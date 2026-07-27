@@ -1,0 +1,6 @@
+{
+  "name": "ArchRoom",
+  "description": "A modern, professional video conferencing application interface.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
