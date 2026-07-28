@@ -2,6 +2,7 @@
 
 import React, { useState } from 'react';
 import { X, LogIn, UserPlus, Mail, Lock, User, ArrowRight } from 'lucide-react';
+import { supabase } from "../lib/supabase";
 
 interface AuthModalProps {
   isOpen: boolean;
@@ -23,11 +24,47 @@ export const AuthModal: React.FC<AuthModalProps> = ({
 
   if (!isOpen) return null;
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+
     if (!email || !password) return;
-    onSuccess(email);
-    onClose();
+
+    try {
+      if (isLogin) {
+        // Login
+        const { error } = await supabase.auth.signInWithPassword({
+          email,
+          password,
+        });
+
+        if (error) {
+          alert(error.message);
+          return;
+        }
+      } else {
+          // Sign Up
+        const { error } = await supabase.auth.signUp({
+          email,
+          password,
+          options: {
+            data: {
+              full_name: name,
+            },
+          },
+        });
+
+        if (error) {
+          alert(error.message);
+          return;
+        }
+      }
+
+      onSuccess(email);
+      onClose();
+    } catch (err) {
+      console.error(err);
+      alert("Something went wrong.");
+    }
   };
 
   return (
