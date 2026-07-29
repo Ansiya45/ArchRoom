@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect} from 'react';
 import { X, LogIn, UserPlus, Mail, Lock, User, ArrowRight } from 'lucide-react';
 import { supabase } from "../lib/supabase";
 
@@ -18,8 +18,18 @@ export const AuthModal: React.FC<AuthModalProps> = ({
   onSuccess,
 }) => {
   const [isLogin, setIsLogin] = useState(mode === 'login');
+  useEffect(() => {
+  setIsLogin(mode === 'login');
+}, [mode]);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const passwordRegex = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d).{8,}$/;
+
+  const isPasswordValid = passwordRegex.test(password);
+
+  const doPasswordsMatch = 
+    password === confirmPassword && confirmPassword !== "";
   const [name, setName] = useState('');
 
   if (!isOpen) return null;

@@ -1,7 +1,8 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { X, CalendarPlus, Copy, Check, Video, Clock, Users, ArrowRight, Link } from 'lucide-react';
+import { supabase } from "../lib/supabase";
 
 interface ScheduleModalProps {
   isOpen: boolean;
@@ -17,33 +18,92 @@ export const ScheduleModal: React.FC<ScheduleModalProps> = ({
   const [title, setTitle] = useState('');
   const [date, setDate] = useState('2026-07-22');
   const [time, setTime] = useState('14:00');
-  const [generatedCode, setGeneratedCode] = useState('');
+  const generateMeetingCode = () =>
+  `arch-${Math.random().toString(36).substring(2, 10).toUpperCase()}`;
+  const [generatedCode, setGeneratedCode] = useState(generateMeetingCode());
   const [copied, setCopied] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [meetingMode, setMeetingMode] = useState<'instant' | 'scheduled'>('instant');
 
-  if (!isOpen) return null;
+  useEffect(() => {
+  
+  if (isOpen) {
+    setGeneratedCode(generateMeetingCode());
+    setCopied(false);
+  }
+}, [isOpen]);
 
-  const handleGenerateInstant = () => {
-    const randomCode = `arch-${Math.floor(100 + Math.random() * 900)}-${Math.floor(100 + Math.random() * 900)}`;
-    setGeneratedCode(randomCode);
-  };
+if (!isOpen) return null;
+
 
   const handleCopyLink = () => {
     const link = `https://archroom.app/meet/${generatedCode || 'arch-772-910'}`;
     navigator.clipboard.writeText(link);
     setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
+    setTimeout(() => {
+    setCopied(false);
+  }, 2000);
+};
+
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+
+    setLoading(true);
+
+    try {
+      const code =
+        generatedCode ||
+        `arch-${Math.random().toString(36).substring(2, 10).toUpperCase()}`;
+
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+
+      if (!user) {
+        alert("Please login first.");
+        setLoading(false);
+        return;
+      }
+
+      const meetingLink = `${window.location.origin}/meet/${code}`;
+
+      const { error } = await supabase
+        .from("meetings")
+        .insert([
+          {
+            meeting_code: code,
+            title: title || "Quick ArchRoom Meeting",
+            host_id: user.id,
+            meeting_link: meetingLink,
+            scheduled_at: `${date} ${time}:00`,
+            status: "scheduled",
+          },
+        ]);
+
+      if (error) {
+        console.error(error);
+        alert(error.message);
+        setLoading(false);
+        return;
+      }
+
+      onCreated({
+        title: title || "Quick ArchRoom Meeting",
+        code,
+        time: `${date} at ${time}`,
+      });
+
+      setLoading(false);
+      onClose();
+
+    } catch (err) {
+      console.error(err);
+      alert("Something went wrong.");
+      setLoading(false);
+    }
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    const code = generatedCode || `arch-${Math.floor(100 + Math.random() * 900)}-${Math.floor(100 + Math.random() * 900)}`;
-    onCreated({
-      title: title || 'Quick ArchRoom Meeting',
-      code,
-      time: `${date} at ${time}`,
-    });
-    onClose();
-  };
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in duration-200">
@@ -60,11 +120,35 @@ export const ScheduleModal: React.FC<ScheduleModalProps> = ({
         </div>
 
         <h3 className="text-xl font-bold text-slate-900 mb-1">Create or Schedule Meeting</h3>
-        <p className="text-sm text-slate-500 mb-6">
-          Generate an instant meeting room or schedule an upcoming conference with your team.
-        </p>
+        <div className="flex rounded-xl bg-slate-100 p-1 mb-6">
+          <button
+            type="button"
+            onClick={() => setMeetingMode("instant")}
+            className={`flex-1 py-2.5 rounded-lg text-sm font-semibold transition-all ${
+              meetingMode === "instant"
+                ? "bg-blue-600 text-white shadow"
+                : "text-slate-600 hover:bg-slate-200"
+            }`}
+          >
+            ⚡ Start Now
+          </button>
+
+          <button
+              type="button"
+              onClick={() => setMeetingMode("scheduled")}
+              className={`flex-1 py-2.5 rounded-lg text-sm font-semibold transition-all ${
+                meetingMode === "scheduled"
+                  ? "bg-blue-600 text-white shadow"
+                  : "text-slate-600 hover:bg-slate-200"
+              }`}
+          >
+              📅 Schedule Later
+          </button>
+        </div>
 
         <form onSubmit={handleSubmit} className="space-y-4">
+
+          {/* Meeting Title */}
           <div>
             <label className="block text-xs font-semibold text-slate-700 uppercase tracking-wider mb-1.5">
               Meeting Topic / Title
@@ -74,74 +158,81 @@ export const ScheduleModal: React.FC<ScheduleModalProps> = ({
               placeholder="e.g. Weekly Product Design Sync"
               value={title}
               onChange={(e) => setTitle(e.target.value)}
-              className="w-full px-4 py-3 rounded-xl border border-slate-200 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 text-slate-900 text-sm font-medium focus:outline-none transition-all"
+              className="w-full px-4 py-3 rounded-xl border border-slate-200 focus:border-blue-500 text-sm focus:outline-none"
             />
           </div>
 
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="block text-xs font-semibold text-slate-700 uppercase tracking-wider mb-1.5">
-                Date
-              </label>
-              <input
-                type="date"
-                value={date}
-                onChange={(e) => setDate(e.target.value)}
-                className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 focus:border-blue-500 text-slate-900 text-sm font-medium focus:outline-none"
-              />
-            </div>
-            <div>
-              <label className="block text-xs font-semibold text-slate-700 uppercase tracking-wider mb-1.5">
+          {/* Schedule Only */}
+          {meetingMode === "scheduled" && (
+            <>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="block text-xs font-semibold mb-1.5">
+                  Date
+                </label>
+
+                <input
+                  type="date"
+                  value={date}
+                  onChange={(e) => setDate(e.target.value)}
+                  className="w-full px-3 py-3 rounded-xl border border-slate-200"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold mb-1.5">
                 Time
-              </label>
-              <input
-                type="time"
-                value={time}
-                onChange={(e) => setTime(e.target.value)}
-                className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 focus:border-blue-500 text-slate-900 text-sm font-medium focus:outline-none"
-              />
-            </div>
-          </div>
+                </label>
 
-          {/* Generated Link Box */}
-          <div className="p-3.5 bg-slate-50 rounded-2xl border border-slate-200/80 space-y-2">
-            <div className="flex items-center justify-between text-xs font-semibold text-slate-600">
-              <span className="flex items-center gap-1.5">
-                <Link className="w-3.5 h-3.5 text-blue-600" /> Meeting Link
-              </span>
-              <button
-                type="button"
-                onClick={handleGenerateInstant}
-                className="text-blue-600 hover:underline cursor-pointer text-[11px]"
-              >
-                Generate New Code
-              </button>
+                <input
+                  type="time"
+                  value={time}
+                  onChange={(e) => setTime(e.target.value)}
+                  className="w-full px-3 py-3 rounded-xl border border-slate-200"
+                />
+              </div>
             </div>
-            <div className="flex items-center justify-between bg-white px-3 py-2 rounded-xl border border-slate-200 text-xs font-mono text-slate-800">
-              <span className="truncate">
-                https://archroom.app/meet/{generatedCode || 'arch-392-810'}
-              </span>
-              <button
-                type="button"
-                onClick={handleCopyLink}
-                className="p-1.5 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors cursor-pointer ml-2 shrink-0"
-                title="Copy Link"
-              >
-                {copied ? <Check className="w-4 h-4 text-green-600" /> : <Copy className="w-4 h-4" />}
-              </button>
-            </div>
-          </div>
+          </>
+        )}
 
-          <div className="pt-3 flex gap-3">
-            <button
-              type="submit"
-              className="flex-1 py-3.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-semibold text-sm shadow-md shadow-blue-500/25 flex items-center justify-center gap-2 active:scale-98 transition-all cursor-pointer"
-            >
-              <Video className="w-4 h-4" />
-              <span>Start Instant Meeting</span>
-            </button>
-          </div>
-        </form>
+        {/* Meeting Link */}
+        <div>
+          <label className="block text-xs font-semibold text-slate-700 uppercase tracking-wider mb-1.5">
+          Meeting Link
+          </label>
+
+          <div className="flex items-center gap-2">
+
+          <input
+            type="text"
+            readOnly
+            value={`${window.location.origin}/meet/${generatedCode || "Generate Link"}`}
+            className="flex-1 px-4 py-3 rounded-xl border border-slate-200 bg-slate-50"
+          />
+
+          <button
+            type="button"
+            onClick={handleCopyLink}
+            className="px-4 py-3 rounded-xl bg-blue-600 text-white hover:bg-blue-700 transition-all"
+         >
+          {copied ? "Copied!" : "Copy"}
+        </button>
+       </div>
+      </div>
+
+      <button
+        type="submit"
+        disabled={loading}
+        className="w-full py-3.5 rounded-xl bg-blue-600 text-white font-semibold"
+      >
+        {meetingMode === "instant"
+          ? (loading ? "Starting..." : "Start Meeting")
+          : (loading ? "Scheduling..." : "Schedule Meeting")}
+      </button>
+
+    </form>
+
+
       </div>
     </div>
   );
