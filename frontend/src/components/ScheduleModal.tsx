@@ -3,6 +3,7 @@
 import React, { useEffect, useState } from 'react';
 import { X, CalendarPlus, Copy, Check, Video, Clock, Users, ArrowRight, Link } from 'lucide-react';
 import { supabase } from "../lib/supabase";
+import { useRouter } from "next/navigation";
 
 interface ScheduleModalProps {
   isOpen: boolean;
@@ -24,6 +25,7 @@ export const ScheduleModal: React.FC<ScheduleModalProps> = ({
   const [copied, setCopied] = useState(false);
   const [loading, setLoading] = useState(false);
   const [meetingMode, setMeetingMode] = useState<'instant' | 'scheduled'>('instant');
+  const router = useRouter();
 
   useEffect(() => {
   
@@ -95,8 +97,12 @@ if (!isOpen) return null;
       });
 
       setLoading(false);
-      onClose();
-
+      if (meetingMode === "instant") {
+        router.push(`/meet/${code}`);
+      } else {
+        onClose();
+      }
+      
     } catch (err) {
       console.error(err);
       alert("Something went wrong.");

@@ -2207,9 +2207,11 @@ var __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist
 var __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$lucide$2d$react$2f$dist$2f$esm$2f$icons$2f$x$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__$3c$export__default__as__X$3e$__ = __turbopack_context__.i("[project]/node_modules/lucide-react/dist/esm/icons/x.js [app-client] (ecmascript) <export default as X>");
 var __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$lucide$2d$react$2f$dist$2f$esm$2f$icons$2f$calendar$2d$plus$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__$3c$export__default__as__CalendarPlus$3e$__ = __turbopack_context__.i("[project]/node_modules/lucide-react/dist/esm/icons/calendar-plus.js [app-client] (ecmascript) <export default as CalendarPlus>");
 var __TURBOPACK__imported__module__$5b$project$5d2f$src$2f$lib$2f$supabase$2e$ts__$5b$app$2d$client$5d$__$28$ecmascript$29$__ = __turbopack_context__.i("[project]/src/lib/supabase.ts [app-client] (ecmascript)");
+var __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$navigation$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__ = __turbopack_context__.i("[project]/node_modules/next/navigation.js [app-client] (ecmascript)");
 ;
 var _s = __turbopack_context__.k.signature();
 'use client';
+;
 ;
 ;
 ;
@@ -2223,6 +2225,7 @@ const ScheduleModal = ({ isOpen, onClose, onCreated })=>{
     const [copied, setCopied] = (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$index$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["useState"])(false);
     const [loading, setLoading] = (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$index$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["useState"])(false);
     const [meetingMode, setMeetingMode] = (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$index$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["useState"])('instant');
+    const router = (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$navigation$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["useRouter"])();
     (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$index$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["useEffect"])({
         "ScheduleModal.useEffect": ()=>{
             if (isOpen) {
@@ -2276,7 +2279,11 @@ const ScheduleModal = ({ isOpen, onClose, onCreated })=>{
                 time: `${date} at ${time}`
             });
             setLoading(false);
-            onClose();
+            if (meetingMode === "instant") {
+                router.push(`/meet/${code}`);
+            } else {
+                onClose();
+            }
         } catch (err) {
             console.error(err);
             alert("Something went wrong.");
@@ -2295,12 +2302,12 @@ const ScheduleModal = ({ isOpen, onClose, onCreated })=>{
                         className: "w-5 h-5"
                     }, void 0, false, {
                         fileName: "[project]/src/components/ScheduleModal.tsx",
-                        lineNumber: 115,
+                        lineNumber: 121,
                         columnNumber: 11
                     }, ("TURBOPACK compile-time value", void 0))
                 }, void 0, false, {
                     fileName: "[project]/src/components/ScheduleModal.tsx",
-                    lineNumber: 111,
+                    lineNumber: 117,
                     columnNumber: 9
                 }, ("TURBOPACK compile-time value", void 0)),
                 /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
@@ -2309,12 +2316,12 @@ const ScheduleModal = ({ isOpen, onClose, onCreated })=>{
                         className: "w-6 h-6 stroke-[2.2]"
                     }, void 0, false, {
                         fileName: "[project]/src/components/ScheduleModal.tsx",
-                        lineNumber: 119,
+                        lineNumber: 125,
                         columnNumber: 11
                     }, ("TURBOPACK compile-time value", void 0))
                 }, void 0, false, {
                     fileName: "[project]/src/components/ScheduleModal.tsx",
-                    lineNumber: 118,
+                    lineNumber: 124,
                     columnNumber: 9
                 }, ("TURBOPACK compile-time value", void 0)),
                 /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("h3", {
@@ -2322,7 +2329,7 @@ const ScheduleModal = ({ isOpen, onClose, onCreated })=>{
                     children: "Create or Schedule Meeting"
                 }, void 0, false, {
                     fileName: "[project]/src/components/ScheduleModal.tsx",
-                    lineNumber: 122,
+                    lineNumber: 128,
                     columnNumber: 9
                 }, ("TURBOPACK compile-time value", void 0)),
                 /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
@@ -2335,7 +2342,7 @@ const ScheduleModal = ({ isOpen, onClose, onCreated })=>{
                             children: "⚡ Start Now"
                         }, void 0, false, {
                             fileName: "[project]/src/components/ScheduleModal.tsx",
-                            lineNumber: 124,
+                            lineNumber: 130,
                             columnNumber: 11
                         }, ("TURBOPACK compile-time value", void 0)),
                         /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("button", {
@@ -2345,13 +2352,13 @@ const ScheduleModal = ({ isOpen, onClose, onCreated })=>{
                             children: "📅 Schedule Later"
                         }, void 0, false, {
                             fileName: "[project]/src/components/ScheduleModal.tsx",
-                            lineNumber: 136,
+                            lineNumber: 142,
                             columnNumber: 11
                         }, ("TURBOPACK compile-time value", void 0))
                     ]
                 }, void 0, true, {
                     fileName: "[project]/src/components/ScheduleModal.tsx",
-                    lineNumber: 123,
+                    lineNumber: 129,
                     columnNumber: 9
                 }, ("TURBOPACK compile-time value", void 0)),
                 /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("form", {
@@ -2365,7 +2372,7 @@ const ScheduleModal = ({ isOpen, onClose, onCreated })=>{
                                     children: "Meeting Topic / Title"
                                 }, void 0, false, {
                                     fileName: "[project]/src/components/ScheduleModal.tsx",
-                                    lineNumber: 153,
+                                    lineNumber: 159,
                                     columnNumber: 13
                                 }, ("TURBOPACK compile-time value", void 0)),
                                 /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("input", {
@@ -2376,13 +2383,13 @@ const ScheduleModal = ({ isOpen, onClose, onCreated })=>{
                                     className: "w-full px-4 py-3 rounded-xl border border-slate-200 focus:border-blue-500 text-sm focus:outline-none"
                                 }, void 0, false, {
                                     fileName: "[project]/src/components/ScheduleModal.tsx",
-                                    lineNumber: 156,
+                                    lineNumber: 162,
                                     columnNumber: 13
                                 }, ("TURBOPACK compile-time value", void 0))
                             ]
                         }, void 0, true, {
                             fileName: "[project]/src/components/ScheduleModal.tsx",
-                            lineNumber: 152,
+                            lineNumber: 158,
                             columnNumber: 11
                         }, ("TURBOPACK compile-time value", void 0)),
                         meetingMode === "scheduled" && /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])(__TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["Fragment"], {
@@ -2396,7 +2403,7 @@ const ScheduleModal = ({ isOpen, onClose, onCreated })=>{
                                                 children: "Date"
                                             }, void 0, false, {
                                                 fileName: "[project]/src/components/ScheduleModal.tsx",
-                                                lineNumber: 170,
+                                                lineNumber: 176,
                                                 columnNumber: 17
                                             }, ("TURBOPACK compile-time value", void 0)),
                                             /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("input", {
@@ -2406,13 +2413,13 @@ const ScheduleModal = ({ isOpen, onClose, onCreated })=>{
                                                 className: "w-full px-3 py-3 rounded-xl border border-slate-200"
                                             }, void 0, false, {
                                                 fileName: "[project]/src/components/ScheduleModal.tsx",
-                                                lineNumber: 174,
+                                                lineNumber: 180,
                                                 columnNumber: 17
                                             }, ("TURBOPACK compile-time value", void 0))
                                         ]
                                     }, void 0, true, {
                                         fileName: "[project]/src/components/ScheduleModal.tsx",
-                                        lineNumber: 169,
+                                        lineNumber: 175,
                                         columnNumber: 15
                                     }, ("TURBOPACK compile-time value", void 0)),
                                     /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
@@ -2422,7 +2429,7 @@ const ScheduleModal = ({ isOpen, onClose, onCreated })=>{
                                                 children: "Time"
                                             }, void 0, false, {
                                                 fileName: "[project]/src/components/ScheduleModal.tsx",
-                                                lineNumber: 183,
+                                                lineNumber: 189,
                                                 columnNumber: 17
                                             }, ("TURBOPACK compile-time value", void 0)),
                                             /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("input", {
@@ -2432,19 +2439,19 @@ const ScheduleModal = ({ isOpen, onClose, onCreated })=>{
                                                 className: "w-full px-3 py-3 rounded-xl border border-slate-200"
                                             }, void 0, false, {
                                                 fileName: "[project]/src/components/ScheduleModal.tsx",
-                                                lineNumber: 187,
+                                                lineNumber: 193,
                                                 columnNumber: 17
                                             }, ("TURBOPACK compile-time value", void 0))
                                         ]
                                     }, void 0, true, {
                                         fileName: "[project]/src/components/ScheduleModal.tsx",
-                                        lineNumber: 182,
+                                        lineNumber: 188,
                                         columnNumber: 15
                                     }, ("TURBOPACK compile-time value", void 0))
                                 ]
                             }, void 0, true, {
                                 fileName: "[project]/src/components/ScheduleModal.tsx",
-                                lineNumber: 168,
+                                lineNumber: 174,
                                 columnNumber: 13
                             }, ("TURBOPACK compile-time value", void 0))
                         }, void 0, false),
@@ -2455,7 +2462,7 @@ const ScheduleModal = ({ isOpen, onClose, onCreated })=>{
                                     children: "Meeting Link"
                                 }, void 0, false, {
                                     fileName: "[project]/src/components/ScheduleModal.tsx",
-                                    lineNumber: 200,
+                                    lineNumber: 206,
                                     columnNumber: 11
                                 }, ("TURBOPACK compile-time value", void 0)),
                                 /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
@@ -2468,7 +2475,7 @@ const ScheduleModal = ({ isOpen, onClose, onCreated })=>{
                                             className: "flex-1 px-4 py-3 rounded-xl border border-slate-200 bg-slate-50"
                                         }, void 0, false, {
                                             fileName: "[project]/src/components/ScheduleModal.tsx",
-                                            lineNumber: 206,
+                                            lineNumber: 212,
                                             columnNumber: 11
                                         }, ("TURBOPACK compile-time value", void 0)),
                                         /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("button", {
@@ -2478,19 +2485,19 @@ const ScheduleModal = ({ isOpen, onClose, onCreated })=>{
                                             children: copied ? "Copied!" : "Copy"
                                         }, void 0, false, {
                                             fileName: "[project]/src/components/ScheduleModal.tsx",
-                                            lineNumber: 213,
+                                            lineNumber: 219,
                                             columnNumber: 11
                                         }, ("TURBOPACK compile-time value", void 0))
                                     ]
                                 }, void 0, true, {
                                     fileName: "[project]/src/components/ScheduleModal.tsx",
-                                    lineNumber: 204,
+                                    lineNumber: 210,
                                     columnNumber: 11
                                 }, ("TURBOPACK compile-time value", void 0))
                             ]
                         }, void 0, true, {
                             fileName: "[project]/src/components/ScheduleModal.tsx",
-                            lineNumber: 199,
+                            lineNumber: 205,
                             columnNumber: 9
                         }, ("TURBOPACK compile-time value", void 0)),
                         /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("button", {
@@ -2500,28 +2507,32 @@ const ScheduleModal = ({ isOpen, onClose, onCreated })=>{
                             children: meetingMode === "instant" ? loading ? "Starting..." : "Start Meeting" : loading ? "Scheduling..." : "Schedule Meeting"
                         }, void 0, false, {
                             fileName: "[project]/src/components/ScheduleModal.tsx",
-                            lineNumber: 223,
+                            lineNumber: 229,
                             columnNumber: 7
                         }, ("TURBOPACK compile-time value", void 0))
                     ]
                 }, void 0, true, {
                     fileName: "[project]/src/components/ScheduleModal.tsx",
-                    lineNumber: 149,
+                    lineNumber: 155,
                     columnNumber: 9
                 }, ("TURBOPACK compile-time value", void 0))
             ]
         }, void 0, true, {
             fileName: "[project]/src/components/ScheduleModal.tsx",
-            lineNumber: 110,
+            lineNumber: 116,
             columnNumber: 7
         }, ("TURBOPACK compile-time value", void 0))
     }, void 0, false, {
         fileName: "[project]/src/components/ScheduleModal.tsx",
-        lineNumber: 109,
+        lineNumber: 115,
         columnNumber: 5
     }, ("TURBOPACK compile-time value", void 0));
 };
-_s(ScheduleModal, "oSQx0wDB7rMXea+/Hv9KgKMK1NA=");
+_s(ScheduleModal, "AVkBVGP72Rxm0wuqQvS9EADDAvA=", false, function() {
+    return [
+        __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$navigation$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["useRouter"]
+    ];
+});
 _c = ScheduleModal;
 const __TURBOPACK__default__export__ = ScheduleModal;
 var _c;
