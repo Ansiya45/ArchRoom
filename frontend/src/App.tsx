@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState } from 'react';
+import { useRouter } from 'next/navigation';
 import Header from './components/Header';
 import Sidebar, { SidebarTab } from './components/Sidebar';
 import Hero from './components/Hero';
@@ -15,6 +16,7 @@ import AuthModal from './components/AuthModal';
 import { CheckCircle2 } from 'lucide-react';
 
 export default function App() {
+  const router = useRouter();
   const [activeTab, setActiveTab] = useState<SidebarTab>('home');
   const [isJoinOpen, setIsJoinOpen] = useState(false);
   const [isCreateOpen, setIsCreateOpen] = useState(false);
@@ -199,6 +201,7 @@ export default function App() {
             isLive: true,
           });
           setActiveTab('home');
+          router.push(`/meet/${code}`);
           showToast(`Successfully joined room ${code} as ${name}`);
         }}
       />

@@ -13,3 +13,5 @@ out/
 
 # Environment files
 .env.local
+
+tsconfig.tsbuildinfo

@@ -2,6 +2,7 @@
 
 import React, { useState } from 'react';
 import { X, Video, KeyRound, Sparkles, User, ArrowRight } from 'lucide-react';
+import { apiFetch } from '../lib/api';
 
 interface JoinModalProps {
   isOpen: boolean;
@@ -19,11 +20,29 @@ export const JoinModal: React.FC<JoinModalProps> = ({
 
   if (!isOpen) return null;
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!meetingCode.trim()) return;
-    onJoinSuccess(meetingCode, guestName || 'Guest User');
-    onClose();
+
+    const finalGuestName = guestName.trim() || 'Guest User';
+
+    try {
+      const payload = await apiFetch<{ meeting_code: string; guest_name: string; title: string; host_name: string }>(
+        '/meetings/join/',
+        {
+          method: 'POST',
+          body: JSON.stringify({
+            meeting_code: meetingCode.trim(),
+            guest_name: finalGuestName,
+          }),
+        }
+      );
+
+      onJoinSuccess(payload.meeting_code, payload.guest_name || finalGuestName);
+      onClose();
+    } catch (error) {
+      alert(error instanceof Error ? error.message : 'Unable to join the meeting.');
+    }
   };
 
   return (

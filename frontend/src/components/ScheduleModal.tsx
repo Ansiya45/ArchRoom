@@ -1,9 +1,9 @@
 'use client';
 
 import React, { useEffect, useState } from 'react';
-import { X, CalendarPlus, Copy, Check, Video, Clock, Users, ArrowRight, Link } from 'lucide-react';
-import { supabase } from "../lib/supabase";
-import { useRouter } from "next/navigation";
+import { X, CalendarPlus } from 'lucide-react';
+import { useRouter } from 'next/navigation';
+import { apiFetch } from '../lib/api';
 
 interface ScheduleModalProps {
   isOpen: boolean;
@@ -27,25 +27,28 @@ export const ScheduleModal: React.FC<ScheduleModalProps> = ({
   const [meetingMode, setMeetingMode] = useState<'instant' | 'scheduled'>('instant');
   const router = useRouter();
 
+  const getMeetingOrigin = () =>
+    typeof window !== 'undefined' ? window.location.origin : 'http://localhost:3000';
+
   useEffect(() => {
-  
-  if (isOpen) {
-    setGeneratedCode(generateMeetingCode());
-    setCopied(false);
-  }
-}, [isOpen]);
+    if (isOpen) {
+      setGeneratedCode(generateMeetingCode());
+      setCopied(false);
+    }
+  }, [isOpen]);
 
-if (!isOpen) return null;
-
+  if (!isOpen) return null;
 
   const handleCopyLink = () => {
-    const link = `https://archroom.app/meet/${generatedCode || 'arch-772-910'}`;
-    navigator.clipboard.writeText(link);
+    const link = `${getMeetingOrigin()}/meet/${generatedCode || 'arch-772-910'}`;
+    if (typeof navigator !== 'undefined' && navigator.clipboard) {
+      navigator.clipboard.writeText(link);
+    }
     setCopied(true);
-    setTimeout(() => {
-    setCopied(false);
-  }, 2000);
-};
+    window.setTimeout(() => {
+      setCopied(false);
+    }, 2000);
+  };
 
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -58,54 +61,37 @@ if (!isOpen) return null;
         generatedCode ||
         `arch-${Math.random().toString(36).substring(2, 10).toUpperCase()}`;
 
-      const {
-        data: { user },
-      } = await supabase.auth.getUser();
-
-      if (!user) {
-        alert("Please login first.");
-        setLoading(false);
-        return;
-      }
-
-      const meetingLink = `${window.location.origin}/meet/${code}`;
-
-      const { error } = await supabase
-        .from("meetings")
-        .insert([
-          {
+      const payload = await apiFetch<{ meeting_code: string; title: string; scheduled_at?: string | null; meeting_link: string; host_name: string; status: string }>(
+        '/meetings/',
+        {
+          method: 'POST',
+          body: JSON.stringify({
             meeting_code: code,
-            title: title || "Quick ArchRoom Meeting",
-            host_id: user.id,
-            meeting_link: meetingLink,
-            scheduled_at: `${date} ${time}:00`,
-            status: "scheduled",
-          },
-        ]);
+            title: title || 'Quick ArchRoom Meeting',
+            host_name: 'Host User',
+            scheduled_at: meetingMode === 'scheduled' ? `${date}T${time}:00Z` : new Date().toISOString(),
+            status: meetingMode === 'scheduled' ? 'scheduled' : 'live',
+          }),
+        }
+      );
 
-      if (error) {
-        console.error(error);
-        alert(error.message);
-        setLoading(false);
-        return;
-      }
+      const createdCode = payload.meeting_code || code;
 
       onCreated({
-        title: title || "Quick ArchRoom Meeting",
-        code,
-        time: `${date} at ${time}`,
+        title: payload.title || title || 'Quick ArchRoom Meeting',
+        code: createdCode,
+        time: meetingMode === 'scheduled' ? `${date} at ${time}` : 'Now',
       });
 
       setLoading(false);
-      if (meetingMode === "instant") {
-        router.push(`/meet/${code}`);
+      if (meetingMode === 'instant') {
+        router.push(`/meet/${createdCode}`);
       } else {
         onClose();
       }
-      
     } catch (err) {
       console.error(err);
-      alert("Something went wrong.");
+      alert(err instanceof Error ? err.message : 'Something went wrong.');
       setLoading(false);
     }
   };
@@ -129,26 +115,26 @@ if (!isOpen) return null;
         <div className="flex rounded-xl bg-slate-100 p-1 mb-6">
           <button
             type="button"
-            onClick={() => setMeetingMode("instant")}
+            onClick={() => setMeetingMode('instant')}
             className={`flex-1 py-2.5 rounded-lg text-sm font-semibold transition-all ${
-              meetingMode === "instant"
-                ? "bg-blue-600 text-white shadow"
-                : "text-slate-600 hover:bg-slate-200"
+              meetingMode === 'instant'
+                ? 'bg-blue-600 text-white shadow'
+                : 'text-slate-600 hover:bg-slate-200'
             }`}
           >
             ⚡ Start Now
           </button>
 
           <button
-              type="button"
-              onClick={() => setMeetingMode("scheduled")}
-              className={`flex-1 py-2.5 rounded-lg text-sm font-semibold transition-all ${
-                meetingMode === "scheduled"
-                  ? "bg-blue-600 text-white shadow"
-                  : "text-slate-600 hover:bg-slate-200"
-              }`}
+            type="button"
+            onClick={() => setMeetingMode('scheduled')}
+            className={`flex-1 py-2.5 rounded-lg text-sm font-semibold transition-all ${
+              meetingMode === 'scheduled'
+                ? 'bg-blue-600 text-white shadow'
+                : 'text-slate-600 hover:bg-slate-200'
+            }`}
           >
-              📅 Schedule Later
+            📅 Schedule Later
           </button>
         </div>
 
@@ -169,14 +155,10 @@ if (!isOpen) return null;
           </div>
 
           {/* Schedule Only */}
-          {meetingMode === "scheduled" && (
-            <>
+          {meetingMode === 'scheduled' && (
             <div className="grid grid-cols-2 gap-3">
               <div>
-                <label className="block text-xs font-semibold mb-1.5">
-                  Date
-                </label>
-
+                <label className="block text-xs font-semibold mb-1.5">Date</label>
                 <input
                   type="date"
                   value={date}
@@ -186,10 +168,7 @@ if (!isOpen) return null;
               </div>
 
               <div>
-                <label className="block text-xs font-semibold mb-1.5">
-                Time
-                </label>
-
+                <label className="block text-xs font-semibold mb-1.5">Time</label>
                 <input
                   type="time"
                   value={time}
@@ -198,8 +177,7 @@ if (!isOpen) return null;
                 />
               </div>
             </div>
-          </>
-        )}
+          )}
 
         {/* Meeting Link */}
         <div>
@@ -212,7 +190,7 @@ if (!isOpen) return null;
           <input
             type="text"
             readOnly
-            value={`${window.location.origin}/meet/${generatedCode || "Generate Link"}`}
+            value={`${getMeetingOrigin()}/meet/${generatedCode || 'Generate Link'}`}
             className="flex-1 px-4 py-3 rounded-xl border border-slate-200 bg-slate-50"
           />
 
