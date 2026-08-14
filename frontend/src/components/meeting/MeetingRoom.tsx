@@ -24,6 +24,8 @@ import {
   Layers,
   CheckCircle2,
 } from 'lucide-react';
+import { trpc } from '@/lib/trpc';
+import { getMeetingSession, storeMeetingSession } from '@/lib/meetingSession';
 
 interface MeetingRoomProps {
   meetingCode?: string;
@@ -36,6 +38,40 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
   const [isBgPickerOpen, setIsBgPickerOpen] = useState<boolean>(false);
   const [isScreenShareModalOpen, setIsScreenShareModalOpen] = useState<boolean>(false);
 
+  const handleJoin = async () => {
+    const displayName = meeting.displayName.trim();
+    if (!displayName) return;
+
+    try {
+      const existingSession = getMeetingSession(meeting.meetingCode);
+
+      if (existingSession?.participantId) {
+        try {
+          await trpc.meetings.updateGuestName.mutate({
+            meetingCode: meeting.meetingCode,
+            participantId: existingSession.participantId,
+            guestName: displayName,
+          });
+        } catch {
+          // Registered users store their name on the user account, not guest_name.
+        }
+      } else {
+        const joined = await trpc.meetings.join.mutate({
+          meetingCode: meeting.meetingCode,
+          guestName: displayName,
+        });
+        storeMeetingSession(meeting.meetingCode, {
+          displayName,
+          participantId: joined.participant.id,
+        });
+      }
+
+      meeting.joinMeeting();
+    } catch (error) {
+      alert(error instanceof Error ? error.message : 'Unable to join the meeting.');
+    }
+  };
+
   // If in waiting room mode, render WaitingRoom
   if (!meeting.inMeeting) {
     return (
@@ -46,7 +82,9 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
         onToggleMic={meeting.toggleMic}
         isCameraOn={meeting.isCameraOn}
         onToggleCamera={meeting.toggleCamera}
-        onJoin={meeting.joinMeeting}
+        onJoin={() => void handleJoin()}
+        displayName={meeting.displayName}
+        onDisplayNameChange={meeting.setDisplayName}
         deviceSettings={meeting.deviceSettings}
         setDeviceSettings={meeting.setDeviceSettings}
       />
@@ -54,7 +92,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
   }
 
   return (
-    <div className="w-full h-screen bg-gradient-to-br from-blue-50 via-white to-sky-100 text-slate-800 flex flex-col justify-start overflow-hidden relative select-none font-sans">
+    <div className="w-full h-screen bg-gradient-to-br from-[#070a18] via-[#11162a] to-[#1b1038] text-slate-800 flex flex-col justify-start overflow-hidden relative select-none font-sans">
       {/* Background ambient lighting orbs */}
       <div className="absolute top-0 left-1/4 w-[600px] h-[600px] bg-blue-200/40 rounded-full blur-[120px] pointer-events-none" />
       <div className="absolute bottom-0 right-1/4 w-[500px] h-[500px] bg-sky-200/50 rounded-full blur-[120px] pointer-events-none" />

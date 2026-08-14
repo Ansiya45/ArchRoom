@@ -2,8 +2,8 @@
 
 import React, { useEffect, useState } from 'react';
 import { X, CalendarPlus } from 'lucide-react';
-import { useRouter } from 'next/navigation';
-import { apiFetch } from '../lib/api';
+import { useNavigate } from 'react-router-dom';
+import { trpc } from '../lib/trpc';
 
 interface ScheduleModalProps {
   isOpen: boolean;
@@ -25,7 +25,7 @@ export const ScheduleModal: React.FC<ScheduleModalProps> = ({
   const [copied, setCopied] = useState(false);
   const [loading, setLoading] = useState(false);
   const [meetingMode, setMeetingMode] = useState<'instant' | 'scheduled'>('instant');
-  const router = useRouter();
+  const navigate = useNavigate();
 
   const getMeetingOrigin = () =>
     typeof window !== 'undefined' ? window.location.origin : 'http://localhost:3000';
@@ -61,31 +61,23 @@ export const ScheduleModal: React.FC<ScheduleModalProps> = ({
         generatedCode ||
         `arch-${Math.random().toString(36).substring(2, 10).toUpperCase()}`;
 
-      const payload = await apiFetch<{ meeting_code: string; title: string; scheduled_at?: string | null; meeting_link: string; host_name: string; status: string }>(
-        '/meetings/',
-        {
-          method: 'POST',
-          body: JSON.stringify({
-            meeting_code: code,
-            title: title || 'Quick ArchRoom Meeting',
-            host_name: 'Host User',
-            scheduled_at: meetingMode === 'scheduled' ? `${date}T${time}:00Z` : new Date().toISOString(),
-            status: meetingMode === 'scheduled' ? 'scheduled' : 'live',
-          }),
-        }
-      );
+      const payload = await trpc.meetings.create.mutate({
+        title: title || 'Quick ArchRoom Meeting',
+        scheduledAt: meetingMode === 'scheduled' ? `${date}T${time}:00Z` : '',
+        startNow: meetingMode === 'instant',
+      });
 
-      const createdCode = payload.meeting_code || code;
+      const createdCode = payload.meeting.meetingCode || code;
 
       onCreated({
-        title: payload.title || title || 'Quick ArchRoom Meeting',
+        title: payload.meeting.title || title || 'Quick ArchRoom Meeting',
         code: createdCode,
         time: meetingMode === 'scheduled' ? `${date} at ${time}` : 'Now',
       });
 
       setLoading(false);
       if (meetingMode === 'instant') {
-        router.push(`/meet/${createdCode}`);
+        navigate(`/meet/${createdCode}`);
       } else {
         onClose();
       }

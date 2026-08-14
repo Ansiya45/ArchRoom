@@ -1,10 +1,8 @@
-import { initTRPC } from '@trpc/server';
 import { z } from 'zod';
-import { type Context } from '../trpc/context.js';
+import { t } from '../trpc/init.js';
 import { RecordingService } from '../services/recording.service.js';
 import { protectedProcedure } from '../trpc/protected.js';
 
-const t = initTRPC.context<Context>().create();
 const recordingService = new RecordingService();
 
 export const recordingsRouter = t.router({

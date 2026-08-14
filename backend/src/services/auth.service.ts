@@ -35,14 +35,28 @@ export class AuthService {
 
     const passwordHash = await hashPassword(input.password);
 
-    const [created] = await db
-      .insert(users)
-      .values({
-        fullName,
-        email: normalizedEmail,
-        passwordHash,
-      })
-      .returning();
+    let created: typeof users.$inferSelect;
+
+    try {
+      [created] = await db
+        .insert(users)
+        .values({
+          fullName,
+          email: normalizedEmail,
+          passwordHash,
+        })
+        .returning();
+    } catch (error) {
+      if (typeof error === 'object' && error !== null && 'code' in error && error.code === '23505') {
+        throw new TRPCError({ code: 'CONFLICT', message: 'Email already registered' });
+      }
+
+      throw new TRPCError({
+        code: 'INTERNAL_SERVER_ERROR',
+        message: 'Unable to create account',
+        cause: error,
+      });
+    }
 
     const token = signJwt({
       sub: created.id,

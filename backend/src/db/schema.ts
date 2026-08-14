@@ -60,6 +60,7 @@ export const meetingParticipants = pgTable(
     userId: uuid('user_id').references(() => users.id, {
       onDelete: 'set null',
     }),
+    guestName: varchar('guest_name', { length: 120 }),
     role: participantRoleEnum('role').default('participant').notNull(),
     joinedAt: timestamp('joined_at', { withTimezone: true }).defaultNow().notNull(),
     leftAt: timestamp('left_at', { withTimezone: true }),

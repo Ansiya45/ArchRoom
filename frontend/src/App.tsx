@@ -1,7 +1,7 @@
 'use client';
 
-import React, { useState } from 'react';
-import { useRouter } from 'next/navigation';
+import React, { useEffect, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import Header from './components/Header';
 import Sidebar, { SidebarTab } from './components/Sidebar';
 import Hero from './components/Hero';
@@ -14,16 +14,24 @@ import SettingsView from './components/SettingsView';
 import SettingsModal from './components/SettingsModal';
 import AuthModal from './components/AuthModal';
 import { CheckCircle2 } from 'lucide-react';
+import { clearStoredSession, getStoredUser } from './lib/auth';
+import { trpc } from './lib/trpc';
+import { storeMeetingSession } from './lib/meetingSession';
 
 export default function App() {
-  const router = useRouter();
+  const navigate = useNavigate();
   const [activeTab, setActiveTab] = useState<SidebarTab>('home');
   const [isJoinOpen, setIsJoinOpen] = useState(false);
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
 
   // User Auth state (null by default so Sign Up and Login are displayed)
-  const [user, setUser] = useState<{ name: string; email: string; isLoggedIn: boolean } | null>(null);
+  const [user, setUser] = useState<{ name: string; email: string; isLoggedIn: boolean } | null>(() => {
+    const stored = getStoredUser();
+    return stored
+      ? { name: stored.fullName, email: stored.email, isLoggedIn: true }
+      : null;
+  });
 
   const [authModalState, setAuthModalState] = useState<{
     isOpen: boolean;
@@ -76,10 +84,71 @@ export default function App() {
     setTimeout(() => setToast(null), 3500);
   };
 
+  useEffect(() => {
+    if (!user) return;
+
+    let cancelled = false;
+
+    async function loadAccount() {
+      try {
+        const [account, meetingList] = await Promise.all([
+          trpc.auth.me.query(),
+          trpc.meetings.list.query(),
+        ]);
+
+        if (cancelled) return;
+
+        setUser({
+          name: account.user.fullName,
+          email: account.user.email,
+          isLoggedIn: true,
+        });
+
+        setMeetings(
+          meetingList.meetings.map((meeting) => ({
+            id: meeting.id,
+            title: meeting.title,
+            code: meeting.meetingCode,
+            time: meeting.scheduledAt
+              ? new Date(meeting.scheduledAt).toLocaleString()
+              : meeting.status === 'live'
+                ? 'Live now'
+                : 'Not scheduled',
+            participantsCount: 1,
+            hostName: account.user.fullName,
+            isFavorite: false,
+          }))
+        );
+      } catch (error) {
+        if (cancelled) return;
+        console.error(error);
+        clearStoredSession();
+        setUser(null);
+        showToast('Your session expired. Please sign in again.', 'info');
+      }
+    }
+
+    void loadAccount();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [user?.email]);
+
+  const requestCreateMeeting = () => {
+    if (!user) {
+      setAuthModalState({ isOpen: true, mode: 'login' });
+      showToast('Please sign in before creating a meeting.', 'info');
+      return;
+    }
+
+    setIsCreateOpen(true);
+  };
+
   const handleSidebarTabChange = (tab: SidebarTab) => {
     setActiveTab(tab);
     if (tab === 'create') {
-      setIsCreateOpen(true);
+      requestCreateMeeting();
     }
   };
 
@@ -104,15 +173,27 @@ export default function App() {
     }
   };
 
-  const handleStartMeeting = (meeting: MeetingItem) => {
-    setCurrentMeeting({
-      title: meeting.title,
-      code: meeting.code,
-      hostName: meeting.hostName,
-      isLive: true,
-    });
-    setActiveTab('home');
-    showToast(`Connected to meeting room: ${meeting.code}`);
+  const handleStartMeeting = async (meeting: MeetingItem) => {
+    if (!user) {
+      setAuthModalState({ isOpen: true, mode: 'login' });
+      showToast('Please sign in before starting a meeting.', 'info');
+      return;
+    }
+
+    try {
+      await trpc.meetings.start.mutate({ meetingCode: meeting.code });
+      setCurrentMeeting({
+        title: meeting.title,
+        code: meeting.code,
+        hostName: meeting.hostName,
+        isLive: true,
+      });
+      setActiveTab('home');
+      navigate(`/meet/${meeting.code}`);
+      showToast(`Connected to meeting room: ${meeting.code}`);
+    } catch (error) {
+      alert(error instanceof Error ? error.message : 'Unable to start the meeting.');
+    }
   };
 
   return (
@@ -129,9 +210,10 @@ export default function App() {
       <Header
         user={user}
         onOpenJoin={() => setIsJoinOpen(true)}
-        onOpenCreate={() => setIsCreateOpen(true)}
+        onOpenCreate={requestCreateMeeting}
         onOpenAuth={(mode) => setAuthModalState({ isOpen: true, mode })}
         onLogout={() => {
+          clearStoredSession();
           setUser(null);
           showToast('Signed out successfully.');
         }}
@@ -149,7 +231,7 @@ export default function App() {
               <Hero
                 currentMeeting={currentMeeting}
                 onJoinMeeting={() => setIsJoinOpen(true)}
-                onCreateMeeting={() => setIsCreateOpen(true)}
+                onCreateMeeting={requestCreateMeeting}
                 onLeaveMeeting={() => {
                   showToast('Left meeting call.');
                   setCurrentMeeting(null);
@@ -164,7 +246,7 @@ export default function App() {
                 onStartMeeting={handleStartMeeting}
                 onToggleFavorite={handleToggleFavorite}
                 onDeleteMeeting={handleDeleteMeeting}
-                onOpenCreateModal={() => setIsCreateOpen(true)}
+                onOpenCreateModal={requestCreateMeeting}
               />
             )}
 
@@ -174,7 +256,7 @@ export default function App() {
                 meetings={meetings}
                 onStartMeeting={handleStartMeeting}
                 onToggleFavorite={handleToggleFavorite}
-                onOpenCreateModal={() => setIsCreateOpen(true)}
+                onOpenCreateModal={requestCreateMeeting}
               />
             )}
 
@@ -193,7 +275,8 @@ export default function App() {
       <JoinModal
         isOpen={isJoinOpen}
         onClose={() => setIsJoinOpen(false)}
-        onJoinSuccess={(code, name) => {
+        onJoinSuccess={(code, name, participantId) => {
+          storeMeetingSession(code, { displayName: name, participantId });
           setCurrentMeeting({
             title: `Instant Meeting Room (${code})`,
             code,
@@ -201,7 +284,7 @@ export default function App() {
             isLive: true,
           });
           setActiveTab('home');
-          router.push(`/meet/${code}`);
+          navigate(`/meet/${code}`);
           showToast(`Successfully joined room ${code} as ${name}`);
         }}
       />
@@ -210,6 +293,7 @@ export default function App() {
         isOpen={isCreateOpen}
         onClose={() => setIsCreateOpen(false)}
         onCreated={(m) => {
+          storeMeetingSession(m.code, { displayName: user?.name || 'You' });
           const newMeeting: MeetingItem = {
             id: `m_${Date.now()}`,
             title: m.title,
@@ -240,13 +324,13 @@ export default function App() {
         isOpen={authModalState.isOpen}
         mode={authModalState.mode}
         onClose={() => setAuthModalState({ isOpen: false, mode: 'login' })}
-        onSuccess={(email) => {
+        onSuccess={(authenticatedUser) => {
           setUser({
-            name: email.split('@')[0],
-            email,
+            name: authenticatedUser.fullName,
+            email: authenticatedUser.email,
             isLoggedIn: true,
           });
-          showToast(`Signed in successfully as ${email}`);
+          showToast(`Signed in successfully as ${authenticatedUser.email}`);
         }}
       />
     </div>

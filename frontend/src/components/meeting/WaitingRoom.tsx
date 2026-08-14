@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import React from 'react';
 import {
   Video,
   VideoOff,
@@ -29,6 +29,8 @@ interface WaitingRoomProps {
   isCameraOn: boolean;
   onToggleCamera: () => void;
   onJoin: () => void;
+  displayName: string;
+  onDisplayNameChange: (name: string) => void;
   deviceSettings: DeviceSettings;
   setDeviceSettings: React.Dispatch<React.SetStateAction<DeviceSettings>>;
 }
@@ -79,11 +81,11 @@ export const WaitingRoom: React.FC<WaitingRoomProps> = ({
   isCameraOn,
   onToggleCamera,
   onJoin,
+  displayName,
+  onDisplayNameChange,
   deviceSettings,
   setDeviceSettings,
 }) => {
-  const [userName, setUserName] = useState('Alex Rivera');
-
   const activeBg = deviceSettings.backgroundBlur || 'blur';
 
   const handleSelectBg = (bgId: BackgroundChoice) => {
@@ -240,8 +242,8 @@ export const WaitingRoom: React.FC<WaitingRoomProps> = ({
             </label>
             <input
               type="text"
-              value={userName}
-              onChange={(e) => setUserName(e.target.value)}
+              value={displayName}
+              onChange={(e) => onDisplayNameChange(e.target.value)}
               placeholder="Enter your name"
               className="w-full py-2.5 px-3.5 rounded-2xl bg-white border border-blue-100 text-slate-800 font-medium text-xs sm:text-sm focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100 transition-all shadow-sm"
             />
@@ -263,7 +265,8 @@ export const WaitingRoom: React.FC<WaitingRoomProps> = ({
           {/* Join Call Action */}
           <button
             onClick={onJoin}
-            className="w-full py-3.5 rounded-2xl bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white font-bold text-sm sm:text-base flex items-center justify-center space-x-2 shadow-lg shadow-blue-200 transition-all active:scale-95"
+            disabled={!displayName.trim()}
+            className="w-full py-3.5 rounded-2xl bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed text-white font-bold text-sm sm:text-base flex items-center justify-center space-x-2 shadow-lg shadow-blue-200 transition-all active:scale-95"
           >
             <span>Join Meeting Now</span>
             <ArrowRight className="w-5 h-5" />

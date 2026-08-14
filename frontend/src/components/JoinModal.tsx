@@ -2,12 +2,12 @@
 
 import React, { useState } from 'react';
 import { X, Video, KeyRound, Sparkles, User, ArrowRight } from 'lucide-react';
-import { apiFetch } from '../lib/api';
+import { trpc } from '../lib/trpc';
 
 interface JoinModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onJoinSuccess: (code: string, name: string) => void;
+  onJoinSuccess: (code: string, name: string, participantId: string) => void;
 }
 
 export const JoinModal: React.FC<JoinModalProps> = ({
@@ -27,18 +27,16 @@ export const JoinModal: React.FC<JoinModalProps> = ({
     const finalGuestName = guestName.trim() || 'Guest User';
 
     try {
-      const payload = await apiFetch<{ meeting_code: string; guest_name: string; title: string; host_name: string }>(
-        '/meetings/join/',
-        {
-          method: 'POST',
-          body: JSON.stringify({
-            meeting_code: meetingCode.trim(),
-            guest_name: finalGuestName,
-          }),
-        }
-      );
+      const payload = await trpc.meetings.join.mutate({
+        meetingCode: meetingCode.trim(),
+        guestName: finalGuestName,
+      });
 
-      onJoinSuccess(payload.meeting_code, payload.guest_name || finalGuestName);
+      onJoinSuccess(
+        payload.meeting.meetingCode,
+        payload.participant.guestName || finalGuestName,
+        payload.participant.id
+      );
       onClose();
     } catch (error) {
       alert(error instanceof Error ? error.message : 'Unable to join the meeting.');

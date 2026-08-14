@@ -2,13 +2,14 @@
 
 import React, { useState, useEffect} from 'react';
 import { X, LogIn, UserPlus, Mail, Lock, User, ArrowRight } from 'lucide-react';
-import { supabase } from "../lib/supabase";
+import { storeSession, type SessionUser } from '../lib/auth';
+import { trpc } from '../lib/trpc';
 
 interface AuthModalProps {
   isOpen: boolean;
   mode: 'login' | 'signup';
   onClose: () => void;
-  onSuccess: (email: string) => void;
+  onSuccess: (user: SessionUser) => void;
 }
 
 export const AuthModal: React.FC<AuthModalProps> = ({
@@ -24,6 +25,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
+  const [isSubmitting, setIsSubmitting] = useState(false);
   const passwordRegex = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d).{8,}$/;
 
   const isPasswordValid = passwordRegex.test(password);
@@ -37,43 +39,51 @@ export const AuthModal: React.FC<AuthModalProps> = ({
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
-    if (!email || !password) return;
+    if (!email || !password || isSubmitting) return;
+
+    if (!isLogin) {
+      if (name.trim().length < 2) {
+        alert('Please enter your full name.');
+        return;
+      }
+
+      if (!isPasswordValid) {
+        alert('Password must contain at least 8 characters, including uppercase, lowercase, and a number.');
+        return;
+      }
+
+      if (!doPasswordsMatch) {
+        alert('Password and confirm password do not match.');
+        return;
+      }
+    }
+
+    setIsSubmitting(true);
 
     try {
       if (isLogin) {
-        // Login
-        const { error } = await supabase.auth.signInWithPassword({
+        const result = await trpc.auth.login.mutate({
           email,
           password,
         });
-
-        if (error) {
-          alert(error.message);
-          return;
-        }
+        storeSession(result.token, result.user);
+        onSuccess(result.user);
       } else {
-          // Sign Up
-        const { error } = await supabase.auth.signUp({
+        const result = await trpc.auth.signup.mutate({
+          fullName: name,
           email,
           password,
-          options: {
-            data: {
-              full_name: name,
-            },
-          },
         });
-
-        if (error) {
-          alert(error.message);
-          return;
-        }
+        storeSession(result.token, result.user);
+        onSuccess(result.user);
       }
 
-      onSuccess(email);
       onClose();
     } catch (err) {
       console.error(err);
-      alert("Something went wrong.");
+      alert(err instanceof Error ? err.message : 'Something went wrong.');
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
@@ -146,6 +156,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
               <input
                 type="password"
                 required
+                autoComplete={isLogin ? 'current-password' : 'new-password'}
                 placeholder="••••••••••••"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
@@ -154,11 +165,32 @@ export const AuthModal: React.FC<AuthModalProps> = ({
             </div>
           </div>
 
+          {!isLogin && (
+            <div>
+              <label className="block text-xs font-semibold text-slate-700 uppercase tracking-wider mb-1.5">
+                Confirm Password
+              </label>
+              <div className="relative">
+                <Lock className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
+                <input
+                  type="password"
+                  required
+                  autoComplete="new-password"
+                  placeholder="Retype your password"
+                  value={confirmPassword}
+                  onChange={(e) => setConfirmPassword(e.target.value)}
+                  className="w-full pl-10 pr-4 py-3 rounded-xl border border-slate-200 focus:border-blue-500 text-slate-900 text-sm focus:outline-none"
+                />
+              </div>
+            </div>
+          )}
+
           <button
             type="submit"
-            className="w-full py-3.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-semibold text-sm shadow-md shadow-blue-500/25 flex items-center justify-center gap-2 active:scale-98 transition-all cursor-pointer"
+            disabled={isSubmitting}
+            className="w-full py-3.5 rounded-xl bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 disabled:cursor-not-allowed text-white font-semibold text-sm shadow-md shadow-blue-500/25 flex items-center justify-center gap-2 active:scale-98 transition-all cursor-pointer"
           >
-            <span>{isLogin ? 'Sign In' : 'Create Free Account'}</span>
+            <span>{isSubmitting ? 'Please wait...' : isLogin ? 'Sign In' : 'Create Free Account'}</span>
             <ArrowRight className="w-4 h-4" />
           </button>
         </form>

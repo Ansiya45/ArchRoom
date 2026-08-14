@@ -1,8 +1,5 @@
 import { TRPCError } from '@trpc/server';
-import { initTRPC } from '@trpc/server';
-import type { Context } from './context.js';
-
-const t = initTRPC.context<Context>().create();
+import { t } from './init.js';
 
 export const protectedProcedure = t.procedure.use(async ({ ctx, next }) => {
   if (!ctx.isAuthenticated || !ctx.user) {

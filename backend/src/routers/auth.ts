@@ -1,10 +1,8 @@
-import { initTRPC } from '@trpc/server';
 import { z } from 'zod';
-import { type Context } from '../trpc/context.js';
+import { t } from '../trpc/init.js';
 import { AuthService } from '../services/auth.service.js';
 import { protectedProcedure } from '../trpc/protected.js';
 
-const t = initTRPC.context<Context>().create();
 const authService = new AuthService();
 
 export const authRouter = t.router({

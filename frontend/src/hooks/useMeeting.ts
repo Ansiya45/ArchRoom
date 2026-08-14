@@ -15,8 +15,13 @@ import {
   DUMMY_POLLS,
   DEFAULT_MEETING_INFO,
 } from '@/utils/meetingHelpers';
+import { getStoredUser } from '@/lib/auth';
+import { getMeetingSession, storeMeetingSession } from '@/lib/meetingSession';
 
 export function useMeeting(initialMeetingCode: string = 'arch-9284-xkp') {
+  const initialSession = getMeetingSession(initialMeetingCode);
+  const authenticatedUser = getStoredUser();
+  const initialDisplayName = initialSession?.displayName || authenticatedUser?.fullName || 'Guest User';
   // Meeting metadata
   const [meetingCode] = useState<string>(initialMeetingCode);
   const [meetingTitle, setMeetingTitle] = useState<string>('ARCHROOM');
@@ -35,7 +40,18 @@ export function useMeeting(initialMeetingCode: string = 'arch-9284-xkp') {
   const [isWhiteboardOpen, setIsWhiteboardOpen] = useState<boolean>(false);
 
   // Participants & Speaker
-  const [participants, setParticipants] = useState<Participant[]>(DUMMY_PARTICIPANTS);
+  const [displayName, setDisplayNameState] = useState<string>(initialDisplayName);
+  const [participants, setParticipants] = useState<Participant[]>(() =>
+    DUMMY_PARTICIPANTS.map((participant) =>
+      participant.id === 'user-self'
+        ? {
+            ...participant,
+            name: `${initialDisplayName} (You)`,
+            role: authenticatedUser ? 'host' : 'attendee',
+          }
+        : participant
+    )
+  );
   const [activeSpeakerId, setActiveSpeakerId] = useState<string>('user-self');
   const [pinnedParticipantId, setPinnedParticipantId] = useState<string | null>(null);
 
@@ -113,6 +129,22 @@ export function useMeeting(initialMeetingCode: string = 'arch-9284-xkp') {
     });
   }, []);
 
+  const setDisplayName = useCallback(
+    (name: string) => {
+      setDisplayNameState(name);
+      setParticipants((list) =>
+        list.map((participant) =>
+          participant.id === 'user-self' ? { ...participant, name: `${name || 'Guest User'} (You)` } : participant
+        )
+      );
+      storeMeetingSession(meetingCode, {
+        ...getMeetingSession(meetingCode),
+        displayName: name,
+      });
+    },
+    [meetingCode]
+  );
+
   const toggleCamera = useCallback(() => {
     setIsCameraOn((prev) => {
       const next = !prev;
@@ -189,7 +221,7 @@ export function useMeeting(initialMeetingCode: string = 'arch-9284-xkp') {
     const newMsg: ChatMessage = {
       id: `msg-${Date.now()}`,
       senderId: 'user-self',
-      senderName: 'Alex Rivera (You)',
+      senderName: `${displayName} (You)`,
       senderAvatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=400&auto=format&fit=crop&q=80',
       message: text,
       timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
@@ -197,7 +229,7 @@ export function useMeeting(initialMeetingCode: string = 'arch-9284-xkp') {
       fileAttachment,
     };
     setMessages((prev) => [...prev, newMsg]);
-  }, []);
+  }, [displayName]);
 
   const votePoll = useCallback((pollId: string, optionId: string) => {
     setPolls((prev) =>
@@ -228,6 +260,8 @@ export function useMeeting(initialMeetingCode: string = 'arch-9284-xkp') {
     meetingCode,
     meetingTitle,
     setMeetingTitle,
+    displayName,
+    setDisplayName,
     meetingInfo: { ...DEFAULT_MEETING_INFO, meetingId: meetingCode, title: meetingTitle },
     inMeeting,
     joinMeeting,

@@ -1,0 +1,1 @@
+ALTER TABLE "meeting_participants" ADD COLUMN "guest_name" varchar(120);
