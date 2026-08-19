@@ -59,7 +59,7 @@ export const JoinModal: React.FC<JoinModalProps> = ({
           <Video className="w-6 h-6 stroke-[2.2]" />
         </div>
 
-        <h3 className="text-xl font-bold text-slate-900 mb-1">Join ArchRoom Meeting</h3>
+        <h3 className="text-xl font-bold text-slate-900 mb-1">Join YLAAM-MEET Meeting</h3>
         <p className="text-sm text-slate-500 mb-6">
           Enter the meeting code or invitation link provided by the host.
         </p>
@@ -74,7 +74,7 @@ export const JoinModal: React.FC<JoinModalProps> = ({
               <input
                 type="text"
                 required
-                placeholder="e.g. arch-982-310"
+                placeholder="e.g. YLM-982-310"
                 value={meetingCode}
                 onChange={(e) => setMeetingCode(e.target.value)}
                 className="w-full pl-10 pr-4 py-3 rounded-xl border border-slate-200 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 text-slate-900 text-sm font-medium focus:outline-none transition-all"

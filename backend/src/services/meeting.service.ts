@@ -40,6 +40,7 @@ export class MeetingService {
         userId: hostUserId,
         guestName: null,
         role: 'host',
+        admission: 'admitted',
         joinedAt: new Date(),
         leftAt: null,
       });
@@ -115,6 +116,7 @@ export class MeetingService {
           userId: identity.userId,
           guestName: null,
           role: 'participant',
+          admission: meeting.hostUserId === identity.userId ? 'admitted' : 'pending',
           joinedAt: new Date(),
           leftAt: null,
         })
@@ -131,12 +133,113 @@ export class MeetingService {
         userId: null,
         guestName,
         role: 'participant',
+        admission: 'pending',
         joinedAt: new Date(),
         leftAt: null,
       })
       .returning();
 
     return { ok: true, meeting, participant };
+  }
+
+  async getAdmissionStatus(meetingCode: string, participantId: string) {
+    const meeting = await this.requireMeeting(meetingCode);
+    const participant = await db.query.meetingParticipants.findFirst({
+      where: and(eq(meetingParticipants.id, participantId), eq(meetingParticipants.meetingId, meeting.id)),
+    });
+
+    if (!participant) {
+      throw new TRPCError({ code: 'NOT_FOUND', message: 'Join request not found' });
+    }
+
+    return { ok: true, admission: participant.admission, meeting };
+  }
+
+  async listPendingAdmissions(meetingCode: string, hostUserId: string) {
+    const meeting = await this.requireHost(meetingCode, hostUserId);
+    const requests = await db
+      .select({
+        id: meetingParticipants.id,
+        guestName: meetingParticipants.guestName,
+        userName: users.fullName,
+        joinedAt: meetingParticipants.joinedAt,
+      })
+      .from(meetingParticipants)
+      .leftJoin(users, eq(meetingParticipants.userId, users.id))
+      .where(and(
+        eq(meetingParticipants.meetingId, meeting.id),
+        eq(meetingParticipants.admission, 'pending'),
+        isNull(meetingParticipants.leftAt)
+      ));
+
+    return {
+      ok: true,
+      requests: requests.map((request) => ({
+        id: request.id,
+        name: request.guestName || request.userName || 'Guest User',
+        requestedAt: request.joinedAt,
+      })),
+    };
+  }
+
+  async listAdmittedParticipants(meetingCode: string, identity: { userId?: string; participantId?: string }) {
+    const meeting = await this.requireMeeting(meetingCode);
+    const requester = await db.query.meetingParticipants.findFirst({
+      where: and(
+        eq(meetingParticipants.meetingId, meeting.id),
+        identity.userId
+          ? eq(meetingParticipants.userId, identity.userId)
+          : eq(meetingParticipants.id, identity.participantId || '00000000-0000-0000-0000-000000000000'),
+        eq(meetingParticipants.admission, 'admitted'),
+        isNull(meetingParticipants.leftAt)
+      ),
+    });
+    if (!requester) throw new TRPCError({ code: 'FORBIDDEN', message: 'You have not been admitted to this meeting' });
+
+    const participants = await db
+      .select({
+        id: meetingParticipants.id,
+        userId: meetingParticipants.userId,
+        guestName: meetingParticipants.guestName,
+        userName: users.fullName,
+        role: meetingParticipants.role,
+      })
+      .from(meetingParticipants)
+      .leftJoin(users, eq(meetingParticipants.userId, users.id))
+      .where(and(
+        eq(meetingParticipants.meetingId, meeting.id),
+        eq(meetingParticipants.admission, 'admitted'),
+        isNull(meetingParticipants.leftAt)
+      ));
+
+    return {
+      ok: true,
+      participants: participants.map((participant) => ({
+        id: participant.id,
+        name: participant.guestName || participant.userName || 'Guest User',
+        role: participant.role,
+        isSelf: participant.id === requester.id,
+      })),
+    };
+  }
+
+  async decideAdmission(meetingCode: string, participantId: string, admit: boolean, hostUserId: string) {
+    const meeting = await this.requireHost(meetingCode, hostUserId);
+    const [participant] = await db
+      .update(meetingParticipants)
+      .set({ admission: admit ? 'admitted' : 'denied', leftAt: admit ? null : new Date() })
+      .where(and(
+        eq(meetingParticipants.id, participantId),
+        eq(meetingParticipants.meetingId, meeting.id),
+        eq(meetingParticipants.admission, 'pending')
+      ))
+      .returning();
+
+    if (!participant) {
+      throw new TRPCError({ code: 'NOT_FOUND', message: 'Pending join request not found' });
+    }
+
+    return { ok: true, participant };
   }
 
   async startMeeting(meetingCode: string, userId: string) {
@@ -213,13 +316,33 @@ export class MeetingService {
     return { ok: true };
   }
 
+  private async requireMeeting(meetingCode: string) {
+    const meeting = await db.query.meetings.findFirst({
+      where: eq(meetings.meetingCode, meetingCode.trim().toUpperCase()),
+    });
+
+    if (!meeting) {
+      throw new TRPCError({ code: 'NOT_FOUND', message: 'Meeting not found' });
+    }
+
+    return meeting;
+  }
+
+  private async requireHost(meetingCode: string, userId: string) {
+    const meeting = await this.requireMeeting(meetingCode);
+    if (meeting.hostUserId !== userId) {
+      throw new TRPCError({ code: 'FORBIDDEN', message: 'Only the meeting host can manage join requests' });
+    }
+    return meeting;
+  }
+
   private async generateUniqueMeetingCode() {
     const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
     let code = '';
     let attempt = 0;
 
     while (attempt < 10) {
-      code = '';
+      code = 'YLM-';
       for (let i = 0; i < 6; i += 1) {
         code += alphabet[Math.floor(Math.random() * alphabet.length)];
       }

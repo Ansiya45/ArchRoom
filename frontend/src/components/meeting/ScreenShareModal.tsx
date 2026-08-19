@@ -57,14 +57,14 @@ const BROWSER_TABS: ScreenShareItem[] = [
   {
     id: 'tab-archroom',
     type: 'tab',
-    title: 'ARCHROOM Meeting',
+    title: 'YLAAM-MEET Meeting',
     icon: <Globe className="w-4 h-4 text-blue-500" />,
     previewType: 'meeting',
   },
   {
     id: 'tab-drive-pdf',
     type: 'tab',
-    title: 'ArchRoom_Facade_v4.2.pdf',
+    title: 'YLAAM-MEET_Facade_v4.2.pdf',
     icon: <FileText className="w-4 h-4 text-red-500" />,
     previewType: 'pdf',
   },
@@ -155,7 +155,7 @@ const PreviewScreenDisplay: React.FC<{ item: ScreenShareItem }> = ({ item }) => 
           <div className="flex items-center justify-between text-[11px] text-slate-300 px-2 py-1 bg-slate-800/80 rounded-lg">
             <span className="flex items-center space-x-1.5 font-bold text-blue-400">
               <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-              <span>ARCHROOM Call</span>
+              <span>YLAAM-MEET Call</span>
             </span>
             <span className="text-[10px] text-slate-400">00:24:12</span>
           </div>
@@ -443,7 +443,7 @@ export const ScreenShareModal: React.FC<ScreenShareModalProps> = ({
             </div>
             <div>
               <h2 className="text-base sm:text-lg font-bold text-slate-900 leading-tight">
-                Choose what to share with ARCHROOM
+                Choose what to share with YLAAM-MEET
               </h2>
               <p className="text-xs text-slate-500">
                 Select a tab, window, or screen to preview and present to all attendees.

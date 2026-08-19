@@ -51,7 +51,7 @@ export const MeetingCard: React.FC<ActiveMeetingProps> = ({
 }) => {
   // Active room info fallback
   const meetingTitle = currentMeeting?.title || 'Design Critique & UI Motion Specs';
-  const meetingCode = currentMeeting?.code || 'arch-402-991';
+  const meetingCode = currentMeeting?.code || 'YLM-402-991';
 
   // State for interactive toolbar toggles
   const [micOn, setMicOn] = useState(true);
@@ -75,8 +75,8 @@ export const MeetingCard: React.FC<ActiveMeetingProps> = ({
       id: 'you',
       name: 'You (Host)',
       avatar:
-        'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&crop=faces&w=800&q=80',
-      objectPosition: 'object-[center_20%]',
+        'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&crop=faces&w=800&h=500&q=85',
+      objectPosition: 'object-center',
       isMuted: false,
       isSpeaking: true,
       hasHandRaised: false,
@@ -85,8 +85,8 @@ export const MeetingCard: React.FC<ActiveMeetingProps> = ({
       id: 'sarah',
       name: 'Sarah J.',
       avatar:
-        'https://images.unsplash.com/photo-1573497019940-1c28c88b4f3e?auto=format&fit=crop&crop=faces&w=800&q=80',
-      objectPosition: 'object-[center_15%]',
+        'https://images.unsplash.com/photo-1573497019940-1c28c88b4f3e?auto=format&fit=crop&crop=faces&w=800&h=500&q=85',
+      objectPosition: 'object-center',
       isMuted: false,
       isSpeaking: true,
     },
@@ -94,8 +94,8 @@ export const MeetingCard: React.FC<ActiveMeetingProps> = ({
       id: 'mike',
       name: 'Mike C.',
       avatar:
-        'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&crop=faces&w=800&q=80',
-      objectPosition: 'object-[center_20%]',
+        'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&crop=faces&w=800&h=500&q=85',
+      objectPosition: 'object-center',
       isMuted: false,
       isSpeaking: false,
     },
@@ -103,8 +103,8 @@ export const MeetingCard: React.FC<ActiveMeetingProps> = ({
       id: 'emma',
       name: 'Emma W.',
       avatar:
-        'https://images.unsplash.com/photo-1580489944761-15a19d654956?auto=format&fit=crop&crop=faces&w=800&q=80',
-      objectPosition: 'object-[center_20%]',
+        'https://images.unsplash.com/photo-1580489944761-15a19d654956?auto=format&fit=crop&crop=faces&w=800&h=500&q=85',
+      objectPosition: 'object-center',
       isMuted: true,
       isSpeaking: false,
     },
@@ -127,7 +127,7 @@ export const MeetingCard: React.FC<ActiveMeetingProps> = ({
   }, [micOn, handRaised]);
 
   const handleCopyCode = () => {
-    navigator.clipboard.writeText(`https://archroom.app/meet/${meetingCode}`);
+    navigator.clipboard.writeText(`${window.location.origin}/meet/${meetingCode}`);
     setCopiedCode(true);
     setTimeout(() => setCopiedCode(false), 2000);
   };
@@ -217,7 +217,7 @@ export const MeetingCard: React.FC<ActiveMeetingProps> = ({
                   <div className="w-2.5 h-2.5 rounded-full bg-red-500" />
                   <div className="w-2.5 h-2.5 rounded-full bg-yellow-500" />
                   <div className="w-2.5 h-2.5 rounded-full bg-green-500" />
-                  <span className="text-xs text-slate-400 font-mono ml-1">archroom-deck-v2.pdf</span>
+                  <span className="text-xs text-slate-400 font-mono ml-1">ylaam-meet-deck-v2.pdf</span>
                 </div>
                 <span className="text-[10px] text-blue-400 bg-blue-500/10 px-2 py-0.5 rounded font-semibold">Presenting</span>
               </div>
@@ -272,7 +272,7 @@ export const MeetingCard: React.FC<ActiveMeetingProps> = ({
                   <img
                     src={p.avatar}
                     alt={p.name}
-                    className={`w-full h-full object-cover ${p.objectPosition || 'object-[center_20%]'} transition-transform duration-300 group-hover:scale-102`}
+                    className={`w-full h-full object-cover ${p.objectPosition || 'object-center'} transition-transform duration-300 group-hover:scale-102`}
                   />
                 ) : (
                   <div className="flex flex-col items-center justify-center space-y-2 text-slate-400">
@@ -504,7 +504,7 @@ export const MeetingCard: React.FC<ActiveMeetingProps> = ({
             if (onLeaveMeeting) {
               onLeaveMeeting();
             } else {
-              alert('Leaving ArchRoom Meeting Preview...');
+              alert('Leaving YLAAM-MEET Meeting Preview...');
             }
           }}
           className="bg-red-500 hover:bg-red-600 text-white px-3 py-1.5 rounded-lg font-semibold text-xs flex items-center gap-1.5 shadow-md shadow-red-500/25 active:scale-95 transition-all cursor-pointer"

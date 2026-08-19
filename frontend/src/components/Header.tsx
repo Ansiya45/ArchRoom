@@ -39,7 +39,7 @@ export const Header: React.FC<HeaderProps> = ({
             </svg>
           </div>
           <span className="text-lg font-bold tracking-tight text-slate-900 italic group-hover:text-blue-600 transition-colors">
-            ArchRoom
+            YLAAM-MEET
           </span>
         </div>
 

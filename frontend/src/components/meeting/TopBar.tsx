@@ -41,14 +41,14 @@ export const TopBar: React.FC<TopBarProps> = ({
 }) => {
   return (
     <header className="w-full h-16 flex-shrink-0 px-4 md:px-6 backdrop-blur-xl bg-white/60 border-b border-blue-100/50 shadow-sm flex items-center justify-between text-slate-800 select-none z-50">
-      {/* Left: Video Icon & ArchRoom */}
+      {/* Left: Video Icon & YLAAM-MEET */}
       <div className="flex items-center space-x-3 cursor-pointer group" onClick={onOpenInfo}>
         <div className="relative w-10 h-10 bg-blue-600 rounded-xl flex items-center justify-center shadow-lg shadow-blue-200 group-hover:scale-105 transition-transform duration-300">
           <Video className="w-5 h-5 text-white" />
           <div className="absolute -top-1 -right-1 w-2.5 h-2.5 bg-blue-400 rounded-full animate-ping" />
         </div>
         <span className="font-bold tracking-tight text-lg text-slate-900">
-          ArchRoom
+          YLAAM-MEET
         </span>
       </div>
 

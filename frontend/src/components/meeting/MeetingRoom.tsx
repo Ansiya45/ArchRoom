@@ -1,6 +1,7 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useMeeting } from '@/hooks/useMeeting';
 import { TopBar } from './TopBar';
 import { VideoGrid } from './VideoGrid';
@@ -13,30 +14,111 @@ import { SettingsPanel } from './SettingsPanel';
 import { BackgroundPickerModal } from './BackgrounPickerModal';
 import { ScreenShareModal } from './ScreenShareModal';
 import { WaitingRoom } from './WaitingRoom';
+import { stopAllCameraStreams } from './CameraVideo';
+import { Whiteboard } from './Whiteboard';
 import {
   PenTool,
   X,
-  Sparkles,
   PhoneOff,
-  HelpCircle,
-  FileQuestion,
   BarChart3,
-  Layers,
-  CheckCircle2,
+  Check,
+  Clock3,
+  UserCheck,
 } from 'lucide-react';
 import { trpc } from '@/lib/trpc';
 import { getMeetingSession, storeMeetingSession } from '@/lib/meetingSession';
+import { useSharedWhiteboard } from '@/hooks/useSharedWhiteboard';
+import { getStoredUser } from '@/lib/auth';
 
 interface MeetingRoomProps {
   meetingCode?: string;
 }
 
 export const MeetingRoom: React.FC<MeetingRoomProps> = ({
-  meetingCode = 'arch-9284-xkp',
+  meetingCode = 'YLM-9284-XKP',
 }) => {
+  const navigate = useNavigate();
   const meeting = useMeeting(meetingCode);
+  const sharedWhiteboard = useSharedWhiteboard(meetingCode, meeting.inMeeting);
   const [isBgPickerOpen, setIsBgPickerOpen] = useState<boolean>(false);
   const [isScreenShareModalOpen, setIsScreenShareModalOpen] = useState<boolean>(false);
+  const [admission, setAdmission] = useState<'idle' | 'pending' | 'denied'>('idle');
+  const [isHost, setIsHost] = useState(false);
+  const [joinRequests, setJoinRequests] = useState<Array<{ id: string; name: string }>>([]);
+
+  useEffect(() => {
+    void trpc.meetings.getByCode.query({ meetingCode }).then(({ meeting: room }) => {
+      meeting.setMeetingTitle(room.title);
+      setIsHost(getStoredUser()?.id === room.hostUserId);
+    }).catch(() => undefined);
+  }, [meetingCode]);
+
+  useEffect(() => {
+    if (admission !== 'pending') return;
+    const session = getMeetingSession(meetingCode);
+    if (!session?.participantId) return;
+
+    const checkAdmission = async () => {
+      try {
+        const result = await trpc.meetings.admissionStatus.query({
+          meetingCode,
+          participantId: session.participantId!,
+        });
+        if (result.admission === 'admitted') {
+          setAdmission('idle');
+          meeting.joinMeeting();
+        } else if (result.admission === 'denied') {
+          setAdmission('denied');
+        }
+      } catch {
+        setAdmission('denied');
+      }
+    };
+
+    void checkAdmission();
+    const timer = window.setInterval(() => void checkAdmission(), 2000);
+    return () => window.clearInterval(timer);
+  }, [admission, meetingCode]);
+
+  useEffect(() => {
+    if (!meeting.inMeeting || !isHost) return;
+    const loadRequests = async () => {
+      try {
+        const result = await trpc.meetings.pendingAdmissions.query({ meetingCode });
+        setJoinRequests(result.requests.map(({ id, name }) => ({ id, name })));
+      } catch {
+        setJoinRequests([]);
+      }
+    };
+    void loadRequests();
+    const timer = window.setInterval(() => void loadRequests(), 2000);
+    return () => window.clearInterval(timer);
+  }, [isHost, meeting.inMeeting, meetingCode]);
+
+  useEffect(() => {
+    if (!meeting.inMeeting) return;
+    const loadParticipants = async () => {
+      try {
+        const session = getMeetingSession(meetingCode);
+        const result = await trpc.meetings.participants.query({
+          meetingCode,
+          participantId: session?.participantId,
+        });
+        meeting.syncParticipants(result.participants);
+      } catch {
+        // Keep the most recent roster while a refresh is temporarily unavailable.
+      }
+    };
+    void loadParticipants();
+    const timer = window.setInterval(() => void loadParticipants(), 2000);
+    return () => window.clearInterval(timer);
+  }, [meeting.inMeeting, meetingCode]);
+
+  const handleLeave = () => {
+    stopAllCameraStreams();
+    meeting.leaveMeeting();
+    navigate('/');
+  };
 
   const handleJoin = async () => {
     const displayName = meeting.displayName.trim();
@@ -55,6 +137,12 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
         } catch {
           // Registered users store their name on the user account, not guest_name.
         }
+        const status = await trpc.meetings.admissionStatus.query({
+          meetingCode: meeting.meetingCode,
+          participantId: existingSession.participantId,
+        });
+        if (status.admission === 'admitted') meeting.joinMeeting();
+        else setAdmission(status.admission === 'denied' ? 'denied' : 'pending');
       } else {
         const joined = await trpc.meetings.join.mutate({
           meetingCode: meeting.meetingCode,
@@ -64,13 +152,39 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
           displayName,
           participantId: joined.participant.id,
         });
+        if (joined.participant.admission === 'admitted') meeting.joinMeeting();
+        else setAdmission('pending');
       }
-
-      meeting.joinMeeting();
     } catch (error) {
       alert(error instanceof Error ? error.message : 'Unable to join the meeting.');
     }
   };
+
+  const decideAdmission = async (participantId: string, admit: boolean) => {
+    await trpc.meetings.decideAdmission.mutate({ meetingCode, participantId, admit });
+    setJoinRequests((requests) => requests.filter((request) => request.id !== participantId));
+  };
+
+  if (admission === 'pending' || admission === 'denied') {
+    return (
+      <div className="min-h-screen bg-slate-950 text-white flex items-center justify-center p-6">
+        <div className="w-full max-w-md rounded-3xl border border-white/10 bg-slate-900 p-8 text-center shadow-2xl">
+          <div className="mx-auto mb-5 flex h-16 w-16 items-center justify-center rounded-full bg-blue-500/15 text-blue-400">
+            <Clock3 className="h-8 w-8" />
+          </div>
+          <h1 className="text-2xl font-bold">{admission === 'pending' ? 'Waiting for the host' : 'Request not accepted'}</h1>
+          <p className="mt-3 text-sm text-slate-400">
+            {admission === 'pending'
+              ? `Your request to join ${meeting.meetingTitle} was sent. You will enter automatically when the host admits you.`
+              : 'The host declined this join request. Contact the host if you think this was a mistake.'}
+          </p>
+          <button onClick={() => navigate('/')} className="mt-7 rounded-xl bg-white/10 px-5 py-2.5 text-sm font-semibold hover:bg-white/15">
+            Return home
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   // If in waiting room mode, render WaitingRoom
   if (!meeting.inMeeting) {
@@ -93,6 +207,36 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
 
   return (
     <div className="w-full h-screen bg-gradient-to-br from-[#070a18] via-[#11162a] to-[#1b1038] text-slate-800 flex flex-col justify-start overflow-hidden relative select-none font-sans">
+      {isHost && joinRequests.length > 0 && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-950/55 p-4 backdrop-blur-sm">
+          <div role="dialog" aria-modal="true" aria-label="Meeting join requests" className="w-full max-w-md rounded-3xl border border-blue-200 bg-white p-6 shadow-2xl">
+            <div className="mb-2 flex items-center gap-3 text-slate-900">
+              <div className="rounded-2xl bg-blue-100 p-3 text-blue-600">
+                <UserCheck className="h-6 w-6" />
+              </div>
+              <div>
+                <h2 className="text-lg font-bold">Someone wants to join</h2>
+                <p className="text-xs text-slate-500">Choose who can enter this meeting.</p>
+              </div>
+            </div>
+            <div className="mt-5 space-y-3">
+              {joinRequests.map((request) => (
+                <div key={request.id} className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                  <p className="mb-3 truncate text-base font-semibold text-slate-900">{request.name}</p>
+                  <div className="grid grid-cols-2 gap-2">
+                    <button onClick={() => void decideAdmission(request.id, false)} className="flex items-center justify-center gap-2 rounded-xl border border-slate-300 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-100">
+                      <X className="h-4 w-4" /> Deny
+                    </button>
+                    <button onClick={() => void decideAdmission(request.id, true)} className="flex items-center justify-center gap-2 rounded-xl bg-emerald-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-emerald-500">
+                      <Check className="h-4 w-4" /> Admit
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
       {/* Background ambient lighting orbs */}
       <div className="absolute top-0 left-1/4 w-[600px] h-[600px] bg-blue-200/40 rounded-full blur-[120px] pointer-events-none" />
       <div className="absolute bottom-0 right-1/4 w-[500px] h-[500px] bg-sky-200/50 rounded-full blur-[120px] pointer-events-none" />
@@ -160,37 +304,20 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
           />
 
           {/* Collaborative Whiteboard Canvas Overlay */}
-          {meeting.isWhiteboardOpen && (
-            <div className="absolute inset-2 sm:inset-4 z-40 bg-white/90 backdrop-blur-2xl border border-blue-100 rounded-3xl p-6 shadow-2xl flex flex-col space-y-4 animate-fadeIn text-slate-800">
-              <div className="flex items-center justify-between border-b border-blue-100 pb-4">
-                <div className="flex items-center space-x-2 text-blue-600 font-bold text-base">
-                  <PenTool className="w-5 h-5" />
-                  <span>ArchRoom Interactive Blueprint Canvas</span>
-                </div>
-                <button
-                  onClick={() => meeting.setIsWhiteboardOpen(false)}
-                  className="p-2 rounded-2xl bg-slate-100 hover:bg-slate-200 text-slate-500 hover:text-slate-800 transition-colors"
-                >
-                  <X className="w-5 h-5" />
-                </button>
-              </div>
-
-              {/* Whiteboard Canvas Visual Mock */}
-              <div className="flex-1 rounded-2xl bg-slate-900 border border-blue-200 p-6 flex items-center justify-center relative overflow-hidden group shadow-inner">
-                <div className="absolute inset-0 bg-[linear-gradient(to_right,#1e293b_1px,transparent_1px),linear-gradient(to_bottom,#1e293b_1px,transparent_1px)] bg-[size:24px_24px] opacity-40" />
-                <div className="relative z-10 text-center space-y-3">
-                  <div className="p-4 rounded-2xl bg-blue-500/20 text-blue-400 w-16 h-16 mx-auto flex items-center justify-center border border-blue-500/40 shadow-lg">
-                    <Sparkles className="w-8 h-8 animate-spin" style={{ animationDuration: '10s' }} />
-                  </div>
-                  <h3 className="text-lg font-bold text-white">
-                    Real-time Architectural Drawing Canvas Active
-                  </h3>
-                  <p className="text-xs text-slate-300 max-w-md">
-                    All participants can draw, add sticky notes, drop CAD markers, and annotate live.
-                  </p>
-                </div>
-              </div>
-            </div>
+          {(meeting.isWhiteboardOpen || sharedWhiteboard.shared) && (
+            <Whiteboard
+              onClose={() => meeting.setIsWhiteboardOpen(false)}
+              shared={sharedWhiteboard.shared}
+              connected={sharedWhiteboard.connected}
+              connectionError={sharedWhiteboard.connectionError}
+              isHost={sharedWhiteboard.isHost}
+              canEdit={sharedWhiteboard.connected ? sharedWhiteboard.canEdit : true}
+              participants={sharedWhiteboard.participants}
+              remoteSnapshot={sharedWhiteboard.snapshot}
+              onToggleShare={sharedWhiteboard.setShared}
+              onGrantAccess={sharedWhiteboard.grantAccess}
+              onPublishSnapshot={sharedWhiteboard.publishSnapshot}
+            />
           )}
         </div>
 
@@ -324,7 +451,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
               <PhoneOff className="w-7 h-7" />
             </div>
             <div className="space-y-1">
-              <h3 className="text-xl font-bold">Leave ArchRoom Meeting?</h3>
+              <h3 className="text-xl font-bold">Leave YLAAM-MEET Meeting?</h3>
               <p className="text-xs text-slate-400">
                 You can rejoin this room at any time using the same meeting link.
               </p>
@@ -337,7 +464,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
                 Cancel
               </button>
               <button
-                onClick={meeting.leaveMeeting}
+                onClick={handleLeave}
                 className="flex-1 py-3 rounded-2xl bg-rose-600 hover:bg-rose-500 text-white font-semibold text-xs sm:text-sm shadow-lg shadow-rose-600/30 transition-all"
               >
                 Leave Call

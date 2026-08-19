@@ -93,7 +93,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
             <span>Audio & Video Preferences</span>
           </h2>
           <p className="text-xs text-slate-500">
-            Configure hardware devices and stream quality for ArchRoom.
+            Configure hardware devices and stream quality for YLAAM-MEET.
           </p>
         </div>
 
@@ -288,7 +288,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                   <span>Network Latency: 24ms (Ultra-Low)</span>
                 </div>
                 <p className="text-[11px] text-slate-600">
-                  Connected to ArchRoom Cloud Edge Node — Frankfurt / US-East Direct Tunnel.
+                  Connected to YLAAM-MEET Cloud Edge Node — Frankfurt / US-East Direct Tunnel.
                 </p>
               </div>
             </div>
@@ -297,7 +297,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
           {activeTab === 'general' && (
             <div className="space-y-4">
               <div className="p-4 rounded-2xl bg-white/80 border border-blue-100/80 text-xs space-y-2 shadow-sm">
-                <div className="font-bold text-slate-900">ArchRoom Version</div>
+                <div className="font-bold text-slate-900">YLAAM-MEET Version</div>
                 <p className="text-slate-500 font-mono text-[11px]">v3.12.0-spatial-glass</p>
               </div>
             </div>

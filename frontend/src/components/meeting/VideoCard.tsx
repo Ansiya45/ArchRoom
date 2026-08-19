@@ -70,7 +70,7 @@ export const VideoCard: React.FC<VideoCardProps> = ({
             <div className="flex items-center space-x-2 text-blue-300 font-semibold text-xs sm:text-sm">
               <Share2 className="w-4 h-4 animate-bounce" />
               <span>
-                {name} is sharing — {participant.sharedScreenTitle || 'ArchRoom BIM Studio v4'}
+                {name} is sharing — {participant.sharedScreenTitle || 'YLAAM-MEET BIM Studio v4'}
               </span>
             </div>
             <span className="text-[11px] px-2 py-0.5 rounded-lg bg-blue-500/30 text-blue-200 border border-blue-400/40 font-mono">

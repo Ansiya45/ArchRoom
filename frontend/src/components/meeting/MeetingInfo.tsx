@@ -34,7 +34,7 @@ export const MeetingInfo: React.FC<MeetingInfoProps> = ({ info, onClose }) => {
   };
 
   const handleCopyFullInvite = async () => {
-    const fullText = `Join ArchRoom Meeting\nTopic: ${info.title}\nMeeting ID: ${info.meetingId}\nPasscode: ${info.passcode}\nLink: ${info.inviteLink}\nDial-in: ${info.dialInNumber}`;
+    const fullText = `Join YLAAM-MEET Meeting\nTopic: ${info.title}\nMeeting ID: ${info.meetingId}\nPasscode: ${info.passcode}\nLink: ${info.inviteLink}\nDial-in: ${info.dialInNumber}`;
     const success = await copyToClipboard(fullText);
     if (success) {
       setCopiedFull(true);

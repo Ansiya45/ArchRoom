@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useEffect} from 'react';
-import { X, LogIn, UserPlus, Mail, Lock, User, ArrowRight } from 'lucide-react';
+import { X, LogIn, UserPlus, Mail, Lock, User, ArrowRight, Eye, EyeOff } from 'lucide-react';
 import { storeSession, type SessionUser } from '../lib/auth';
 import { trpc } from '../lib/trpc';
 
@@ -20,12 +20,22 @@ export const AuthModal: React.FC<AuthModalProps> = ({
 }) => {
   const [isLogin, setIsLogin] = useState(mode === 'login');
   useEffect(() => {
-  setIsLogin(mode === 'login');
-}, [mode]);
+    setIsLogin(mode === 'login');
+    if (!isOpen) {
+      setFormError('');
+      setSubmitAttempted(false);
+      setShowPassword(false);
+      setShowConfirmPassword(false);
+    }
+  }, [mode, isOpen]);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
+  const [submitAttempted, setSubmitAttempted] = useState(false);
+  const [formError, setFormError] = useState('');
   const passwordRegex = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d).{8,}$/;
 
   const isPasswordValid = passwordRegex.test(password);
@@ -38,22 +48,23 @@ export const AuthModal: React.FC<AuthModalProps> = ({
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    setSubmitAttempted(true);
+    setFormError('');
 
     if (!email || !password || isSubmitting) return;
 
     if (!isLogin) {
       if (name.trim().length < 2) {
-        alert('Please enter your full name.');
+        setFormError('Please enter your full name.');
         return;
       }
 
       if (!isPasswordValid) {
-        alert('Password must contain at least 8 characters, including uppercase, lowercase, and a number.');
+        setFormError('Password must contain at least 8 characters, including uppercase, lowercase, and a number.');
         return;
       }
 
       if (!doPasswordsMatch) {
-        alert('Password and confirm password do not match.');
         return;
       }
     }
@@ -81,7 +92,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
       onClose();
     } catch (err) {
       console.error(err);
-      alert(err instanceof Error ? err.message : 'Something went wrong.');
+      setFormError(err instanceof Error ? err.message : 'Something went wrong.');
     } finally {
       setIsSubmitting(false);
     }
@@ -102,7 +113,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
         </div>
 
         <h3 className="text-xl font-bold text-slate-900 mb-1">
-          {isLogin ? 'Welcome back to ArchRoom' : 'Create your ArchRoom Account'}
+          {isLogin ? 'Welcome back to YLAAM-MEET' : 'Create your YLAAM-MEET Account'}
         </h3>
         <p className="text-sm text-slate-500 mb-6">
           {isLogin
@@ -154,15 +165,21 @@ export const AuthModal: React.FC<AuthModalProps> = ({
             <div className="relative">
               <Lock className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
               <input
-                type="password"
+                type={showPassword ? 'text' : 'password'}
                 required
                 autoComplete={isLogin ? 'current-password' : 'new-password'}
                 placeholder="••••••••••••"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
-                className="w-full pl-10 pr-4 py-3 rounded-xl border border-slate-200 focus:border-blue-500 text-slate-900 text-sm focus:outline-none"
+                className="w-full pl-10 pr-11 py-3 rounded-xl border border-slate-200 focus:border-blue-500 text-slate-900 text-sm focus:outline-none"
               />
+              <button type="button" onClick={() => setShowPassword((value) => !value)} aria-label={showPassword ? 'Hide password' : 'Show password'} className="absolute right-3.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-700 cursor-pointer">
+                {showPassword ? <EyeOff className="w-4.5 h-4.5" /> : <Eye className="w-4.5 h-4.5" />}
+              </button>
             </div>
+            {!isLogin && submitAttempted && !isPasswordValid && (
+              <p className="mt-1.5 text-xs font-medium text-red-600">Use 8+ characters with uppercase, lowercase, and a number.</p>
+            )}
           </div>
 
           {!isLogin && (
@@ -173,17 +190,25 @@ export const AuthModal: React.FC<AuthModalProps> = ({
               <div className="relative">
                 <Lock className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
                 <input
-                  type="password"
+                  type={showConfirmPassword ? 'text' : 'password'}
                   required
                   autoComplete="new-password"
                   placeholder="Retype your password"
                   value={confirmPassword}
                   onChange={(e) => setConfirmPassword(e.target.value)}
-                  className="w-full pl-10 pr-4 py-3 rounded-xl border border-slate-200 focus:border-blue-500 text-slate-900 text-sm focus:outline-none"
+                  className={`w-full pl-10 pr-11 py-3 rounded-xl border text-slate-900 text-sm focus:outline-none ${submitAttempted && !doPasswordsMatch ? 'border-red-400 focus:border-red-500' : 'border-slate-200 focus:border-blue-500'}`}
                 />
+                <button type="button" onClick={() => setShowConfirmPassword((value) => !value)} aria-label={showConfirmPassword ? 'Hide confirmation password' : 'Show confirmation password'} className="absolute right-3.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-700 cursor-pointer">
+                  {showConfirmPassword ? <EyeOff className="w-4.5 h-4.5" /> : <Eye className="w-4.5 h-4.5" />}
+                </button>
               </div>
+              {submitAttempted && !doPasswordsMatch && (
+                <p className="mt-1.5 text-xs font-medium text-red-600">Passwords do not match.</p>
+              )}
             </div>
           )}
+
+          {formError && <p role="alert" className="text-xs font-medium text-red-600">{formError}</p>}
 
           <button
             type="submit"

@@ -43,7 +43,7 @@ export default function App() {
     {
       id: 'm2',
       title: 'Design Critique & UI Motion Specs',
-      code: 'arch-402-991',
+      code: 'YLM-402-991',
       time: 'Tomorrow • 10:30 AM - 11:30 AM',
       participantsCount: 5,
       hostName: 'Mike Chen',
@@ -52,7 +52,7 @@ export default function App() {
     {
       id: 'm3',
       title: 'Client Demo: WebRTC & Spatial Audio',
-      code: 'arch-118-203',
+      code: 'YLM-118-203',
       time: 'Thursday, July 23 • 4:00 PM',
       participantsCount: 12,
       hostName: 'Emma Watson',
@@ -68,7 +68,7 @@ export default function App() {
     isLive: boolean;
   } | null>({
     title: 'Design Critique & UI Motion Specs',
-    code: 'arch-402-991',
+    code: 'YLM-402-991',
     hostName: 'Mike Chen',
     isLive: true,
   });
@@ -173,27 +173,25 @@ export default function App() {
     }
   };
 
-  const handleStartMeeting = async (meeting: MeetingItem) => {
+  const handleStartMeeting = (meeting: MeetingItem) => {
     if (!user) {
       setAuthModalState({ isOpen: true, mode: 'login' });
       showToast('Please sign in before starting a meeting.', 'info');
       return;
     }
 
-    try {
-      await trpc.meetings.start.mutate({ meetingCode: meeting.code });
-      setCurrentMeeting({
-        title: meeting.title,
-        code: meeting.code,
-        hostName: meeting.hostName,
-        isLive: true,
-      });
-      setActiveTab('home');
-      navigate(`/meet/${meeting.code}`);
-      showToast(`Connected to meeting room: ${meeting.code}`);
-    } catch (error) {
-      alert(error instanceof Error ? error.message : 'Unable to start the meeting.');
-    }
+    setCurrentMeeting({
+      title: meeting.title,
+      code: meeting.code,
+      hostName: meeting.hostName,
+      isLive: true,
+    });
+    setActiveTab('home');
+    navigate(`/meet/${meeting.code}`);
+
+    void trpc.meetings.start.mutate({ meetingCode: meeting.code }).catch((error) => {
+      console.error('Unable to mark meeting as started:', error);
+    });
   };
 
   return (

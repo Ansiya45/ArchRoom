@@ -12,7 +12,7 @@ class Meeting(models.Model):
         ('ended', 'Ended'),
     ]
 
-    title = models.CharField(max_length=200, default='Quick ArchRoom Meeting')
+    title = models.CharField(max_length=200, default='Quick YLAAM-MEET Meeting')
     meeting_code = models.CharField(max_length=50, unique=True, blank=True)
     host_name = models.CharField(max_length=120, default='Host')
     guest_name = models.CharField(max_length=120, blank=True, null=True)
@@ -30,7 +30,7 @@ class Meeting(models.Model):
 
     @staticmethod
     def generate_code():
-        prefix = 'arch-'
+        prefix = 'YLM-'
         suffix = ''.join(random.choice(string.ascii_uppercase + string.digits) for _ in range(8))
         return f'{prefix}{suffix}'
 

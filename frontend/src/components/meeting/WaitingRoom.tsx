@@ -106,7 +106,7 @@ export const WaitingRoom: React.FC<WaitingRoomProps> = ({
           </div>
           <div>
             <h1 className="text-lg sm:text-xl font-bold text-slate-900 tracking-tight">
-              ArchRoom
+              YLAAM-MEET
             </h1>
             <p className="text-[11px] text-slate-500 font-mono">Meeting ID: {meetingCode}</p>
           </div>

@@ -29,7 +29,7 @@ export const HeroContent: React.FC<HeroContentProps> = ({
 
       {/* Subtitle */}
       <p className="text-xs sm:text-sm text-slate-500 leading-relaxed max-w-md mb-4">
-        ArchRoom brings teams together with crystal-clear video, real-time collaboration and intelligent tools.
+        YLAAM-MEET brings teams together with crystal-clear video, real-time collaboration and intelligent tools.
       </p>
 
       {/* Action Buttons */}

@@ -22,7 +22,7 @@ export const meetingsRouter = t.router({
     return meetingService.listMeetings(ctx.user!.id);
   }),
 
-  getByCode: protectedProcedure
+  getByCode: t.procedure
     .input(z.object({ meetingCode: z.string().min(1) }))
     .query(async ({ input }) => {
       return meetingService.getByCode(input.meetingCode);
@@ -40,6 +40,37 @@ export const meetingsRouter = t.router({
         userId: ctx.user?.id,
         guestName: input.guestName,
       });
+    }),
+
+  admissionStatus: t.procedure
+    .input(z.object({ meetingCode: z.string().min(1), participantId: z.string().uuid() }))
+    .query(async ({ input }) => {
+      return meetingService.getAdmissionStatus(input.meetingCode, input.participantId);
+    }),
+
+  participants: t.procedure
+    .input(z.object({ meetingCode: z.string().min(1), participantId: z.string().uuid().optional() }))
+    .query(async ({ input, ctx }) => {
+      return meetingService.listAdmittedParticipants(input.meetingCode, {
+        userId: ctx.user?.id,
+        participantId: input.participantId,
+      });
+    }),
+
+  pendingAdmissions: protectedProcedure
+    .input(z.object({ meetingCode: z.string().min(1) }))
+    .query(async ({ input, ctx }) => {
+      return meetingService.listPendingAdmissions(input.meetingCode, ctx.user!.id);
+    }),
+
+  decideAdmission: protectedProcedure
+    .input(z.object({
+      meetingCode: z.string().min(1),
+      participantId: z.string().uuid(),
+      admit: z.boolean(),
+    }))
+    .mutation(async ({ input, ctx }) => {
+      return meetingService.decideAdmission(input.meetingCode, input.participantId, input.admit, ctx.user!.id);
     }),
 
   start: protectedProcedure

@@ -30,7 +30,7 @@ export const ScheduledMeetingsView: React.FC<ScheduledMeetingsViewProps> = ({
   );
 
   const handleCopy = (id: string, code: string) => {
-    navigator.clipboard.writeText(`https://archroom.app/meet/${code}`);
+    navigator.clipboard.writeText(`${window.location.origin}/meet/${code}`);
     setCopiedId(id);
     setTimeout(() => setCopiedId(null), 2000);
   };

@@ -38,7 +38,7 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ messages, onSendMessage, o
 
   const handleSimulatedFileUpload = () => {
     setSelectedFile({
-      name: 'ArchRoom_Design_Doc_v2.pdf',
+      name: 'YLAAM-MEET_Design_Doc_v2.pdf',
       size: '4.8 MB',
       type: 'PDF',
     });

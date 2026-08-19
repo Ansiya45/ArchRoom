@@ -14,10 +14,10 @@ export function formatTime(seconds: number): string {
 }
 
 export function generateMeetingCode(): string {
-  const chars = 'abcdefghijklmnopqrstuvwxyz';
+  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
   const getRandomPart = (length: number) =>
     Array.from({ length }, () => chars[Math.floor(Math.random() * chars.length)]).join('');
-  return `${getRandomPart(3)}-${getRandomPart(4)}-${getRandomPart(3)}`;
+  return `YLM-${getRandomPart(4)}-${getRandomPart(3)}`;
 }
 
 export async function copyToClipboard(text: string): Promise<boolean> {
@@ -155,7 +155,7 @@ export const DUMMY_MESSAGES: ChatMessage[] = [
     message: "I've attached the latest BIM rendering PDF for review before we dive in.",
     timestamp: '10:15 AM',
     fileAttachment: {
-      name: 'ArchRoom_Facade_v4.2.pdf',
+      name: 'YLAAM-MEET_Facade_v4.2.pdf',
       size: '14.2 MB',
       type: 'PDF',
     },
@@ -216,14 +216,14 @@ export const BACKGROUND_PRESETS = [
 ];
 
 export const DEFAULT_MEETING_INFO: MeetingInfoData = {
-  meetingId: 'arch-9284-xkp',
-  title: 'ARCHROOM',
+  meetingId: 'YLM-9284-XKP',
+  title: 'YLAAM-MEET',
   passcode: '882910',
   dialInNumber: '+1 (800) 555-0199 ID: 928 410',
   inviteLink:
     typeof window !== 'undefined'
-      ? `${window.location.origin}/meet/arch-9284-xkp`
-      : 'https://archroom.app/meet/arch-9284-xkp',
+      ? `${window.location.origin}/meet/YLM-9284-XKP`
+      : 'https://archroom.app/meet/YLM-9284-XKP',
   hostName: 'Alex Rivera',
   scheduledTime: 'Today • 10:00 AM - 11:30 AM EST',
 };

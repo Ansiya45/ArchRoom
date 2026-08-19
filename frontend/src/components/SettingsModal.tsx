@@ -31,7 +31,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
           <SlidersHorizontal className="w-6 h-6 stroke-[2.2]" />
         </div>
 
-        <h3 className="text-xl font-bold text-slate-900 mb-1">ArchRoom Settings</h3>
+        <h3 className="text-xl font-bold text-slate-900 mb-1">YLAAM-MEET Settings</h3>
         <p className="text-sm text-slate-500 mb-6">
           Configure your audio, video feeds and AI enhancement preferences.
         </p>
@@ -64,7 +64,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
               className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 text-slate-800 focus:border-blue-500 focus:outline-none bg-slate-50"
             >
               <option>FaceTime HD Camera (Built-in)</option>
-              <option>ArchRoom 4K Pro Webcam</option>
+              <option>YLAAM-MEET 4K Pro Webcam</option>
               <option>Virtual Continuity Camera</option>
             </select>
           </div>

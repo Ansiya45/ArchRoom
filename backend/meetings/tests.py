@@ -19,7 +19,7 @@ class MeetingApiTests(TestCase):
 
         self.assertEqual(response.status_code, 201)
         self.assertIn('meeting_code', response.data)
-        self.assertTrue(response.data['meeting_code'].startswith('arch-'))
+        self.assertTrue(response.data['meeting_code'].startswith('YLM-'))
         self.assertEqual(response.data['title'], 'Weekly Product Sync')
 
     def test_list_meetings_returns_created_records(self):

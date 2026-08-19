@@ -10,21 +10,18 @@ import {
   Poll,
 } from '@/types/meeting';
 import {
-  DUMMY_PARTICIPANTS,
-  DUMMY_MESSAGES,
-  DUMMY_POLLS,
   DEFAULT_MEETING_INFO,
 } from '@/utils/meetingHelpers';
 import { getStoredUser } from '@/lib/auth';
 import { getMeetingSession, storeMeetingSession } from '@/lib/meetingSession';
 
-export function useMeeting(initialMeetingCode: string = 'arch-9284-xkp') {
+export function useMeeting(initialMeetingCode: string = 'YLM-9284-XKP') {
   const initialSession = getMeetingSession(initialMeetingCode);
   const authenticatedUser = getStoredUser();
   const initialDisplayName = initialSession?.displayName || authenticatedUser?.fullName || 'Guest User';
   // Meeting metadata
   const [meetingCode] = useState<string>(initialMeetingCode);
-  const [meetingTitle, setMeetingTitle] = useState<string>('ARCHROOM');
+  const [meetingTitle, setMeetingTitle] = useState<string>('YLAAM-MEET');
   const [inMeeting, setInMeeting] = useState<boolean>(false); // Starts in waiting room or in meeting
   
   // Timers
@@ -41,17 +38,20 @@ export function useMeeting(initialMeetingCode: string = 'arch-9284-xkp') {
 
   // Participants & Speaker
   const [displayName, setDisplayNameState] = useState<string>(initialDisplayName);
-  const [participants, setParticipants] = useState<Participant[]>(() =>
-    DUMMY_PARTICIPANTS.map((participant) =>
-      participant.id === 'user-self'
-        ? {
-            ...participant,
-            name: `${initialDisplayName} (You)`,
-            role: authenticatedUser ? 'host' : 'attendee',
-          }
-        : participant
-    )
-  );
+  const [participants, setParticipants] = useState<Participant[]>([{
+    id: 'user-self',
+    name: `${initialDisplayName} (You)`,
+    avatar: 'https://api.dicebear.com/9.x/initials/svg?seed=You',
+    role: authenticatedUser ? 'host' : 'attendee',
+    isMuted: false,
+    isCameraOn: true,
+    isSpeaking: false,
+    isHandRaised: false,
+    isPinned: false,
+    isScreenSharing: false,
+    connectionQuality: 'excellent',
+    audioLevel: 0,
+  }]);
   const [activeSpeakerId, setActiveSpeakerId] = useState<string>('user-self');
   const [pinnedParticipantId, setPinnedParticipantId] = useState<string | null>(null);
 
@@ -63,8 +63,8 @@ export function useMeeting(initialMeetingCode: string = 'arch-9284-xkp') {
   const [layoutMode, setLayoutMode] = useState<LayoutMode>('speaker');
 
   // Chat & Polls
-  const [messages, setMessages] = useState<ChatMessage[]>(DUMMY_MESSAGES);
-  const [polls, setPolls] = useState<Poll[]>(DUMMY_POLLS);
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [polls, setPolls] = useState<Poll[]>([]);
 
   // Devices & Audio Settings
   const [deviceSettings, setDeviceSettings] = useState<DeviceSettings>({
@@ -72,7 +72,7 @@ export function useMeeting(initialMeetingCode: string = 'arch-9284-xkp') {
     cameraId: 'default-camera',
     speakerId: 'default-speaker',
     noiseCancellation: true,
-    backgroundBlur: 'blur',
+    backgroundBlur: 'none',
     resolution: '1080p',
   });
 
@@ -165,7 +165,7 @@ export function useMeeting(initialMeetingCode: string = 'arch-9284-xkp') {
     });
   }, []);
 
-  const startScreenSharing = useCallback((title: string = 'ArchRoom BIM Studio v4') => {
+  const startScreenSharing = useCallback((title: string = 'YLAAM-MEET BIM Studio v4') => {
     setIsScreenSharing(true);
     setParticipants((list) =>
       list.map((p) =>
@@ -187,7 +187,7 @@ export function useMeeting(initialMeetingCode: string = 'arch-9284-xkp') {
   }, []);
 
   const toggleScreenSharing = useCallback(
-    (title: string = 'ArchRoom BIM Studio v4') => {
+    (title: string = 'YLAAM-MEET BIM Studio v4') => {
       if (isScreenSharing) {
         stopScreenSharing();
       } else {
@@ -210,6 +210,27 @@ export function useMeeting(initialMeetingCode: string = 'arch-9284-xkp') {
     setParticipants((list) =>
       list.map((p) => (p.id === participantId ? { ...p, isMuted: !p.isMuted } : p))
     );
+  }, []);
+
+  const syncParticipants = useCallback((roster: Array<{ id: string; name: string; role: 'host' | 'participant'; isSelf: boolean }>) => {
+    setParticipants((current) => roster.map((entry) => {
+      const id = entry.isSelf ? 'user-self' : entry.id;
+      const existing = current.find((participant) => participant.id === id);
+      return {
+        id,
+        name: `${entry.name}${entry.isSelf ? ' (You)' : ''}`,
+        avatar: `https://api.dicebear.com/9.x/initials/svg?seed=${encodeURIComponent(entry.name)}`,
+        role: entry.role === 'host' ? 'host' : 'attendee',
+        isMuted: existing?.isMuted ?? false,
+        isCameraOn: existing?.isCameraOn ?? false,
+        isSpeaking: existing?.isSpeaking ?? false,
+        isHandRaised: existing?.isHandRaised ?? false,
+        isPinned: existing?.isPinned ?? false,
+        isScreenSharing: existing?.isScreenSharing ?? false,
+        connectionQuality: existing?.connectionQuality ?? 'excellent',
+        audioLevel: existing?.audioLevel ?? 0,
+      };
+    }));
   }, []);
 
   const toggleSidebarTab = useCallback((tab: SidebarTab) => {
@@ -262,7 +283,12 @@ export function useMeeting(initialMeetingCode: string = 'arch-9284-xkp') {
     setMeetingTitle,
     displayName,
     setDisplayName,
-    meetingInfo: { ...DEFAULT_MEETING_INFO, meetingId: meetingCode, title: meetingTitle },
+    meetingInfo: {
+      ...DEFAULT_MEETING_INFO,
+      meetingId: meetingCode,
+      title: meetingTitle,
+      inviteLink: `${window.location.origin}/meet/${meetingCode}`,
+    },
     inMeeting,
     joinMeeting,
     leaveMeeting,
@@ -292,6 +318,7 @@ export function useMeeting(initialMeetingCode: string = 'arch-9284-xkp') {
     pinnedParticipantId,
     togglePinParticipant,
     toggleMuteParticipant,
+    syncParticipants,
 
     // Layout & Sidebar
     layoutMode,

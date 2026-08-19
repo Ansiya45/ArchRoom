@@ -13,6 +13,7 @@ import {
 
 export const meetingStatusEnum = pgEnum('meeting_status', ['scheduled', 'live', 'ended']);
 export const participantRoleEnum = pgEnum('participant_role', ['host', 'participant']);
+export const participantAdmissionEnum = pgEnum('participant_admission', ['pending', 'admitted', 'denied']);
 export const recordingStatusEnum = pgEnum('recording_status', ['created', 'completed', 'failed']);
 
 export const users = pgTable(
@@ -62,6 +63,7 @@ export const meetingParticipants = pgTable(
     }),
     guestName: varchar('guest_name', { length: 120 }),
     role: participantRoleEnum('role').default('participant').notNull(),
+    admission: participantAdmissionEnum('admission').default('pending').notNull(),
     joinedAt: timestamp('joined_at', { withTimezone: true }).defaultNow().notNull(),
     leftAt: timestamp('left_at', { withTimezone: true }),
   },

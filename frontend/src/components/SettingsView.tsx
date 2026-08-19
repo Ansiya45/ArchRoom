@@ -108,7 +108,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onShowToast }) => {
               className="w-full px-4 py-3 rounded-xl border border-slate-200 text-slate-800 text-sm focus:border-blue-500 focus:outline-none bg-slate-50 font-medium"
             >
               <option>FaceTime HD Camera (Built-in)</option>
-              <option>ArchRoom 4K Pro Webcam</option>
+              <option>YLAAM-MEET 4K Pro Webcam</option>
               <option>Virtual Continuity Camera</option>
             </select>
           </div>

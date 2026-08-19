@@ -19,6 +19,15 @@ declare global {
   }
 }
 
+const activeCameraStreams = new Set<MediaStream>();
+
+export function stopAllCameraStreams() {
+  activeCameraStreams.forEach((cameraStream) => {
+    cameraStream.getTracks().forEach((track) => track.stop());
+  });
+  activeCameraStreams.clear();
+}
+
 export const CameraVideo: React.FC<CameraVideoProps> = ({
   isCameraOn,
   activeBg = 'none',
@@ -28,9 +37,15 @@ export const CameraVideo: React.FC<CameraVideoProps> = ({
   isSelf = true,
 }) => {
   const videoRef = useRef<HTMLVideoElement | null>(null);
+  const previewVideoRef = useRef<HTMLVideoElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const bgImageRef = useRef<HTMLImageElement | null>(null);
   const avatarImgRef = useRef<HTMLImageElement | null>(null);
+  const streamRef = useRef<MediaStream | null>(null);
+  const cameraRequestedRef = useRef(false);
+  const cameraEnabledRef = useRef(isCameraOn);
+  const mountedRef = useRef(true);
+  cameraEnabledRef.current = isCameraOn;
 
   const [stream, setStream] = useState<MediaStream | null>(null);
   const [hasError, setHasError] = useState<boolean>(false);
@@ -72,19 +87,27 @@ export const CameraVideo: React.FC<CameraVideoProps> = ({
     }
   }, [fallbackAvatar]);
 
-  // 1. Initialize Webcam Stream
+  // Keep the camera stream alive while this component is mounted. Toggling the
+  // camera only enables/disables its video track, avoiding slow hardware restarts.
   useEffect(() => {
-    let active = true;
-    let localStream: MediaStream | null = null;
-
     async function startCamera() {
       if (!isCameraOn || !isSelf) {
-        if (stream) {
-          stream.getTracks().forEach((track) => track.stop());
-          setStream(null);
-        }
+        streamRef.current?.getVideoTracks().forEach((track) => {
+          track.enabled = false;
+        });
         return;
       }
+
+      if (streamRef.current) {
+        streamRef.current.getVideoTracks().forEach((track) => {
+          track.enabled = true;
+        });
+        setStream(streamRef.current);
+        return;
+      }
+
+      if (cameraRequestedRef.current) return;
+      cameraRequestedRef.current = true;
 
       setHasError(false);
       setErrorMessage('');
@@ -100,12 +123,17 @@ export const CameraVideo: React.FC<CameraVideoProps> = ({
             audio: false,
           });
 
-          if (!active) {
+          if (!mountedRef.current) {
             mediaStream.getTracks().forEach((track) => track.stop());
             return;
           }
 
-          localStream = mediaStream;
+          mediaStream.getVideoTracks().forEach((track) => {
+            track.enabled = cameraEnabledRef.current;
+          });
+
+          streamRef.current = mediaStream;
+          activeCameraStreams.add(mediaStream);
           setStream(mediaStream);
 
           if (videoRef.current) {
@@ -115,7 +143,7 @@ export const CameraVideo: React.FC<CameraVideoProps> = ({
           throw new Error('Camera access API not supported on this browser.');
         }
       } catch (err: any) {
-        if (!active) return;
+        cameraRequestedRef.current = false;
         console.warn('Real webcam access error:', err);
         setHasError(true);
         setErrorMessage(
@@ -127,23 +155,32 @@ export const CameraVideo: React.FC<CameraVideoProps> = ({
     }
 
     startCamera();
-
-    return () => {
-      active = false;
-      if (localStream) {
-        localStream.getTracks().forEach((track) => track.stop());
-      }
-    };
   }, [isCameraOn, isSelf]);
 
   useEffect(() => {
-    if (videoRef.current && stream) {
-      videoRef.current.srcObject = stream;
-    }
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      const currentStream = streamRef.current;
+      currentStream?.getTracks().forEach((track) => track.stop());
+      if (currentStream) activeCameraStreams.delete(currentStream);
+      streamRef.current = null;
+    };
+  }, []);
+
+  useEffect(() => {
+    const videoElements = [videoRef.current, previewVideoRef.current];
+    videoElements.forEach((videoElement) => {
+      if (videoElement && videoElement.srcObject !== stream) {
+        videoElement.srcObject = stream;
+      }
+    });
   }, [stream]);
 
   // 2. Load MediaPipe SelfieSegmentation for real-time AI background removal
   useEffect(() => {
+    if (activeBg === 'none') return;
+
     let selfieSeg: any = null;
 
     const loadMediaPipe = () => {
@@ -176,7 +213,7 @@ export const CameraVideo: React.FC<CameraVideoProps> = ({
     } else {
       loadMediaPipe();
     }
-  }, []);
+  }, [activeBg === 'none']);
 
   // 3. Canvas Segmentation Render Loop
   useEffect(() => {
@@ -386,9 +423,7 @@ export const CameraVideo: React.FC<CameraVideoProps> = ({
               autoPlay
               playsInline
               muted
-              ref={(el) => {
-                if (el && stream) el.srcObject = stream;
-              }}
+              ref={previewVideoRef}
               className={`w-full h-full ${
                 objectFit === 'cover' ? 'object-cover' : 'object-contain'
               } -scale-x-100 transition-all duration-300`}

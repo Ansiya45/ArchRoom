@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useState } from 'react';
+import React, { useState } from 'react';
 import { X, CalendarPlus } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { trpc } from '../lib/trpc';
@@ -19,10 +19,6 @@ export const ScheduleModal: React.FC<ScheduleModalProps> = ({
   const [title, setTitle] = useState('');
   const [date, setDate] = useState('2026-07-22');
   const [time, setTime] = useState('14:00');
-  const generateMeetingCode = () =>
-  `arch-${Math.random().toString(36).substring(2, 10).toUpperCase()}`;
-  const [generatedCode, setGeneratedCode] = useState(generateMeetingCode());
-  const [copied, setCopied] = useState(false);
   const [loading, setLoading] = useState(false);
   const [meetingMode, setMeetingMode] = useState<'instant' | 'scheduled'>('instant');
   const navigate = useNavigate();
@@ -30,25 +26,7 @@ export const ScheduleModal: React.FC<ScheduleModalProps> = ({
   const getMeetingOrigin = () =>
     typeof window !== 'undefined' ? window.location.origin : 'http://localhost:3000';
 
-  useEffect(() => {
-    if (isOpen) {
-      setGeneratedCode(generateMeetingCode());
-      setCopied(false);
-    }
-  }, [isOpen]);
-
   if (!isOpen) return null;
-
-  const handleCopyLink = () => {
-    const link = `${getMeetingOrigin()}/meet/${generatedCode || 'arch-772-910'}`;
-    if (typeof navigator !== 'undefined' && navigator.clipboard) {
-      navigator.clipboard.writeText(link);
-    }
-    setCopied(true);
-    window.setTimeout(() => {
-      setCopied(false);
-    }, 2000);
-  };
 
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -57,20 +35,16 @@ export const ScheduleModal: React.FC<ScheduleModalProps> = ({
     setLoading(true);
 
     try {
-      const code =
-        generatedCode ||
-        `arch-${Math.random().toString(36).substring(2, 10).toUpperCase()}`;
-
       const payload = await trpc.meetings.create.mutate({
-        title: title || 'Quick ArchRoom Meeting',
+        title: title || 'Quick YLAAM-MEET Meeting',
         scheduledAt: meetingMode === 'scheduled' ? `${date}T${time}:00Z` : '',
         startNow: meetingMode === 'instant',
       });
 
-      const createdCode = payload.meeting.meetingCode || code;
+      const createdCode = payload.meeting.meetingCode;
 
       onCreated({
-        title: payload.meeting.title || title || 'Quick ArchRoom Meeting',
+        title: payload.meeting.title || title || 'Quick YLAAM-MEET Meeting',
         code: createdCode,
         time: meetingMode === 'scheduled' ? `${date} at ${time}` : 'Now',
       });
@@ -177,23 +151,13 @@ export const ScheduleModal: React.FC<ScheduleModalProps> = ({
           Meeting Link
           </label>
 
-          <div className="flex items-center gap-2">
-
           <input
             type="text"
             readOnly
-            value={`${getMeetingOrigin()}/meet/${generatedCode || 'Generate Link'}`}
-            className="flex-1 px-4 py-3 rounded-xl border border-slate-200 bg-slate-50"
+            value={`${getMeetingOrigin()}/meet/[generated-after-creation]`}
+            className="w-full px-4 py-3 rounded-xl border border-slate-200 bg-slate-50 text-slate-500"
           />
-
-          <button
-            type="button"
-            onClick={handleCopyLink}
-            className="px-4 py-3 rounded-xl bg-blue-600 text-white hover:bg-blue-700 transition-all"
-         >
-          {copied ? "Copied!" : "Copy"}
-        </button>
-       </div>
+          <p className="mt-1.5 text-xs text-slate-500">The secure meeting link is available after the meeting is created.</p>
       </div>
 
       <button
