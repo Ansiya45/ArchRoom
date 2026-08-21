@@ -11,6 +11,7 @@ interface CameraVideoProps {
   fallbackAvatar?: string;
   objectFit?: 'cover' | 'contain';
   isSelf?: boolean;
+  mediaStream?: MediaStream | null;
 }
 
 declare global {
@@ -35,6 +36,7 @@ export const CameraVideo: React.FC<CameraVideoProps> = ({
   fallbackAvatar = 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=800&auto=format&fit=crop&q=80',
   objectFit = 'cover',
   isSelf = true,
+  mediaStream,
 }) => {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const previewVideoRef = useRef<HTMLVideoElement | null>(null);
@@ -42,6 +44,7 @@ export const CameraVideo: React.FC<CameraVideoProps> = ({
   const bgImageRef = useRef<HTMLImageElement | null>(null);
   const avatarImgRef = useRef<HTMLImageElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
+  const ownsStreamRef = useRef(false);
   const cameraRequestedRef = useRef(false);
   const cameraEnabledRef = useRef(isCameraOn);
   const mountedRef = useRef(true);
@@ -91,6 +94,12 @@ export const CameraVideo: React.FC<CameraVideoProps> = ({
   // camera only enables/disables its video track, avoiding slow hardware restarts.
   useEffect(() => {
     async function startCamera() {
+      if (mediaStream !== undefined) {
+        ownsStreamRef.current = false;
+        streamRef.current = mediaStream;
+        setStream(mediaStream);
+        return;
+      }
       if (!isCameraOn || !isSelf) {
         streamRef.current?.getVideoTracks().forEach((track) => {
           track.enabled = false;
@@ -133,6 +142,7 @@ export const CameraVideo: React.FC<CameraVideoProps> = ({
           });
 
           streamRef.current = mediaStream;
+          ownsStreamRef.current = true;
           activeCameraStreams.add(mediaStream);
           setStream(mediaStream);
 
@@ -155,15 +165,17 @@ export const CameraVideo: React.FC<CameraVideoProps> = ({
     }
 
     startCamera();
-  }, [isCameraOn, isSelf]);
+  }, [isCameraOn, isSelf, mediaStream]);
 
   useEffect(() => {
     mountedRef.current = true;
     return () => {
       mountedRef.current = false;
       const currentStream = streamRef.current;
-      currentStream?.getTracks().forEach((track) => track.stop());
-      if (currentStream) activeCameraStreams.delete(currentStream);
+      if (ownsStreamRef.current) {
+        currentStream?.getTracks().forEach((track) => track.stop());
+        if (currentStream) activeCameraStreams.delete(currentStream);
+      }
       streamRef.current = null;
     };
   }, []);
@@ -173,6 +185,9 @@ export const CameraVideo: React.FC<CameraVideoProps> = ({
     videoElements.forEach((videoElement) => {
       if (videoElement && videoElement.srcObject !== stream) {
         videoElement.srcObject = stream;
+        // Remote audio/video may arrive after the element was rendered.
+        // Explicit play handles browsers that do not resume automatically.
+        void videoElement.play().catch(() => undefined);
       }
     });
   }, [stream]);
@@ -240,8 +255,7 @@ export const CameraVideo: React.FC<CameraVideoProps> = ({
       }
 
       // Check if live camera video is active
-      const isVideoActive =
-        isSelf && stream && video && video.readyState >= 2 && !hasError;
+      const isVideoActive = stream && video && video.readyState >= 2 && !hasError;
 
       if (isVideoActive && selfieSeg && isAiSegmentationReady) {
         // AI Segmentation Path with MediaPipe
@@ -418,15 +432,15 @@ export const CameraVideo: React.FC<CameraVideoProps> = ({
       {/* Mode A: Clean direct camera view when activeBg === 'none' */}
       {activeBg === 'none' ? (
         <div className="relative w-full h-full flex items-center justify-center bg-slate-950">
-          {!hasError && stream && isSelf ? (
+          {!hasError && stream ? (
             <video
               autoPlay
               playsInline
-              muted
+              muted={isSelf}
               ref={previewVideoRef}
               className={`w-full h-full ${
                 objectFit === 'cover' ? 'object-cover' : 'object-contain'
-              } -scale-x-100 transition-all duration-300`}
+              } ${isSelf ? '-scale-x-100' : ''} transition-all duration-300`}
             />
           ) : (
             <img

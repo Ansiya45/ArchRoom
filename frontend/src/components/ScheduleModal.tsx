@@ -1,7 +1,7 @@
 'use client';
 
-import React, { useState } from 'react';
-import { X, CalendarPlus } from 'lucide-react';
+import React, { useEffect, useState } from 'react';
+import { X, CalendarPlus, Copy, Check } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { trpc } from '../lib/trpc';
 
@@ -9,6 +9,13 @@ interface ScheduleModalProps {
   isOpen: boolean;
   onClose: () => void;
   onCreated: (meeting: { title: string; code: string; time: string }) => void;
+}
+
+const CODE_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+
+function generateMeetingCode() {
+  const values = crypto.getRandomValues(new Uint8Array(6));
+  return `YLM-${Array.from(values, (value) => CODE_ALPHABET[value % CODE_ALPHABET.length]).join('')}`;
 }
 
 export const ScheduleModal: React.FC<ScheduleModalProps> = ({
@@ -20,13 +27,30 @@ export const ScheduleModal: React.FC<ScheduleModalProps> = ({
   const [date, setDate] = useState('2026-07-22');
   const [time, setTime] = useState('14:00');
   const [loading, setLoading] = useState(false);
+  const [meetingCode, setMeetingCode] = useState(generateMeetingCode);
+  const [copied, setCopied] = useState(false);
   const [meetingMode, setMeetingMode] = useState<'instant' | 'scheduled'>('instant');
   const navigate = useNavigate();
 
   const getMeetingOrigin = () =>
     typeof window !== 'undefined' ? window.location.origin : 'http://localhost:3000';
 
+  const meetingLink = `${getMeetingOrigin()}/meet/${meetingCode}`;
+
+  useEffect(() => {
+    if (isOpen) {
+      setMeetingCode(generateMeetingCode());
+      setCopied(false);
+    }
+  }, [isOpen]);
+
   if (!isOpen) return null;
+
+  const handleCopyLink = async () => {
+    await navigator.clipboard.writeText(meetingLink);
+    setCopied(true);
+    window.setTimeout(() => setCopied(false), 2000);
+  };
 
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -37,6 +61,7 @@ export const ScheduleModal: React.FC<ScheduleModalProps> = ({
     try {
       const payload = await trpc.meetings.create.mutate({
         title: title || 'Quick YLAAM-MEET Meeting',
+        meetingCode,
         scheduledAt: meetingMode === 'scheduled' ? `${date}T${time}:00Z` : '',
         startNow: meetingMode === 'instant',
       });
@@ -59,6 +84,7 @@ export const ScheduleModal: React.FC<ScheduleModalProps> = ({
       console.error(err);
       alert(err instanceof Error ? err.message : 'Something went wrong.');
       setLoading(false);
+      setMeetingCode(generateMeetingCode());
     }
   };
 
@@ -151,13 +177,24 @@ export const ScheduleModal: React.FC<ScheduleModalProps> = ({
           Meeting Link
           </label>
 
-          <input
-            type="text"
-            readOnly
-            value={`${getMeetingOrigin()}/meet/[generated-after-creation]`}
-            className="w-full px-4 py-3 rounded-xl border border-slate-200 bg-slate-50 text-slate-500"
-          />
-          <p className="mt-1.5 text-xs text-slate-500">The secure meeting link is available after the meeting is created.</p>
+          <div className="flex min-w-0 flex-col gap-2 sm:flex-row">
+            <input
+              type="text"
+              readOnly
+              value={meetingLink}
+              onFocus={(event) => event.currentTarget.select()}
+              className="min-w-0 flex-1 px-4 py-3 rounded-xl border border-slate-200 bg-slate-50 text-slate-700 font-mono text-sm"
+            />
+            <button
+              type="button"
+              onClick={() => void handleCopyLink()}
+              className="shrink-0 inline-flex items-center justify-center gap-2 rounded-xl bg-slate-800 px-4 py-3 text-sm font-semibold text-white hover:bg-slate-700"
+            >
+              {copied ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
+              {copied ? 'Copied' : 'Copy'}
+            </button>
+          </div>
+          <p className="mt-1.5 text-xs text-slate-500">This exact link becomes active when you create the meeting.</p>
       </div>
 
       <button

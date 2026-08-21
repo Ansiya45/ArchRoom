@@ -13,6 +13,8 @@ interface VideoGridProps {
   onTogglePin: (id: string) => void;
   onToggleMute: (id: string) => void;
   onSelectSpeaker: (id: string) => void;
+  localStream?: MediaStream | null;
+  remoteStreams?: Record<string, MediaStream>;
 }
 
 export const VideoGrid: React.FC<VideoGridProps> = ({
@@ -24,6 +26,8 @@ export const VideoGrid: React.FC<VideoGridProps> = ({
   onTogglePin,
   onToggleMute,
   onSelectSpeaker,
+  localStream,
+  remoteStreams = {},
 }) => {
   // Determine active main speaker
   const mainParticipant =
@@ -57,6 +61,7 @@ export const VideoGrid: React.FC<VideoGridProps> = ({
                 onTogglePin={onTogglePin}
                 onToggleMute={onToggleMute}
                 isSelf={mainParticipant.id === 'user-self'}
+                mediaStream={mainParticipant.id === 'user-self' ? localStream : remoteStreams[mainParticipant.id]}
               />
             ) : (
               <div className="w-full h-full bg-white/60 border border-white rounded-3xl flex items-center justify-center text-slate-500 backdrop-blur-xl shadow-xl">
@@ -95,6 +100,7 @@ export const VideoGrid: React.FC<VideoGridProps> = ({
                       onTogglePin={onTogglePin}
                       onToggleMute={onToggleMute}
                       isSelf={p.id === 'user-self'}
+                      mediaStream={p.id === 'user-self' ? localStream : remoteStreams[p.id]}
                     />
                   </div>
                 ))}
@@ -130,6 +136,7 @@ export const VideoGrid: React.FC<VideoGridProps> = ({
                   onTogglePin={onTogglePin}
                   onToggleMute={onToggleMute}
                   isSelf={p.id === 'user-self'}
+                  mediaStream={p.id === 'user-self' ? localStream : remoteStreams[p.id]}
                 />
               </div>
             ))}

@@ -23,6 +23,7 @@ interface VideoCardProps {
   onToggleMute?: (id: string) => void;
   isSelf?: boolean;
   activeBg?: BackgroundChoice;
+  mediaStream?: MediaStream | null;
 }
 
 export const VideoCard: React.FC<VideoCardProps> = ({
@@ -32,6 +33,7 @@ export const VideoCard: React.FC<VideoCardProps> = ({
   onToggleMute,
   isSelf = false,
   activeBg = 'none',
+  mediaStream,
 }) => {
   const {
     id,
@@ -108,14 +110,15 @@ export const VideoCard: React.FC<VideoCardProps> = ({
             </div>
           </div>
         </div>
-      ) : isCameraOn ? (
+      ) : isCameraOn || Boolean(mediaStream?.getVideoTracks().length) ? (
         /* Camera Video View */
         <div className="absolute inset-0 bg-slate-900 overflow-hidden">
           <CameraVideo
-            isCameraOn={isCameraOn}
+            isCameraOn={isCameraOn || Boolean(mediaStream?.getVideoTracks().length)}
             activeBg={activeBg}
             fallbackAvatar={avatar}
             isSelf={isSelf || id === 'user-self'}
+            mediaStream={mediaStream}
           />
           {/* Subtle gradient vignette */}
           <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-black/20 pointer-events-none z-10" />

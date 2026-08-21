@@ -10,6 +10,7 @@ export const meetingsRouter = t.router({
     .input(
       z.object({
         title: z.string().min(1),
+        meetingCode: z.string().regex(/^YLM-[A-Z2-9]{6}$/).optional(),
         scheduledAt: z.string().datetime().optional().or(z.literal('')).optional(),
         startNow: z.boolean().default(false),
       })

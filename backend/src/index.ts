@@ -4,6 +4,7 @@ import { env } from './env.js';
 import { createContext } from './trpc/context.js';
 import { appRouter } from './trpc/router.js';
 import { attachWhiteboardServer } from './realtime/whiteboard.js';
+import { attachCallServer } from './realtime/call.js';
 
 const allowedOrigins = new Set(
   env.CORS_ALLOWED_ORIGINS.split(',')
@@ -29,6 +30,7 @@ const server = createHTTPServer({
 });
 
 attachWhiteboardServer(server);
+attachCallServer(server);
 
 server.listen(env.PORT, () => {
   console.log(`YLAAM-MEET tRPC backend listening on http://localhost:${env.PORT}`);

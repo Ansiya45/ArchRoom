@@ -29,6 +29,7 @@ import { trpc } from '@/lib/trpc';
 import { getMeetingSession, storeMeetingSession } from '@/lib/meetingSession';
 import { useSharedWhiteboard } from '@/hooks/useSharedWhiteboard';
 import { getStoredUser } from '@/lib/auth';
+import { useWebRtcMeeting } from '@/hooks/useWebRtcMeeting';
 
 interface MeetingRoomProps {
   meetingCode?: string;
@@ -39,6 +40,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
 }) => {
   const navigate = useNavigate();
   const meeting = useMeeting(meetingCode);
+  const call = useWebRtcMeeting(meetingCode, meeting.inMeeting, meeting.isMicOn, meeting.isCameraOn);
   const sharedWhiteboard = useSharedWhiteboard(meetingCode, meeting.inMeeting);
   const [isBgPickerOpen, setIsBgPickerOpen] = useState<boolean>(false);
   const [isScreenShareModalOpen, setIsScreenShareModalOpen] = useState<boolean>(false);
@@ -282,6 +284,8 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
             onTogglePin={meeting.togglePinParticipant}
             onToggleMute={meeting.toggleMuteParticipant}
             onSelectSpeaker={meeting.setActiveSpeakerId}
+            localStream={call.localStream}
+            remoteStreams={call.remoteStreams}
           />
 
           {/* BOTTOM TOOLBAR CONTROLS (Below Video Grid in center column) */}

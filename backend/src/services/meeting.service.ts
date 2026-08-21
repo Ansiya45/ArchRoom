@@ -5,6 +5,7 @@ import { meetings, meetingParticipants, users } from '../db/schema.js';
 
 export type CreateMeetingInput = {
   title: string;
+  meetingCode?: string;
   scheduledAt?: string | null;
   startNow?: boolean;
 };
@@ -21,7 +22,9 @@ export class MeetingService {
       throw new TRPCError({ code: 'BAD_REQUEST', message: 'Meeting title is required' });
     }
 
-    const code = await this.generateUniqueMeetingCode();
+    const code = input.meetingCode
+      ? await this.validateAvailableMeetingCode(input.meetingCode)
+      : await this.generateUniqueMeetingCode();
 
     const meeting = await db.transaction(async (tx) => {
       const [createdMeeting] = await tx
@@ -359,5 +362,16 @@ export class MeetingService {
     }
 
     throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: 'Unable to allocate a meeting code' });
+  }
+
+  private async validateAvailableMeetingCode(meetingCode: string) {
+    const code = meetingCode.trim().toUpperCase();
+    const existing = await db.query.meetings.findFirst({
+      where: eq(meetings.meetingCode, code),
+    });
+    if (existing) {
+      throw new TRPCError({ code: 'CONFLICT', message: 'Meeting code is already in use. Please try again.' });
+    }
+    return code;
   }
 }
