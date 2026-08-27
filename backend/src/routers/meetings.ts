@@ -96,13 +96,33 @@ export const meetingsRouter = t.router({
       return meetingService.updateGuestName(input.meetingCode, input.participantId, input.guestName);
     }),
 
-  leave: protectedProcedure
+  leave: t.procedure
     .input(
       z.object({
         meetingCode: z.string().min(1),
+        participantId: z.string().uuid().optional(),
       })
     )
     .mutation(async ({ input, ctx }) => {
-      return meetingService.leaveMeeting(input.meetingCode, ctx.user!.id);
+      return meetingService.leaveMeeting(input.meetingCode, {
+        userId: ctx.user?.id,
+        participantId: input.participantId,
+      });
+    }),
+
+  rejoin: t.procedure
+    .input(z.object({ meetingCode: z.string().min(1), participantId: z.string().uuid() }))
+    .mutation(({ input, ctx }) => {
+      return meetingService.rejoinMeeting(input.meetingCode, input.participantId, ctx.user?.id);
+    }),
+
+  end: protectedProcedure
+    .input(z.object({ meetingCode: z.string().min(1) }))
+    .mutation(({ input, ctx }) => meetingService.endMeeting(input.meetingCode, ctx.user.id)),
+
+  removeParticipant: protectedProcedure
+    .input(z.object({ meetingCode: z.string().min(1), participantId: z.string().uuid() }))
+    .mutation(async ({ input, ctx }) => {
+      return meetingService.removeParticipant(input.meetingCode, input.participantId, ctx.user!.id);
     }),
 });

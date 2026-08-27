@@ -1,6 +1,6 @@
 'use client';
 
-import React from 'react';
+import React, { useEffect, useRef } from 'react';
 import {
   Mic,
   MicOff,
@@ -25,6 +25,17 @@ interface VideoCardProps {
   activeBg?: BackgroundChoice;
   mediaStream?: MediaStream | null;
 }
+
+const SharedScreenVideo: React.FC<{ stream: MediaStream; muted: boolean }> = ({ stream, muted }) => {
+  const ref = useRef<HTMLVideoElement | null>(null);
+  useEffect(() => {
+    if (ref.current && ref.current.srcObject !== stream) {
+      ref.current.srcObject = stream;
+      void ref.current.play().catch(() => undefined);
+    }
+  }, [stream]);
+  return <video ref={ref} autoPlay playsInline muted={muted} className="absolute inset-0 h-full w-full bg-black object-contain" />;
+};
 
 export const VideoCard: React.FC<VideoCardProps> = ({
   participant,
@@ -60,7 +71,7 @@ export const VideoCard: React.FC<VideoCardProps> = ({
     >
       {/* Screen Share / Active Video Canvas Mock */}
       {isScreenSharing ? (
-        <div className="absolute inset-0 bg-slate-950 flex flex-col justify-between p-4 overflow-hidden">
+        mediaStream ? <SharedScreenVideo stream={mediaStream} muted={isSelf} /> : <div className="absolute inset-0 bg-slate-950 flex flex-col justify-between p-4 overflow-hidden">
           {/* Mock Blueprint / Code Slide Screen */}
           <div className="absolute inset-0 bg-gradient-to-br from-slate-900 via-blue-950/40 to-slate-950 opacity-90" />
           

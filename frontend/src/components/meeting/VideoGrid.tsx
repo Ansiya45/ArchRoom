@@ -15,6 +15,9 @@ interface VideoGridProps {
   onSelectSpeaker: (id: string) => void;
   localStream?: MediaStream | null;
   remoteStreams?: Record<string, MediaStream>;
+  remoteBackgrounds?: Record<string, BackgroundChoice>;
+  remoteScreenShares?: Record<string, boolean>;
+  localDisplayStream?: MediaStream | null;
 }
 
 export const VideoGrid: React.FC<VideoGridProps> = ({
@@ -28,10 +31,16 @@ export const VideoGrid: React.FC<VideoGridProps> = ({
   onSelectSpeaker,
   localStream,
   remoteStreams = {},
+  remoteBackgrounds = {},
+  remoteScreenShares = {},
+  localDisplayStream,
 }) => {
+  const participantBackground = (participantId: string) =>
+    participantId === 'user-self' ? activeBg : remoteBackgrounds[participantId] || 'none';
   // Determine active main speaker
   const mainParticipant =
     participants.find((p) => p.id === pinnedParticipantId) ||
+    participants.find((p) => p.id === 'user-self' ? Boolean(localDisplayStream) : Boolean(remoteScreenShares[p.id])) ||
     participants.find((p) => p.id === activeSpeakerId) ||
     participants.find((p) => p.isScreenSharing) ||
     participants[0];
@@ -55,13 +64,14 @@ export const VideoGrid: React.FC<VideoGridProps> = ({
                 participant={{
                   ...mainParticipant,
                   isPinned: mainParticipant.id === pinnedParticipantId,
+                  isScreenSharing: mainParticipant.id === 'user-self' ? Boolean(localDisplayStream) : Boolean(remoteScreenShares[mainParticipant.id]),
                 }}
                 isMainStage={true}
-                activeBg={activeBg}
+                activeBg={participantBackground(mainParticipant.id)}
                 onTogglePin={onTogglePin}
                 onToggleMute={onToggleMute}
                 isSelf={mainParticipant.id === 'user-self'}
-                mediaStream={mainParticipant.id === 'user-self' ? localStream : remoteStreams[mainParticipant.id]}
+                mediaStream={mainParticipant.id === 'user-self' ? (localDisplayStream || localStream) : remoteStreams[mainParticipant.id]}
               />
             ) : (
               <div className="w-full h-full bg-white/60 border border-white rounded-3xl flex items-center justify-center text-slate-500 backdrop-blur-xl shadow-xl">
@@ -94,13 +104,14 @@ export const VideoGrid: React.FC<VideoGridProps> = ({
                       participant={{
                         ...p,
                         isPinned: p.id === pinnedParticipantId,
+                        isScreenSharing: p.id === 'user-self' ? Boolean(localDisplayStream) : Boolean(remoteScreenShares[p.id]),
                       }}
                       isMainStage={false}
-                      activeBg={activeBg}
+                      activeBg={participantBackground(p.id)}
                       onTogglePin={onTogglePin}
                       onToggleMute={onToggleMute}
                       isSelf={p.id === 'user-self'}
-                      mediaStream={p.id === 'user-self' ? localStream : remoteStreams[p.id]}
+                      mediaStream={p.id === 'user-self' ? (localDisplayStream || localStream) : remoteStreams[p.id]}
                     />
                   </div>
                 ))}
@@ -130,13 +141,14 @@ export const VideoGrid: React.FC<VideoGridProps> = ({
                   participant={{
                     ...p,
                     isPinned: p.id === pinnedParticipantId,
+                    isScreenSharing: p.id === 'user-self' ? Boolean(localDisplayStream) : Boolean(remoteScreenShares[p.id]),
                   }}
                   isMainStage={false}
-                  activeBg={activeBg}
+                  activeBg={participantBackground(p.id)}
                   onTogglePin={onTogglePin}
                   onToggleMute={onToggleMute}
                   isSelf={p.id === 'user-self'}
-                  mediaStream={p.id === 'user-self' ? localStream : remoteStreams[p.id]}
+                  mediaStream={p.id === 'user-self' ? (localDisplayStream || localStream) : remoteStreams[p.id]}
                 />
               </div>
             ))}

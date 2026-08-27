@@ -65,7 +65,7 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ messages, onSendMessage, o
       {/* Encryption Banner */}
       <div className="px-4 py-2 bg-blue-50/80 border-b border-blue-100/60 flex items-center space-x-2 text-xs text-blue-700 flex-shrink-0">
         <Lock className="w-3.5 h-3.5 text-blue-600 flex-shrink-0" />
-        <span className="font-medium">Messages are end-to-end encrypted for meeting attendees.</span>
+        <span className="font-medium">Messages are visible to everyone currently in this meeting.</span>
       </div>
 
       {/* Messages Scroll View */}

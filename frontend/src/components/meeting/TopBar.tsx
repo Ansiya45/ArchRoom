@@ -6,6 +6,7 @@ import {
   UserPlus,
   Grid,
   Maximize2,
+  PhoneOff,
 } from 'lucide-react';
 import { LayoutMode } from '@/types/meeting';
 
@@ -20,6 +21,8 @@ interface TopBarProps {
   layoutMode: LayoutMode;
   onChangeLayout: (mode: LayoutMode) => void;
   inviteLink?: string;
+  isHost?: boolean;
+  onEndMeeting?: () => void;
 }
 
 const formatRecordingTime = (ms: number = 0) => {
@@ -38,6 +41,8 @@ export const TopBar: React.FC<TopBarProps> = ({
   onOpenInfo,
   layoutMode,
   onChangeLayout,
+  isHost = false,
+  onEndMeeting,
 }) => {
   return (
     <header className="w-full h-16 flex-shrink-0 px-4 md:px-6 backdrop-blur-xl bg-white/60 border-b border-blue-100/50 shadow-sm flex items-center justify-between text-slate-800 select-none z-50">
@@ -104,6 +109,17 @@ export const TopBar: React.FC<TopBarProps> = ({
           <UserPlus className="w-4 h-4" />
           <span>Invite</span>
         </button>
+
+        {isHost && (
+          <button
+            onClick={onEndMeeting}
+            className="px-3 sm:px-4 py-2 bg-rose-600 hover:bg-rose-700 text-white rounded-xl text-xs sm:text-sm font-semibold shadow-md shadow-rose-200 transition-all duration-200 active:scale-95 flex items-center space-x-1.5"
+            title="End the meeting for everyone"
+          >
+            <PhoneOff className="w-4 h-4" />
+            <span className="hidden sm:inline">End meeting</span>
+          </button>
+        )}
       </div>
     </header>
   );

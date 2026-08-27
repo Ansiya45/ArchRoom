@@ -12,7 +12,6 @@ import { ParticipantsPanel } from './ParticipantsPanel';
 import { MeetingInfo } from './MeetingInfo';
 import { SettingsPanel } from './SettingsPanel';
 import { BackgroundPickerModal } from './BackgrounPickerModal';
-import { ScreenShareModal } from './ScreenShareModal';
 import { WaitingRoom } from './WaitingRoom';
 import { stopAllCameraStreams } from './CameraVideo';
 import { Whiteboard } from './Whiteboard';
@@ -26,10 +25,12 @@ import {
   UserCheck,
 } from 'lucide-react';
 import { trpc } from '@/lib/trpc';
-import { getMeetingSession, storeMeetingSession } from '@/lib/meetingSession';
+import { clearMeetingSession, getMeetingSession, storeMeetingSession } from '@/lib/meetingSession';
 import { useSharedWhiteboard } from '@/hooks/useSharedWhiteboard';
 import { getStoredUser } from '@/lib/auth';
 import { useWebRtcMeeting } from '@/hooks/useWebRtcMeeting';
+import { useScreenRecorder } from '@/hooks/useScreenRecorder';
+import { RecordingsModal } from './RecordingsModal';
 
 interface MeetingRoomProps {
   meetingCode?: string;
@@ -40,13 +41,28 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
 }) => {
   const navigate = useNavigate();
   const meeting = useMeeting(meetingCode);
-  const call = useWebRtcMeeting(meetingCode, meeting.inMeeting, meeting.isMicOn, meeting.isCameraOn);
+  const call = useWebRtcMeeting(
+    meetingCode,
+    meeting.inMeeting,
+    meeting.isMicOn,
+    meeting.isCameraOn,
+    meeting.deviceSettings.backgroundBlur
+  );
   const sharedWhiteboard = useSharedWhiteboard(meetingCode, meeting.inMeeting);
   const [isBgPickerOpen, setIsBgPickerOpen] = useState<boolean>(false);
-  const [isScreenShareModalOpen, setIsScreenShareModalOpen] = useState<boolean>(false);
   const [admission, setAdmission] = useState<'idle' | 'pending' | 'denied'>('idle');
   const [isHost, setIsHost] = useState(false);
   const [joinRequests, setJoinRequests] = useState<Array<{ id: string; name: string }>>([]);
+  const [isRecordingsOpen, setIsRecordingsOpen] = useState(false);
+  const recorder = useScreenRecorder();
+
+  useEffect(() => {
+    if (recorder.preview) setIsRecordingsOpen(true);
+  }, [recorder.preview]);
+
+  useEffect(() => {
+    if (sharedWhiteboard.closeSignal > 0) meeting.setIsWhiteboardOpen(false);
+  }, [sharedWhiteboard.closeSignal]);
 
   useEffect(() => {
     void trpc.meetings.getByCode.query({ meetingCode }).then(({ meeting: room }) => {
@@ -73,7 +89,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
           setAdmission('denied');
         }
       } catch {
-        setAdmission('denied');
+        // Temporary connectivity problems must not reject the participant.
       }
     };
 
@@ -116,10 +132,88 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
     return () => window.clearInterval(timer);
   }, [meeting.inMeeting, meetingCode]);
 
-  const handleLeave = () => {
+  useEffect(() => {
+    if (!meeting.inMeeting) return;
+    let checking = false;
+    const checkMembership = async () => {
+      if (checking) return;
+      checking = true;
+      try {
+        const session = getMeetingSession(meetingCode);
+        if (session?.participantId) {
+          const status = await trpc.meetings.admissionStatus.query({
+            meetingCode,
+            participantId: session.participantId,
+          });
+          if (status.meeting.status === 'ended' || status.leftAt || status.admission !== 'admitted') {
+            clearMeetingSession(meetingCode);
+            stopAllCameraStreams();
+            meeting.leaveMeeting();
+            alert(status.meeting.status === 'ended' ? 'The host ended the meeting.' : 'The host removed you from the meeting.');
+            navigate('/');
+          }
+        } else {
+          const { meeting: room } = await trpc.meetings.getByCode.query({ meetingCode });
+          if (room.status === 'ended') {
+            stopAllCameraStreams();
+            meeting.leaveMeeting();
+            alert('The meeting has ended.');
+            navigate('/');
+          }
+        }
+      } catch {
+        // Keep the call active during temporary backend/network interruptions.
+      } finally {
+        checking = false;
+      }
+    };
+    void checkMembership();
+    const timer = window.setInterval(() => void checkMembership(), 2000);
+    return () => window.clearInterval(timer);
+  }, [meeting.inMeeting, meetingCode]);
+
+  const handleLeave = async () => {
+    const session = getMeetingSession(meetingCode);
+    try {
+      await trpc.meetings.leave.mutate({ meetingCode, participantId: session?.participantId });
+    } catch (error) {
+      alert(error instanceof Error ? error.message : 'Unable to leave the meeting.');
+      return;
+    }
     stopAllCameraStreams();
     meeting.leaveMeeting();
     navigate('/');
+  };
+
+  const handleEndMeeting = async () => {
+    if (!isHost || !window.confirm('End this meeting for everyone? Participants will not be able to rejoin.')) return;
+    try {
+      await trpc.meetings.end.mutate({ meetingCode });
+      clearMeetingSession(meetingCode);
+      stopAllCameraStreams();
+      meeting.leaveMeeting();
+      navigate('/');
+    } catch (error) {
+      alert(error instanceof Error ? error.message : 'Unable to end the meeting.');
+    }
+  };
+
+  const removeParticipant = async (participantId: string) => {
+    if (!window.confirm('Remove this participant from the meeting?')) return;
+    await trpc.meetings.removeParticipant.mutate({ meetingCode, participantId });
+  };
+
+  const toggleRecording = async () => {
+    if (!isHost) return;
+    if (recorder.isRecording) {
+      recorder.stop();
+      return;
+    }
+    try {
+      await recorder.start();
+    } catch (error) {
+      alert(error instanceof Error ? error.message : 'Unable to start screen recording.');
+    }
   };
 
   const handleJoin = async () => {
@@ -130,6 +224,10 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
       const existingSession = getMeetingSession(meeting.meetingCode);
 
       if (existingSession?.participantId) {
+        const rejoined = await trpc.meetings.rejoin.mutate({
+          meetingCode: meeting.meetingCode,
+          participantId: existingSession.participantId,
+        });
         try {
           await trpc.meetings.updateGuestName.mutate({
             meetingCode: meeting.meetingCode,
@@ -139,12 +237,8 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
         } catch {
           // Registered users store their name on the user account, not guest_name.
         }
-        const status = await trpc.meetings.admissionStatus.query({
-          meetingCode: meeting.meetingCode,
-          participantId: existingSession.participantId,
-        });
-        if (status.admission === 'admitted') meeting.joinMeeting();
-        else setAdmission(status.admission === 'denied' ? 'denied' : 'pending');
+        if (rejoined.participant.admission === 'admitted') meeting.joinMeeting();
+        else setAdmission(rejoined.participant.admission === 'denied' ? 'denied' : 'pending');
       } else {
         const joined = await trpc.meetings.join.mutate({
           meetingCode: meeting.meetingCode,
@@ -248,13 +342,15 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
         meetingTitle={meeting.meetingTitle}
         meetingCode={meeting.meetingCode}
         durationSeconds={meeting.durationSeconds}
-        isRecording={meeting.isRecording}
-        recordingMs={meeting.recordingMs}
+        isRecording={recorder.isRecording}
+        recordingMs={recorder.recordingMs}
         onOpenInfo={() => meeting.setIsInfoOpen(true)}
         onOpenLeave={() => meeting.setIsLeaveModalOpen(true)}
         layoutMode={meeting.layoutMode}
         onChangeLayout={meeting.setLayoutMode}
         inviteLink={meeting.meetingInfo.inviteLink}
+        isHost={isHost}
+        onEndMeeting={() => void handleEndMeeting()}
       />
 
       {/* MAIN CONTENT AREA: Left Panel + Video Stage + Right Sidebar */}
@@ -267,11 +363,21 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
           onToggleBgPicker={() => setIsBgPickerOpen((prev) => !prev)}
           activeSidebarTab={meeting.activeSidebarTab}
           onToggleSidebarTab={meeting.toggleSidebarTab}
-          isRecording={meeting.isRecording}
-          onToggleRecording={meeting.toggleRecording}
+          isRecording={recorder.isRecording}
+          onToggleRecording={() => void toggleRecording()}
           onOpenSettings={() => meeting.setIsSettingsOpen(true)}
           participantsCount={meeting.participants.length}
-        />
+          isHost={isHost}
+          onOpenRecordings={() => setIsRecordingsOpen(true)}
+      />
+
+      <RecordingsModal
+        isOpen={isHost && isRecordingsOpen}
+        meetingCode={meetingCode}
+        preview={recorder.preview}
+        onClose={() => setIsRecordingsOpen(false)}
+        onDiscardPreview={recorder.clearPreview}
+      />
 
         {/* CENTER VIDEO GRID & STAGE */}
         <div className="flex-1 h-full min-h-0 overflow-hidden flex flex-col relative">
@@ -286,6 +392,9 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
             onSelectSpeaker={meeting.setActiveSpeakerId}
             localStream={call.localStream}
             remoteStreams={call.remoteStreams}
+            remoteBackgrounds={call.remoteBackgrounds}
+            remoteScreenShares={call.remoteScreenShares}
+            localDisplayStream={call.displayStream}
           />
 
           {/* BOTTOM TOOLBAR CONTROLS (Below Video Grid in center column) */}
@@ -294,12 +403,15 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
             onToggleMic={meeting.toggleMic}
             isCameraOn={meeting.isCameraOn}
             onToggleCamera={meeting.toggleCamera}
-            isScreenSharing={meeting.isScreenSharing}
+            isScreenSharing={call.isScreenSharing}
             onToggleScreenSharing={() => {
-              if (meeting.isScreenSharing) {
-                meeting.stopScreenSharing();
+              if (call.isScreenSharing) {
+                call.stopScreenShare();
               } else {
-                setIsScreenShareModalOpen(true);
+                void call.startScreenShare().catch((error) => {
+                  if (error instanceof DOMException && error.name === 'NotAllowedError') return;
+                  alert(error instanceof Error ? error.message : 'Unable to share the screen.');
+                });
               }
             }}
             isHandRaised={meeting.isHandRaised}
@@ -308,16 +420,19 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
           />
 
           {/* Collaborative Whiteboard Canvas Overlay */}
-          {(meeting.isWhiteboardOpen || sharedWhiteboard.shared) && (
+          {meeting.isWhiteboardOpen && (
             <Whiteboard
-              onClose={() => meeting.setIsWhiteboardOpen(false)}
+              onClose={() => {
+                meeting.setIsWhiteboardOpen(false);
+                if (sharedWhiteboard.isHost && sharedWhiteboard.shared) sharedWhiteboard.closeShared();
+              }}
               shared={sharedWhiteboard.shared}
               connected={sharedWhiteboard.connected}
               connectionError={sharedWhiteboard.connectionError}
               isHost={sharedWhiteboard.isHost}
-              canEdit={sharedWhiteboard.connected ? sharedWhiteboard.canEdit : true}
+              canEdit={!sharedWhiteboard.shared || !sharedWhiteboard.connected ? true : sharedWhiteboard.canEdit}
               participants={sharedWhiteboard.participants}
-              remoteSnapshot={sharedWhiteboard.snapshot}
+              remoteSnapshot={sharedWhiteboard.shared ? sharedWhiteboard.snapshot : null}
               onToggleShare={sharedWhiteboard.setShared}
               onGrantAccess={sharedWhiteboard.grantAccess}
               onPublishSnapshot={sharedWhiteboard.publishSnapshot}
@@ -330,8 +445,8 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
           <div className="w-full sm:w-80 md:w-96 h-full min-h-0 flex-shrink-0 z-30 transition-all duration-300 animate-slideLeft">
             {meeting.activeSidebarTab === 'chat' && (
               <ChatPanel
-                messages={meeting.messages}
-                onSendMessage={meeting.sendMessage}
+                messages={call.chatMessages}
+                onSendMessage={(text) => call.sendChatMessage(text)}
                 onClose={() => meeting.toggleSidebarTab(null)}
               />
             )}
@@ -343,6 +458,8 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
                 onTogglePin={meeting.togglePinParticipant}
                 onClose={() => meeting.toggleSidebarTab(null)}
                 onOpenInfo={() => meeting.setIsInfoOpen(true)}
+                isHost={isHost}
+                onRemoveParticipant={(participantId) => void removeParticipant(participantId)}
               />
             )}
 
@@ -434,16 +551,6 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
             meeting.setDeviceSettings((prev) => ({ ...prev, backgroundBlur: bg }))
           }
           onClose={() => setIsBgPickerOpen(false)}
-        />
-      )}
-
-      {isScreenShareModalOpen && (
-        <ScreenShareModal
-          onStartShare={(item) => {
-            meeting.startScreenSharing(item.title);
-            setIsScreenShareModalOpen(false);
-          }}
-          onClose={() => setIsScreenShareModalOpen(false)}
         />
       )}
 

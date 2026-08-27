@@ -17,6 +17,7 @@ type Room = {
   editors: Set<string>;
   shared: boolean;
   snapshot: string | null;
+  closeTimer: ReturnType<typeof setTimeout> | null;
 };
 
 const rooms = new Map<string, Room>();
@@ -120,6 +121,7 @@ export function attachWhiteboardServer(server: Server) {
           editors: new Set<string>(),
           shared: false,
           snapshot: null,
+          closeTimer: null,
         };
         rooms.set(identity.meetingCode, currentRoom);
         currentClient = { socket, key: identity.key, name: identity.name, isHost: identity.isHost };
@@ -131,8 +133,23 @@ export function attachWhiteboardServer(server: Server) {
           try {
             const next = JSON.parse(nextRaw.toString());
             if (next.type === 'share' && currentClient.isHost) {
+              if (next.shared && currentRoom.closeTimer) {
+                clearTimeout(currentRoom.closeTimer);
+                currentRoom.closeTimer = null;
+              }
               currentRoom.shared = Boolean(next.shared);
               broadcast(currentRoom);
+            } else if (next.type === 'close' && currentClient.isHost) {
+              if (currentRoom.closeTimer) clearTimeout(currentRoom.closeTimer);
+              const room = currentRoom;
+              room.closeTimer = setTimeout(() => {
+                room.closeTimer = null;
+                room.shared = false;
+                room.clients.forEach((client) => {
+                  if (!client.isHost) send(client.socket, { type: 'close' });
+                });
+                broadcast(room);
+              }, 5000);
             } else if (next.type === 'grant' && currentClient.isHost && typeof next.participantId === 'string') {
               if (next.canEdit) currentRoom.editors.add(next.participantId);
               else currentRoom.editors.delete(next.participantId);
@@ -162,6 +179,7 @@ export function attachWhiteboardServer(server: Server) {
       if (!currentRoom || !currentClient) return;
       currentRoom.clients.delete(currentClient);
       if (currentRoom.clients.size === 0) {
+        if (currentRoom.closeTimer) clearTimeout(currentRoom.closeTimer);
         for (const [code, room] of rooms) {
           if (room === currentRoom) rooms.delete(code);
         }

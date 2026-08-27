@@ -2,16 +2,28 @@ import type { Server } from 'node:http';
 import { WebSocket, WebSocketServer } from 'ws';
 import { and, eq, isNull } from 'drizzle-orm';
 import { db } from '../db/index.js';
-import { meetingParticipants, meetings } from '../db/schema.js';
+import { meetingParticipants, meetings, users } from '../db/schema.js';
 import { verifyJwt } from '../utils/jwt.js';
 
 type CallClient = {
   socket: WebSocket;
   peerId: string;
   meetingCode: string;
+  background: BackgroundChoice;
+  name: string;
+  isHost: boolean;
+  screenSharing: boolean;
 };
 
+type BackgroundChoice = 'none' | 'blur' | 'office' | 'skyline' | 'studio';
+const BACKGROUNDS = new Set<BackgroundChoice>(['none', 'blur', 'office', 'skyline', 'studio']);
+
+function validBackground(value: unknown): BackgroundChoice {
+  return BACKGROUNDS.has(value as BackgroundChoice) ? value as BackgroundChoice : 'none';
+}
+
 const rooms = new Map<string, Map<string, CallClient>>();
+const chatHistory = new Map<string, Array<Record<string, unknown>>>();
 
 function send(socket: WebSocket, message: unknown) {
   if (socket.readyState === WebSocket.OPEN) socket.send(JSON.stringify(message));
@@ -50,7 +62,16 @@ async function identify(input: any) {
     });
   }
 
-  return participant ? { meetingCode, peerId: participant.id } : null;
+  if (!participant) return null;
+  const user = participant.userId
+    ? await db.query.users.findFirst({ where: eq(users.id, participant.userId) })
+    : null;
+  return {
+    meetingCode,
+    peerId: participant.id,
+    name: participant.guestName || user?.fullName || 'Participant',
+    isHost: participant.role === 'host',
+  };
 }
 
 export function attachCallServer(server: Server) {
@@ -76,17 +97,61 @@ export function attachCallServer(server: Server) {
           const room = rooms.get(identity.meetingCode) || new Map<string, CallClient>();
           const previous = room.get(identity.peerId);
           if (previous) previous.socket.close(4001, 'Connected from another session');
-          client = { socket, ...identity };
+          client = { socket, ...identity, background: validBackground(message.background), screenSharing: false };
           room.set(client.peerId, client);
           rooms.set(client.meetingCode, room);
 
-          send(socket, { type: 'peers', peerIds: [...room.keys()].filter((id) => id !== client!.peerId) });
+          send(socket, {
+            type: 'peers',
+            selfId: client.peerId,
+            messages: chatHistory.get(client.meetingCode) || [],
+            peers: [...room.values()]
+              .filter((peer) => peer.peerId !== client!.peerId)
+              .map((peer) => ({ peerId: peer.peerId, background: peer.background, screenSharing: peer.screenSharing })),
+          });
           room.forEach((peer) => {
-            if (peer.peerId !== client!.peerId) send(peer.socket, { type: 'peer-joined', peerId: client!.peerId });
+            if (peer.peerId !== client!.peerId) {
+              send(peer.socket, { type: 'peer-joined', peerId: client!.peerId, background: client!.background, screenSharing: false });
+            }
           });
           return;
         }
 
+        if (message.type === 'background') {
+          client.background = validBackground(message.background);
+          rooms.get(client.meetingCode)?.forEach((peer) => {
+            if (peer.peerId !== client!.peerId) {
+              send(peer.socket, { type: 'background', peerId: client!.peerId, background: client!.background });
+            }
+          });
+          return;
+        }
+        if (message.type === 'screen-share') {
+          client.screenSharing = Boolean(message.active);
+          rooms.get(client.meetingCode)?.forEach((peer) => {
+            if (peer.peerId !== client!.peerId) {
+              send(peer.socket, { type: 'screen-share', peerId: client!.peerId, active: client!.screenSharing });
+            }
+          });
+          return;
+        }
+        if (message.type === 'chat') {
+          const text = String(message.text || '').trim().slice(0, 4000);
+          if (!text) return;
+          const chatMessage = {
+            id: crypto.randomUUID(),
+            senderId: client.peerId,
+            senderName: client.name,
+            senderAvatar: `https://api.dicebear.com/9.x/initials/svg?seed=${encodeURIComponent(client.name)}`,
+            message: text,
+            timestamp: new Date().toISOString(),
+            isHost: client.isHost,
+          };
+          const history = [...(chatHistory.get(client.meetingCode) || []), chatMessage].slice(-200);
+          chatHistory.set(client.meetingCode, history);
+          rooms.get(client.meetingCode)?.forEach((peer) => send(peer.socket, { type: 'chat', message: chatMessage }));
+          return;
+        }
         if (!['offer', 'answer', 'ice'].includes(message.type)) return;
         const target = rooms.get(client.meetingCode)?.get(String(message.target));
         if (target) {
@@ -107,7 +172,10 @@ export function attachCallServer(server: Server) {
       if (!room || room.get(client.peerId)?.socket !== socket) return;
       room.delete(client.peerId);
       room.forEach((peer) => send(peer.socket, { type: 'peer-left', peerId: client!.peerId }));
-      if (room.size === 0) rooms.delete(client.meetingCode);
+      if (room.size === 0) {
+        rooms.delete(client.meetingCode);
+        chatHistory.delete(client.meetingCode);
+      }
     });
   });
 }

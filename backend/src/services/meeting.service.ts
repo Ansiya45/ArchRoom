@@ -98,6 +98,9 @@ export class MeetingService {
     if (!meeting) {
       throw new TRPCError({ code: 'NOT_FOUND', message: 'Meeting not found' });
     }
+    if (meeting.status === 'ended') {
+      throw new TRPCError({ code: 'FORBIDDEN', message: 'This meeting has ended' });
+    }
 
     if (identity.userId) {
       const existing = await db.query.meetingParticipants.findFirst({
@@ -110,6 +113,21 @@ export class MeetingService {
 
       if (existing) {
         return { ok: true, meeting, participant: existing };
+      }
+
+      const previouslyAdmitted = await db.query.meetingParticipants.findFirst({
+        where: and(
+          eq(meetingParticipants.meetingId, meeting.id),
+          eq(meetingParticipants.userId, identity.userId),
+          eq(meetingParticipants.admission, 'admitted')
+        ),
+      });
+      if (previouslyAdmitted) {
+        const [rejoined] = await db.update(meetingParticipants)
+          .set({ leftAt: null, joinedAt: new Date() })
+          .where(eq(meetingParticipants.id, previouslyAdmitted.id))
+          .returning();
+        return { ok: true, meeting, participant: rejoined };
       }
 
       const [participant] = await db
@@ -155,7 +173,7 @@ export class MeetingService {
       throw new TRPCError({ code: 'NOT_FOUND', message: 'Join request not found' });
     }
 
-    return { ok: true, admission: participant.admission, meeting };
+    return { ok: true, admission: participant.admission, leftAt: participant.leftAt, meeting };
   }
 
   async listPendingAdmissions(meetingCode: string, hostUserId: string) {
@@ -301,21 +319,71 @@ export class MeetingService {
     return { ok: true, participant };
   }
 
-  async leaveMeeting(meetingCode: string, userId: string) {
-    const normalizedCode = meetingCode.trim().toUpperCase();
-    const meeting = await db.query.meetings.findFirst({
-      where: eq(meetings.meetingCode, normalizedCode),
+  async leaveMeeting(meetingCode: string, identity: { userId?: string; participantId?: string }) {
+    const meeting = await this.requireMeeting(meetingCode);
+    const participant = await db.query.meetingParticipants.findFirst({
+      where: and(
+        eq(meetingParticipants.meetingId, meeting.id),
+        identity.userId
+          ? eq(meetingParticipants.userId, identity.userId)
+          : eq(meetingParticipants.id, identity.participantId || '00000000-0000-0000-0000-000000000000'),
+        isNull(meetingParticipants.leftAt)
+      ),
     });
+    if (!participant) throw new TRPCError({ code: 'NOT_FOUND', message: 'Active participant not found' });
 
-    if (!meeting) {
-      throw new TRPCError({ code: 'NOT_FOUND', message: 'Meeting not found' });
+    await db.update(meetingParticipants).set({ leftAt: new Date() }).where(eq(meetingParticipants.id, participant.id));
+    return { ok: true, meetingEnded: false };
+  }
+
+  async rejoinMeeting(meetingCode: string, participantId: string, userId?: string) {
+    const meeting = await this.requireMeeting(meetingCode);
+    if (meeting.status === 'ended') {
+      throw new TRPCError({ code: 'FORBIDDEN', message: 'This meeting has ended' });
     }
+    const participant = await db.query.meetingParticipants.findFirst({
+      where: and(
+        eq(meetingParticipants.id, participantId),
+        eq(meetingParticipants.meetingId, meeting.id),
+        eq(meetingParticipants.admission, 'admitted')
+      ),
+    });
+    if (!participant || (participant.userId && participant.userId !== userId)) {
+      throw new TRPCError({ code: 'FORBIDDEN', message: 'A new admission is required' });
+    }
+    const [rejoined] = await db.update(meetingParticipants)
+      .set({ leftAt: null, joinedAt: new Date() })
+      .where(eq(meetingParticipants.id, participant.id))
+      .returning();
+    return { ok: true, meeting, participant: rejoined };
+  }
 
-    await db
-      .update(meetingParticipants)
-      .set({ leftAt: new Date() })
-      .where(and(eq(meetingParticipants.meetingId, meeting.id), eq(meetingParticipants.userId, userId), isNull(meetingParticipants.leftAt)));
+  async endMeeting(meetingCode: string, hostUserId: string) {
+    const meeting = await this.requireHost(meetingCode, hostUserId);
+    const endedAt = new Date();
+    await db.transaction(async (tx) => {
+      await tx.update(meetings).set({ status: 'ended', updatedAt: endedAt }).where(eq(meetings.id, meeting.id));
+      await tx.update(meetingParticipants).set({ leftAt: endedAt }).where(and(
+        eq(meetingParticipants.meetingId, meeting.id),
+        isNull(meetingParticipants.leftAt)
+      ));
+    });
+    return { ok: true };
+  }
 
+  async removeParticipant(meetingCode: string, participantId: string, hostUserId: string) {
+    const meeting = await this.requireHost(meetingCode, hostUserId);
+    const [participant] = await db.update(meetingParticipants)
+      .set({ leftAt: new Date(), admission: 'denied' })
+      .where(and(
+        eq(meetingParticipants.id, participantId),
+        eq(meetingParticipants.meetingId, meeting.id),
+        eq(meetingParticipants.role, 'participant'),
+        eq(meetingParticipants.admission, 'admitted'),
+        isNull(meetingParticipants.leftAt)
+      ))
+      .returning();
+    if (!participant) throw new TRPCError({ code: 'NOT_FOUND', message: 'Active participant not found' });
     return { ok: true };
   }
 

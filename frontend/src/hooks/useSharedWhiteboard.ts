@@ -26,6 +26,7 @@ export function useSharedWhiteboard(meetingCode: string, enabled: boolean) {
   const [participants, setParticipants] = useState<WhiteboardParticipant[]>([]);
   const [snapshot, setSnapshot] = useState<string | null>(null);
   const [connectionError, setConnectionError] = useState<string | null>(null);
+  const [closeSignal, setCloseSignal] = useState(0);
 
   useEffect(() => {
     if (!enabled) return;
@@ -54,6 +55,9 @@ export function useSharedWhiteboard(meetingCode: string, enabled: boolean) {
         if (typeof message.snapshot === 'string') setSnapshot(message.snapshot);
       } else if (message.type === 'snapshot' && typeof message.data === 'string') {
         setSnapshot(message.data);
+      } else if (message.type === 'close') {
+        setShared(false);
+        setCloseSignal((value) => value + 1);
       } else if (message.type === 'error') {
         setConnectionError(String(message.message || 'Whiteboard connection rejected'));
       }
@@ -85,7 +89,9 @@ export function useSharedWhiteboard(meetingCode: string, enabled: boolean) {
     canEdit,
     participants,
     snapshot,
+    closeSignal,
     setShared: (value: boolean) => send({ type: 'share', shared: value }),
+    closeShared: () => send({ type: 'close', delayMs: 5000 }),
     grantAccess: (participantId: string, value: boolean) =>
       send({ type: 'grant', participantId, canEdit: value }),
     publishSnapshot: (data: string) => send({ type: 'snapshot', data }),

@@ -6,42 +6,20 @@ import { protectedProcedure } from '../trpc/protected.js';
 const recordingService = new RecordingService();
 
 export const recordingsRouter = t.router({
-  create: protectedProcedure
-    .input(
-      z.object({
-        meetingId: z.string().min(1),
-        fileName: z.string().min(1),
-        mimeType: z.string().min(1).optional(),
-        fileSize: z.number().int().nonnegative().optional(),
-        durationSeconds: z.number().int().nonnegative().optional(),
-      })
-    )
-    .mutation(async ({ input, ctx }) => {
-      return recordingService.createRecording(input, ctx.user!.id);
-    }),
+  createUpload: protectedProcedure.input(z.object({
+    meetingCode: z.string().min(1),
+    fileName: z.string().min(1).max(255),
+    mimeType: z.string().min(1).max(120),
+    fileSize: z.number().int().positive(),
+    durationSeconds: z.number().int().nonnegative(),
+  })).mutation(({ input, ctx }) => recordingService.createUpload(input, ctx.user.id)),
 
-  complete: protectedProcedure
-    .input(
-      z.object({
-        recordingId: z.string().min(1),
-        storagePath: z.string().min(1),
-        fileName: z.string().min(1).optional(),
-      })
-    )
-    .mutation(async ({ input }) => {
-      return recordingService.completeRecording(input.recordingId, {
-        storagePath: input.storagePath,
-        fileName: input.fileName,
-      });
-    }),
+  complete: protectedProcedure.input(z.object({ recordingId: z.string().uuid() }))
+    .mutation(({ input, ctx }) => recordingService.completeRecording(input.recordingId, ctx.user.id)),
 
-  getForMeeting: protectedProcedure
-    .input(
-      z.object({
-        meetingId: z.string().min(1),
-      })
-    )
-    .query(async ({ input }) => {
-      return recordingService.getForMeeting(input.meetingId);
-    }),
+  getForMeeting: protectedProcedure.input(z.object({ meetingCode: z.string().min(1) }))
+    .query(({ input, ctx }) => recordingService.getForMeeting(input.meetingCode, ctx.user.id)),
+
+  downloadUrl: protectedProcedure.input(z.object({ recordingId: z.string().uuid() }))
+    .mutation(({ input, ctx }) => recordingService.getDownloadUrl(input.recordingId, ctx.user.id)),
 });

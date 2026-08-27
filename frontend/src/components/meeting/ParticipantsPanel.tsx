@@ -15,6 +15,7 @@ import {
   VolumeX,
   X,
   ShieldCheck,
+  UserMinus,
 } from 'lucide-react';
 import { Participant } from '@/types/meeting';
 
@@ -24,6 +25,8 @@ interface ParticipantsPanelProps {
   onTogglePin: (id: string) => void;
   onClose: () => void;
   onOpenInfo: () => void;
+  isHost?: boolean;
+  onRemoveParticipant?: (id: string) => void;
 }
 
 export const ParticipantsPanel: React.FC<ParticipantsPanelProps> = ({
@@ -32,6 +35,8 @@ export const ParticipantsPanel: React.FC<ParticipantsPanelProps> = ({
   onTogglePin,
   onClose,
   onOpenInfo,
+  isHost = false,
+  onRemoveParticipant,
 }) => {
   const [search, setSearch] = useState('');
 
@@ -157,6 +162,16 @@ export const ParticipantsPanel: React.FC<ParticipantsPanelProps> = ({
                 >
                   <Pin className="w-4 h-4" />
                 </button>
+
+                {isHost && !isSelf && p.role !== 'host' && onRemoveParticipant && (
+                  <button
+                    onClick={() => onRemoveParticipant(p.id)}
+                    className="p-1.5 rounded-lg text-rose-500 hover:bg-rose-50 transition-colors"
+                    title="Remove participant"
+                  >
+                    <UserMinus className="w-4 h-4" />
+                  </button>
+                )}
               </div>
             </div>
           );

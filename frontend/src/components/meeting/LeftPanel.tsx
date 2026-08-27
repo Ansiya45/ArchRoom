@@ -7,6 +7,7 @@ import {
   MessageSquare,
   Users,
   Disc,
+  FolderOpen,
   Settings,
 } from 'lucide-react';
 import { SidebarTab } from '@/types/meeting';
@@ -22,6 +23,8 @@ interface LeftPanelProps {
   onToggleRecording: () => void;
   onOpenSettings: () => void;
   participantsCount?: number;
+  isHost?: boolean;
+  onOpenRecordings?: () => void;
 }
 
 export const LeftPanel: React.FC<LeftPanelProps> = ({
@@ -35,6 +38,8 @@ export const LeftPanel: React.FC<LeftPanelProps> = ({
   onToggleRecording,
   onOpenSettings,
   participantsCount,
+  isHost = false,
+  onOpenRecordings,
 }) => {
   return (
     <aside className="w-16 sm:w-20 h-full flex flex-col justify-between items-center py-4 bg-white/70 backdrop-blur-xl border border-white/80 rounded-3xl shadow-xl z-30 shrink-0">
@@ -121,8 +126,8 @@ export const LeftPanel: React.FC<LeftPanelProps> = ({
           </div>
         </div>
 
-        {/* 5. Record */}
-        <div className="relative group flex items-center justify-center">
+        {/* 5. Record (host only) */}
+        {isHost && <div className="relative group flex items-center justify-center">
           <button
             onClick={onToggleRecording}
             className={`p-3 rounded-2xl transition-all duration-200 border ${
@@ -135,10 +140,25 @@ export const LeftPanel: React.FC<LeftPanelProps> = ({
           </button>
           <div className="absolute left-20 opacity-0 group-hover:opacity-100 transition-all duration-200 pointer-events-none z-50 transform group-hover:translate-x-1">
             <div className="px-2.5 py-1 rounded-lg bg-slate-900/90 text-white text-[11px] font-semibold whitespace-nowrap shadow-xl">
-              Record
+              {isRecording ? 'Stop recording' : 'Record'}
             </div>
           </div>
-        </div>
+        </div>}
+
+        {isHost && <div className="relative group flex items-center justify-center">
+          <button
+            onClick={onOpenRecordings}
+            className="p-3 rounded-2xl bg-slate-100/80 hover:bg-slate-200/80 text-slate-600 border border-slate-200/60 hover:scale-105 transition-all duration-200"
+            aria-label="Open saved recordings"
+          >
+            <FolderOpen className="w-5 h-5" />
+          </button>
+          <div className="absolute left-20 opacity-0 group-hover:opacity-100 transition-all duration-200 pointer-events-none z-50 transform group-hover:translate-x-1">
+            <div className="px-2.5 py-1 rounded-lg bg-slate-900/90 text-white text-[11px] font-semibold whitespace-nowrap shadow-xl">
+              Recordings
+            </div>
+          </div>
+        </div>}
       </div>
 
       {/* Bottom Group: 6. Settings at the end */}

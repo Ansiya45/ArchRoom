@@ -21,6 +21,37 @@ declare global {
 }
 
 const activeCameraStreams = new Set<MediaStream>();
+const BACKGROUND_IMAGES: Partial<Record<BackgroundChoice, string>> = {
+  office: 'https://images.unsplash.com/photo-1497366216548-37526070297c?w=1280&auto=format&fit=crop&q=80',
+  skyline: 'https://images.unsplash.com/photo-1513694203232-719a280e022f?w=1280&auto=format&fit=crop&q=80',
+  studio: 'https://images.unsplash.com/photo-1600585154340-be6161a56a0c?w=1280&auto=format&fit=crop&q=80',
+};
+let mediaPipeScriptPromise: Promise<void> | null = null;
+
+function preloadMediaPipe() {
+  if (window.SelfieSegmentation) return Promise.resolve();
+  if (!mediaPipeScriptPromise) {
+    mediaPipeScriptPromise = new Promise<void>((resolve, reject) => {
+      const existing = document.querySelector<HTMLScriptElement>('script[data-selfie-segmentation]');
+      if (existing) {
+        existing.addEventListener('load', () => resolve(), { once: true });
+        existing.addEventListener('error', () => reject(new Error('Unable to load background effects')), { once: true });
+        return;
+      }
+      const script = document.createElement('script');
+      script.src = 'https://cdn.jsdelivr.net/npm/@mediapipe/selfie_segmentation/selfie_segmentation.js';
+      script.async = true;
+      script.dataset.selfieSegmentation = 'true';
+      script.onload = () => resolve();
+      script.onerror = () => reject(new Error('Unable to load background effects'));
+      document.body.appendChild(script);
+    }).catch((error) => {
+      mediaPipeScriptPromise = null;
+      throw error;
+    });
+  }
+  return mediaPipeScriptPromise;
+}
 
 export function stopAllCameraStreams() {
   activeCameraStreams.forEach((cameraStream) => {
@@ -48,6 +79,7 @@ export const CameraVideo: React.FC<CameraVideoProps> = ({
   const cameraRequestedRef = useRef(false);
   const cameraEnabledRef = useRef(isCameraOn);
   const mountedRef = useRef(true);
+  const selfieSegmentationRef = useRef<any>(null);
   cameraEnabledRef.current = isCameraOn;
 
   const [stream, setStream] = useState<MediaStream | null>(null);
@@ -55,14 +87,19 @@ export const CameraVideo: React.FC<CameraVideoProps> = ({
   const [errorMessage, setErrorMessage] = useState<string>('');
   const [isAiSegmentationReady, setIsAiSegmentationReady] = useState<boolean>(false);
 
-  // Background image URLs
-  const bgImageMap: Record<string, string> = {
-    office: 'https://images.unsplash.com/photo-1497366216548-37526070297c?w=1280&auto=format&fit=crop&q=80',
-    skyline: 'https://images.unsplash.com/photo-1513694203232-719a280e022f?w=1280&auto=format&fit=crop&q=80',
-    studio: 'https://images.unsplash.com/photo-1600585154340-be6161a56a0c?w=1280&auto=format&fit=crop&q=80',
-  };
+  const currentBgUrl = BACKGROUND_IMAGES[activeBg];
 
-  const currentBgUrl = bgImageMap[activeBg];
+  // Warm the local-only background assets while the meeting is idle so a
+  // later selection can switch immediately without starting multiple loads.
+  useEffect(() => {
+    if (!isSelf) return;
+    Object.values(BACKGROUND_IMAGES).forEach((url) => {
+      const image = new Image();
+      image.crossOrigin = 'anonymous';
+      image.src = url;
+    });
+    void preloadMediaPipe().catch(() => undefined);
+  }, [isSelf]);
 
   // Preload background image object for canvas rendering
   useEffect(() => {
@@ -208,7 +245,7 @@ export const CameraVideo: React.FC<CameraVideoProps> = ({
           selfieSeg.setOptions({
             modelSelection: 1, // 1 for landscape selfie mode
           });
-          (window as any)._selfieSegmentation = selfieSeg;
+          selfieSegmentationRef.current = selfieSeg;
           setIsAiSegmentationReady(true);
         } catch (e) {
           console.warn('MediaPipe initialization fallback:', e);
@@ -216,18 +253,13 @@ export const CameraVideo: React.FC<CameraVideoProps> = ({
       }
     };
 
-    if (!window.SelfieSegmentation) {
-      const script = document.createElement('script');
-      script.src =
-        'https://cdn.jsdelivr.net/npm/@mediapipe/selfie_segmentation/selfie_segmentation.js';
-      script.async = true;
-      script.onload = () => {
-        loadMediaPipe();
-      };
-      document.body.appendChild(script);
-    } else {
-      loadMediaPipe();
-    }
+    void preloadMediaPipe().then(loadMediaPipe).catch((error) => {
+      console.warn('MediaPipe loading fallback:', error);
+    });
+    return () => {
+      selfieSegmentationRef.current = null;
+      void selfieSeg?.close?.();
+    };
   }, [activeBg === 'none']);
 
   // 3. Canvas Segmentation Render Loop
@@ -244,7 +276,7 @@ export const CameraVideo: React.FC<CameraVideoProps> = ({
       if (!ctx) return;
 
       const video = videoRef.current;
-      const selfieSeg = (window as any)._selfieSegmentation;
+      const selfieSeg = selfieSegmentationRef.current;
 
       // Set canvas size matching container ratio
       const width = canvas.clientWidth || 640;

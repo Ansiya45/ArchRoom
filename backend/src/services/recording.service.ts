@@ -1,89 +1,133 @@
 import { TRPCError } from '@trpc/server';
-import { eq } from 'drizzle-orm';
+import { and, desc, eq } from 'drizzle-orm';
 import { createClient } from '@supabase/supabase-js';
 import { db } from '../db/index.js';
-import { recordings } from '../db/schema.js';
+import { meetings, recordings } from '../db/schema.js';
 import { env } from '../env.js';
 
 export type CreateRecordingInput = {
-  meetingId: string;
+  meetingCode: string;
   fileName: string;
-  mimeType?: string | null;
-  fileSize?: number | null;
-  durationSeconds?: number | null;
+  mimeType: string;
+  fileSize: number;
+  durationSeconds: number;
 };
 
 export class RecordingService {
   private supabase: ReturnType<typeof createClient> | null;
+  private bucketReady: Promise<void> | null = null;
 
   constructor() {
-    if (!env.SUPABASE_URL || !env.SUPABASE_SERVICE_ROLE_KEY) {
-      this.supabase = null;
-      return;
-    }
+    this.supabase = env.SUPABASE_URL && env.SUPABASE_SERVICE_ROLE_KEY
+      ? createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY, {
+          auth: { persistSession: false, autoRefreshToken: false },
+        })
+      : null;
+  }
 
-    this.supabase = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY, {
-      auth: {
-        persistSession: false,
-        autoRefreshToken: false,
-      },
+  private requireStorage() {
+    if (!this.supabase) {
+      throw new TRPCError({ code: 'PRECONDITION_FAILED', message: 'Supabase Storage is not configured on the server' });
+    }
+    return this.supabase;
+  }
+
+  private async ensurePrivateBucket() {
+    const supabase = this.requireStorage();
+    if (!this.bucketReady) {
+      this.bucketReady = (async () => {
+        const existing = await supabase.storage.getBucket(env.SUPABASE_STORAGE_BUCKET);
+        const result = existing.data
+          ? await supabase.storage.updateBucket(env.SUPABASE_STORAGE_BUCKET, {
+              public: false,
+              allowedMimeTypes: ['video/webm'],
+            })
+          : await supabase.storage.createBucket(env.SUPABASE_STORAGE_BUCKET, {
+              public: false,
+              allowedMimeTypes: ['video/webm'],
+            });
+        if (result.error) throw result.error;
+      })().catch((error) => {
+        this.bucketReady = null;
+        throw new TRPCError({
+          code: 'INTERNAL_SERVER_ERROR',
+          message: error instanceof Error ? error.message : 'Unable to prepare recording storage',
+        });
+      });
+    }
+    await this.bucketReady;
+  }
+
+  private async requireHostByCode(meetingCode: string, userId: string) {
+    const meeting = await db.query.meetings.findFirst({
+      where: eq(meetings.meetingCode, meetingCode.trim().toUpperCase()),
     });
-  }
-
-  async createRecording(input: CreateRecordingInput, userId: string) {
-    const fileName = input.fileName.trim();
-
-    if (!fileName) {
-      throw new TRPCError({ code: 'BAD_REQUEST', message: 'file_name is required' });
+    if (!meeting) throw new TRPCError({ code: 'NOT_FOUND', message: 'Meeting not found' });
+    if (meeting.hostUserId !== userId) {
+      throw new TRPCError({ code: 'FORBIDDEN', message: 'Only the meeting host can access recordings' });
     }
-
-    const [recording] = await db
-      .insert(recordings)
-      .values({
-        meetingId: input.meetingId,
-        createdByUserId: userId,
-        storagePath: `meeting/${input.meetingId}/${fileName}`,
-        fileName,
-        mimeType: input.mimeType || 'application/octet-stream',
-        fileSize: input.fileSize ?? 0,
-        durationSeconds: input.durationSeconds ?? 0,
-        status: 'created',
-      })
-      .returning();
-
-    return {
-      ok: true,
-      recording,
-    };
+    return meeting;
   }
 
-  async completeRecording(recordingId: string, input: { storagePath: string; fileName?: string }) {
-    const [completed] = await db
-      .update(recordings)
-      .set({
-        storagePath: input.storagePath,
-        fileName: input.fileName ?? recordings.fileName,
-        status: 'completed',
-        completedAt: new Date(),
-      })
-      .where(eq(recordings.id, recordingId))
-      .returning();
+  private async requireOwnedRecording(recordingId: string, userId: string) {
+    const [row] = await db.select({ recording: recordings, hostUserId: meetings.hostUserId })
+      .from(recordings)
+      .innerJoin(meetings, eq(recordings.meetingId, meetings.id))
+      .where(eq(recordings.id, recordingId));
+    if (!row) throw new TRPCError({ code: 'NOT_FOUND', message: 'Recording not found' });
+    if (row.hostUserId !== userId) {
+      throw new TRPCError({ code: 'FORBIDDEN', message: 'Only the meeting host can access recordings' });
+    }
+    return row.recording;
+  }
 
+  async createUpload(input: CreateRecordingInput, userId: string) {
+    const supabase = this.requireStorage();
+    await this.ensurePrivateBucket();
+    const meeting = await this.requireHostByCode(input.meetingCode, userId);
+    const safeName = input.fileName.trim().replace(/[^a-zA-Z0-9._-]/g, '-');
+    const storagePath = `meetings/${meeting.id}/${crypto.randomUUID()}-${safeName}`;
+    const { data, error } = await supabase.storage.from(env.SUPABASE_STORAGE_BUCKET).createSignedUploadUrl(storagePath);
+    if (error) throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: error.message });
+
+    const [recording] = await db.insert(recordings).values({
+      meetingId: meeting.id,
+      createdByUserId: userId,
+      storagePath,
+      fileName: safeName,
+      mimeType: input.mimeType,
+      fileSize: input.fileSize,
+      durationSeconds: input.durationSeconds,
+      status: 'created',
+    }).returning();
+    return { ok: true, recording, uploadUrl: data.signedUrl };
+  }
+
+  async completeRecording(recordingId: string, userId: string) {
+    await this.requireOwnedRecording(recordingId, userId);
+    const [completed] = await db.update(recordings).set({ status: 'completed', completedAt: new Date() })
+      .where(and(eq(recordings.id, recordingId), eq(recordings.createdByUserId, userId))).returning();
     return { ok: true, recording: completed };
   }
 
-  async getForMeeting(meetingId: string) {
+  async getForMeeting(meetingCode: string, userId: string) {
+    const meeting = await this.requireHostByCode(meetingCode, userId);
     const found = await db.query.recordings.findMany({
-      where: eq(recordings.meetingId, meetingId),
+      where: and(eq(recordings.meetingId, meeting.id), eq(recordings.status, 'completed')),
+      orderBy: [desc(recordings.createdAt)],
     });
-
     return { ok: true, recordings: found };
   }
 
-  async getBucketStatus() {
-    return {
-      configured: Boolean(env.SUPABASE_URL && env.SUPABASE_SERVICE_ROLE_KEY),
-      bucket: env.SUPABASE_STORAGE_BUCKET,
-    };
+  async getDownloadUrl(recordingId: string, userId: string) {
+    const supabase = this.requireStorage();
+    const recording = await this.requireOwnedRecording(recordingId, userId);
+    if (recording.status !== 'completed') {
+      throw new TRPCError({ code: 'PRECONDITION_FAILED', message: 'Recording upload is not complete' });
+    }
+    const { data, error } = await supabase.storage.from(env.SUPABASE_STORAGE_BUCKET)
+      .createSignedUrl(recording.storagePath, 60 * 10, { download: recording.fileName });
+    if (error) throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: error.message });
+    return { ok: true, url: data.signedUrl };
   }
 }
