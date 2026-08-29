@@ -1,14 +1,17 @@
 'use client';
 
-import React from 'react';
+import React, { useState } from 'react';
 import { X, Check, Palette, Sparkles, Ban, Droplets, Building2, Sun } from 'lucide-react';
 import { BackgroundChoice } from '@/types/meeting';
 import { BACKGROUND_PRESETS } from '@/utils/meetingHelpers';
+import { CameraVideo } from './CameraVideo';
 
 interface BackgroundPickerModalProps {
   activeBg: BackgroundChoice;
-  onSelectBg: (bg: BackgroundChoice) => void;
+  onApplyBg: (bg: BackgroundChoice) => void;
   onClose: () => void;
+  localStream?: MediaStream | null;
+  isCameraOn?: boolean;
 }
 
 const getPresetIcon = (id: BackgroundChoice) => {
@@ -30,12 +33,16 @@ const getPresetIcon = (id: BackgroundChoice) => {
 
 export const BackgroundPickerModal: React.FC<BackgroundPickerModalProps> = ({
   activeBg,
-  onSelectBg,
+  onApplyBg,
   onClose,
+  localStream,
+  isCameraOn = true,
 }) => {
+  const [previewBg, setPreviewBg] = useState<BackgroundChoice>(activeBg);
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-md animate-fadeIn">
-      <div className="w-full max-w-lg bg-white/85 border border-white rounded-3xl p-6 text-slate-800 shadow-2xl relative space-y-5 backdrop-blur-2xl">
+      <div className="w-full max-w-2xl bg-white/85 border border-white rounded-3xl p-6 text-slate-800 shadow-2xl relative space-y-5 backdrop-blur-2xl max-h-[92vh] overflow-y-auto">
         {/* Close Button */}
         <button
           onClick={onClose}
@@ -52,18 +59,33 @@ export const BackgroundPickerModal: React.FC<BackgroundPickerModalProps> = ({
           </div>
           <h2 className="text-xl font-bold text-slate-900">Choose Virtual Background</h2>
           <p className="text-xs text-slate-500">
-            Select an effect or workspace environment to apply immediately to your camera stream.
+            Preview an effect privately, then apply it when you are ready.
           </p>
+        </div>
+
+        <div className="space-y-2">
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-bold uppercase tracking-wider text-slate-600">Live preview</span>
+            <span className="text-[11px] text-slate-500">Only your video is affected</span>
+          </div>
+          <div className="relative mx-auto aspect-video w-full max-w-xl overflow-hidden rounded-2xl border border-slate-700 bg-slate-950 shadow-lg">
+            <CameraVideo
+              isCameraOn={isCameraOn}
+              activeBg={previewBg}
+              mediaStream={localStream}
+              isSelf
+            />
+          </div>
         </div>
 
         {/* Background Options Grid */}
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 max-h-[360px] overflow-y-auto pr-1">
           {BACKGROUND_PRESETS.map((preset) => {
-            const isSelected = activeBg === preset.id;
+            const isSelected = previewBg === preset.id;
             return (
               <button
                 key={preset.id}
-                onClick={() => onSelectBg(preset.id as BackgroundChoice)}
+                onClick={() => setPreviewBg(preset.id as BackgroundChoice)}
                 className={`p-3 rounded-2xl border text-left transition-all relative flex flex-col justify-between space-y-2.5 overflow-hidden group ${
                   isSelected
                     ? 'bg-blue-50/90 border-blue-600 ring-2 ring-blue-400/50 shadow-md shadow-blue-100'
@@ -110,7 +132,10 @@ export const BackgroundPickerModal: React.FC<BackgroundPickerModalProps> = ({
         {/* Done Button */}
         <div className="pt-2 flex justify-end">
           <button
-            onClick={onClose}
+            onClick={() => {
+              onApplyBg(previewBg);
+              onClose();
+            }}
             className="w-full py-3 rounded-2xl bg-blue-600 hover:bg-blue-700 text-white text-xs sm:text-sm font-semibold shadow-lg shadow-blue-200 transition-all active:scale-95"
           >
             Apply & Close

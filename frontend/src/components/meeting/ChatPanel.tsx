@@ -17,12 +17,17 @@ interface ChatPanelProps {
   messages: ChatMessage[];
   onSendMessage: (text: string, fileAttachment?: ChatMessage['fileAttachment']) => void;
   onClose: () => void;
+  onUploadFile: (file: File) => Promise<NonNullable<ChatMessage['fileAttachment']>>;
+  onDownloadFile: (attachment: NonNullable<ChatMessage['fileAttachment']>) => void;
 }
 
-export const ChatPanel: React.FC<ChatPanelProps> = ({ messages, onSendMessage, onClose }) => {
+export const ChatPanel: React.FC<ChatPanelProps> = ({ messages, onSendMessage, onClose, onUploadFile, onDownloadFile }) => {
   const [text, setText] = useState('');
   const [selectedFile, setSelectedFile] = useState<ChatMessage['fileAttachment'] | null>(null);
   const chatEndRef = useRef<HTMLDivElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [isUploading, setIsUploading] = useState(false);
+  const [uploadError, setUploadError] = useState<string | null>(null);
 
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -36,12 +41,19 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ messages, onSendMessage, o
     setSelectedFile(null);
   };
 
-  const handleSimulatedFileUpload = () => {
-    setSelectedFile({
-      name: 'YLAAM-MEET_Design_Doc_v2.pdf',
-      size: '4.8 MB',
-      type: 'PDF',
-    });
+  const handleFileSelected = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+    if (!file) return;
+    setUploadError(null);
+    setIsUploading(true);
+    try {
+      setSelectedFile(await onUploadFile(file));
+    } catch (error) {
+      setUploadError(error instanceof Error ? error.message : 'Unable to upload file.');
+    } finally {
+      setIsUploading(false);
+    }
   };
 
   return (
@@ -120,7 +132,7 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ messages, onSendMessage, o
                         </p>
                         <p className="text-[10px] text-slate-500">{msg.fileAttachment.size}</p>
                       </div>
-                      <button className="p-1.5 rounded-lg hover:bg-slate-200 text-blue-600">
+                      <button onClick={() => onDownloadFile(msg.fileAttachment!)} className="p-1.5 rounded-lg hover:bg-slate-200 text-blue-600" title="Download attachment">
                         <Download className="w-4 h-4" />
                       </button>
                     </div>
@@ -148,6 +160,7 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ messages, onSendMessage, o
           </button>
         </div>
       )}
+      {uploadError && <p className="px-4 py-2 text-xs font-medium text-rose-600 bg-rose-50">{uploadError}</p>}
 
       {/* Message Input Form */}
       <form onSubmit={handleSend} className="p-3 sm:p-4 border-t border-blue-100 bg-white/60 backdrop-blur-md flex-shrink-0">
@@ -161,13 +174,15 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ messages, onSendMessage, o
           />
 
           <div className="absolute right-2 flex items-center space-x-1">
+            <input ref={fileInputRef} type="file" className="hidden" onChange={(event) => void handleFileSelected(event)} />
             <button
               type="button"
-              onClick={handleSimulatedFileUpload}
+              onClick={() => fileInputRef.current?.click()}
+              disabled={isUploading}
               className="p-1.5 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-xl transition-colors"
-              title="Attach File"
+              title={isUploading ? 'Uploading file…' : 'Attach file (maximum 25 MB)'}
             >
-              <Paperclip className="w-4 h-4" />
+              <Paperclip className={`w-4 h-4 ${isUploading ? 'animate-pulse text-blue-600' : ''}`} />
             </button>
 
             <button

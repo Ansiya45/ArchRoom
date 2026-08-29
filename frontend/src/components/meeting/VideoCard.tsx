@@ -121,7 +121,7 @@ export const VideoCard: React.FC<VideoCardProps> = ({
             </div>
           </div>
         </div>
-      ) : isCameraOn || Boolean(mediaStream?.getVideoTracks().length) ? (
+      ) : isCameraOn ? (
         /* Camera Video View */
         <div className="absolute inset-0 bg-slate-900 overflow-hidden">
           <CameraVideo
@@ -149,10 +149,14 @@ export const VideoCard: React.FC<VideoCardProps> = ({
                   : 'border-white/30'
               }`}
             >
+              <div className="absolute inset-0 flex items-center justify-center bg-gradient-to-br from-blue-600 to-violet-700 text-xl font-bold uppercase text-white">
+                {name.replace(/\s*\(You\)\s*/i, '').trim().split(/\s+/).slice(0, 2).map((part) => part[0]).join('') || '?'}
+              </div>
               <img
                 src={avatar}
                 alt={name}
-                className="w-full h-full object-cover rounded-full"
+                onError={(event) => { event.currentTarget.style.display = 'none'; }}
+                className="relative w-full h-full object-cover rounded-full"
               />
             </div>
 
@@ -212,16 +216,13 @@ export const VideoCard: React.FC<VideoCardProps> = ({
 
         {onToggleMute && !isSelf && (
           <button
-            onClick={(e) => {
-              e.stopPropagation();
-              onToggleMute(id);
-            }}
+            disabled
             className={`p-2 rounded-xl backdrop-blur-md border transition-all ${
               isMuted
                 ? 'bg-red-500/80 text-white border-red-400'
                 : 'bg-black/40 text-white border-white/20 hover:bg-black/60'
             }`}
-            title={isMuted ? 'Unmute Participant' : 'Mute Participant'}
+            title={isMuted ? 'Participant is muted' : 'Participant is unmuted'}
           >
             {isMuted ? <MicOff className="w-3.5 h-3.5" /> : <Mic className="w-3.5 h-3.5" />}
           </button>

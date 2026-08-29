@@ -1,6 +1,7 @@
 export interface MeetingSession {
   displayName: string;
   participantId?: string;
+  joinRequestId?: string;
 }
 
 function sessionKey(meetingCode: string) {

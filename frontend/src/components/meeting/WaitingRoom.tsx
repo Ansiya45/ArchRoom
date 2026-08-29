@@ -1,6 +1,6 @@
 'use client';
 
-import React from 'react';
+import React, { useCallback, useState } from 'react';
 import {
   Video,
   VideoOff,
@@ -33,6 +33,11 @@ interface WaitingRoomProps {
   onDisplayNameChange: (name: string) => void;
   deviceSettings: DeviceSettings;
   setDeviceSettings: React.Dispatch<React.SetStateAction<DeviceSettings>>;
+  audioInputDevices: MediaDeviceInfo[];
+  microphoneError: string | null;
+  videoInputDevices: MediaDeviceInfo[];
+  cameraError: string | null;
+  isJoining: boolean;
 }
 
 interface BackgroundPreset {
@@ -85,10 +90,21 @@ export const WaitingRoom: React.FC<WaitingRoomProps> = ({
   onDisplayNameChange,
   deviceSettings,
   setDeviceSettings,
+  audioInputDevices,
+  microphoneError,
+  videoInputDevices,
+  cameraError,
+  isJoining,
 }) => {
   const activeBg = deviceSettings.backgroundBlur || 'blur';
+  const [previewCameraError, setPreviewCameraError] = useState<string | null>(null);
+  const handleCameraUnavailable = useCallback((message: string) => {
+    setPreviewCameraError(message);
+    if (isCameraOn) onToggleCamera();
+  }, [isCameraOn, onToggleCamera]);
 
   const handleSelectBg = (bgId: BackgroundChoice) => {
+    if (!isCameraOn) onToggleCamera();
     setDeviceSettings((prev) => ({ ...prev, backgroundBlur: bgId }));
   };
 
@@ -123,7 +139,7 @@ export const WaitingRoom: React.FC<WaitingRoomProps> = ({
         {/* Left Column: Video Feed & Background Selector */}
         <div className="lg:col-span-7 flex flex-col h-full max-h-full justify-center space-y-3">
           <div className="relative w-full aspect-video rounded-3xl bg-slate-900 border border-white/80 overflow-hidden shadow-2xl backdrop-blur-xl group max-h-[380px]">
-            <CameraVideo isCameraOn={isCameraOn} activeBg={activeBg} />
+            <CameraVideo isCameraOn={isCameraOn} activeBg={activeBg} cameraDeviceId={deviceSettings.cameraId} onCameraUnavailable={handleCameraUnavailable} />
 
             {/* Mic & Camera Controls Overlay */}
             <div className="absolute bottom-3 left-3 right-3 flex items-center justify-between z-30">
@@ -249,13 +265,19 @@ export const WaitingRoom: React.FC<WaitingRoomProps> = ({
             />
           </div>
 
-          {/* Device Mocks */}
+          {/* Browser media devices */}
           <div className="space-y-2">
             <div className="text-xs font-bold text-slate-700">Hardware Verification</div>
-            <div className="p-2.5 rounded-2xl bg-white/90 border border-blue-100/80 text-xs text-slate-700 flex items-center justify-between shadow-sm">
-              <span className="truncate font-medium">Default Mic (MacBook Array)</span>
-              <Check className="w-4 h-4 text-emerald-600 flex-shrink-0" />
-            </div>
+            <select value={deviceSettings.micId} onChange={(event) => setDeviceSettings((settings) => ({ ...settings, micId: event.target.value }))} className="w-full p-2.5 rounded-2xl bg-white border border-blue-100 text-xs text-slate-700">
+              <option value="default">Default microphone</option>
+              {audioInputDevices.filter((device) => device.deviceId !== 'default').map((device, index) => <option key={device.deviceId} value={device.deviceId}>{device.label || `Microphone ${index + 1}`}</option>)}
+            </select>
+            {microphoneError && <p role="alert" className="rounded-xl border border-red-200 bg-red-50 p-2.5 text-[11px] font-medium text-red-700">{microphoneError}</p>}
+            <select value={deviceSettings.cameraId} onChange={(event) => setDeviceSettings((settings) => ({ ...settings, cameraId: event.target.value }))} className="w-full p-2.5 rounded-2xl bg-white border border-blue-100 text-xs text-slate-700">
+              <option value="default">Default camera</option>
+              {videoInputDevices.filter((device) => device.deviceId !== 'default').map((device, index) => <option key={device.deviceId} value={device.deviceId}>{device.label || `Camera ${index + 1}`}</option>)}
+            </select>
+            {(previewCameraError || cameraError) && <p role="alert" className="rounded-xl border border-amber-200 bg-amber-50 p-2.5 text-[11px] font-medium text-amber-800">{previewCameraError || cameraError}</p>}
             <div className="p-2.5 rounded-2xl bg-white/90 border border-blue-100/80 text-xs text-slate-700 flex items-center justify-between shadow-sm">
               <span className="truncate font-medium">FaceTime HD Camera (1080p)</span>
               <Check className="w-4 h-4 text-emerald-600 flex-shrink-0" />
@@ -265,10 +287,10 @@ export const WaitingRoom: React.FC<WaitingRoomProps> = ({
           {/* Join Call Action */}
           <button
             onClick={onJoin}
-            disabled={!displayName.trim()}
+            disabled={!displayName.trim() || isJoining}
             className="w-full py-3.5 rounded-2xl bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed text-white font-bold text-sm sm:text-base flex items-center justify-center space-x-2 shadow-lg shadow-blue-200 transition-all active:scale-95"
           >
-            <span>Join Meeting Now</span>
+            <span>{isJoining ? 'Joining...' : 'Join Meeting Now'}</span>
             <ArrowRight className="w-5 h-5" />
           </button>
         </div>

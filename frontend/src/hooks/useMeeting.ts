@@ -68,8 +68,8 @@ export function useMeeting(initialMeetingCode: string = 'YLM-9284-XKP') {
 
   // Devices & Audio Settings
   const [deviceSettings, setDeviceSettings] = useState<DeviceSettings>({
-    micId: 'default-mic',
-    cameraId: 'default-camera',
+    micId: 'default',
+    cameraId: 'default',
     speakerId: 'default-speaker',
     noiseCancellation: true,
     backgroundBlur: 'none',
@@ -127,6 +127,13 @@ export function useMeeting(initialMeetingCode: string = 'YLM-9284-XKP') {
       );
       return next;
     });
+  }, []);
+
+  const setMicEnabled = useCallback((enabled: boolean) => {
+    setIsMicOn(enabled);
+    setParticipants((list) =>
+      list.map((p) => (p.id === 'user-self' ? { ...p, isMuted: !enabled } : p))
+    );
   }, []);
 
   const setDisplayName = useCallback(
@@ -207,9 +214,27 @@ export function useMeeting(initialMeetingCode: string = 'YLM-9284-XKP') {
   }, []);
 
   const toggleMuteParticipant = useCallback((participantId: string) => {
+    if (participantId !== 'user-self') return;
+    toggleMic();
+  }, [toggleMic]);
+
+  const syncParticipantAudio = useCallback((mutedById: Record<string, boolean>) => {
     setParticipants((list) =>
-      list.map((p) => (p.id === participantId ? { ...p, isMuted: !p.isMuted } : p))
+      list.map((p) => p.id !== 'user-self' && mutedById[p.id] !== undefined
+        ? { ...p, isMuted: mutedById[p.id], isSpeaking: mutedById[p.id] ? false : p.isSpeaking }
+        : p)
     );
+  }, []);
+
+  const syncParticipantVideo = useCallback((cameraById: Record<string, boolean>) => {
+    setParticipants((list) => list.map((p) => p.id !== 'user-self' && cameraById[p.id] !== undefined
+      ? { ...p, isCameraOn: cameraById[p.id] }
+      : p));
+  }, []);
+
+  const setCameraEnabled = useCallback((enabled: boolean) => {
+    setIsCameraOn(enabled);
+    setParticipants((list) => list.map((p) => p.id === 'user-self' ? { ...p, isCameraOn: enabled } : p));
   }, []);
 
   const syncParticipants = useCallback((roster: Array<{ id: string; name: string; role: 'host' | 'participant'; isSelf: boolean }>) => {
@@ -221,7 +246,9 @@ export function useMeeting(initialMeetingCode: string = 'YLM-9284-XKP') {
         name: `${entry.name}${entry.isSelf ? ' (You)' : ''}`,
         avatar: `https://api.dicebear.com/9.x/initials/svg?seed=${encodeURIComponent(entry.name)}`,
         role: entry.role === 'host' ? 'host' : 'attendee',
-        isMuted: existing?.isMuted ?? false,
+        // Media mute state is synchronized separately from LiveKit. Roster
+        // polling must not overwrite it with stale identity-only data.
+        isMuted: existing?.isMuted ?? true,
         isCameraOn: existing?.isCameraOn ?? false,
         isSpeaking: existing?.isSpeaking ?? false,
         isHandRaised: existing?.isHandRaised ?? false,
@@ -300,8 +327,10 @@ export function useMeeting(initialMeetingCode: string = 'YLM-9284-XKP') {
     // Controls
     isMicOn,
     toggleMic,
+    setMicEnabled,
     isCameraOn,
     toggleCamera,
+    setCameraEnabled,
     isHandRaised,
     toggleHandRaised,
     isScreenSharing,
@@ -318,6 +347,8 @@ export function useMeeting(initialMeetingCode: string = 'YLM-9284-XKP') {
     pinnedParticipantId,
     togglePinParticipant,
     toggleMuteParticipant,
+    syncParticipantAudio,
+    syncParticipantVideo,
     syncParticipants,
 
     // Layout & Sidebar

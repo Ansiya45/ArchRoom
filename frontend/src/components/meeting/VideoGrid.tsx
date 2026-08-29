@@ -11,13 +11,14 @@ interface VideoGridProps {
   layoutMode: LayoutMode;
   activeBg?: BackgroundChoice;
   onTogglePin: (id: string) => void;
-  onToggleMute: (id: string) => void;
+  onToggleMute?: (id: string) => void;
   onSelectSpeaker: (id: string) => void;
   localStream?: MediaStream | null;
   remoteStreams?: Record<string, MediaStream>;
   remoteBackgrounds?: Record<string, BackgroundChoice>;
   remoteScreenShares?: Record<string, boolean>;
   localDisplayStream?: MediaStream | null;
+  remoteRaisedHands?: Record<string, boolean>;
 }
 
 export const VideoGrid: React.FC<VideoGridProps> = ({
@@ -34,6 +35,7 @@ export const VideoGrid: React.FC<VideoGridProps> = ({
   remoteBackgrounds = {},
   remoteScreenShares = {},
   localDisplayStream,
+  remoteRaisedHands = {},
 }) => {
   const participantBackground = (participantId: string) =>
     participantId === 'user-self' ? activeBg : remoteBackgrounds[participantId] || 'none';
@@ -65,6 +67,7 @@ export const VideoGrid: React.FC<VideoGridProps> = ({
                   ...mainParticipant,
                   isPinned: mainParticipant.id === pinnedParticipantId,
                   isScreenSharing: mainParticipant.id === 'user-self' ? Boolean(localDisplayStream) : Boolean(remoteScreenShares[mainParticipant.id]),
+                  isHandRaised: mainParticipant.id === 'user-self' ? mainParticipant.isHandRaised : Boolean(remoteRaisedHands[mainParticipant.id]),
                 }}
                 isMainStage={true}
                 activeBg={participantBackground(mainParticipant.id)}
@@ -105,6 +108,7 @@ export const VideoGrid: React.FC<VideoGridProps> = ({
                         ...p,
                         isPinned: p.id === pinnedParticipantId,
                         isScreenSharing: p.id === 'user-self' ? Boolean(localDisplayStream) : Boolean(remoteScreenShares[p.id]),
+                        isHandRaised: p.id === 'user-self' ? p.isHandRaised : Boolean(remoteRaisedHands[p.id]),
                       }}
                       isMainStage={false}
                       activeBg={participantBackground(p.id)}
@@ -142,6 +146,7 @@ export const VideoGrid: React.FC<VideoGridProps> = ({
                     ...p,
                     isPinned: p.id === pinnedParticipantId,
                     isScreenSharing: p.id === 'user-self' ? Boolean(localDisplayStream) : Boolean(remoteScreenShares[p.id]),
+                    isHandRaised: p.id === 'user-self' ? p.isHandRaised : Boolean(remoteRaisedHands[p.id]),
                   }}
                   isMainStage={false}
                   activeBg={participantBackground(p.id)}

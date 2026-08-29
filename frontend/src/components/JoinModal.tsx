@@ -1,13 +1,13 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useRef, useState } from 'react';
 import { X, Video, KeyRound, Sparkles, User, ArrowRight } from 'lucide-react';
 import { trpc } from '../lib/trpc';
 
 interface JoinModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onJoinSuccess: (code: string, name: string, participantId: string) => void;
+  onJoinSuccess: (code: string, name: string, participantId: string, joinRequestId: string) => void;
 }
 
 export const JoinModal: React.FC<JoinModalProps> = ({
@@ -17,12 +17,17 @@ export const JoinModal: React.FC<JoinModalProps> = ({
 }) => {
   const [meetingCode, setMeetingCode] = useState('');
   const [guestName, setGuestName] = useState('');
+  const [isJoining, setIsJoining] = useState(false);
+  const joiningRef = useRef(false);
+  const joinRequestIdRef = useRef(crypto.randomUUID());
 
   if (!isOpen) return null;
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!meetingCode.trim()) return;
+    if (!meetingCode.trim() || joiningRef.current) return;
+    joiningRef.current = true;
+    setIsJoining(true);
 
     const finalGuestName = guestName.trim() || 'Guest User';
 
@@ -30,15 +35,19 @@ export const JoinModal: React.FC<JoinModalProps> = ({
       const payload = await trpc.meetings.join.mutate({
         meetingCode: meetingCode.trim(),
         guestName: finalGuestName,
+        joinRequestId: joinRequestIdRef.current,
       });
 
       onJoinSuccess(
         payload.meeting.meetingCode,
         payload.participant.guestName || finalGuestName,
-        payload.participant.id
+        payload.participant.id,
+        joinRequestIdRef.current
       );
       onClose();
     } catch (error) {
+      joiningRef.current = false;
+      setIsJoining(false);
       alert(error instanceof Error ? error.message : 'Unable to join the meeting.');
     }
   };
@@ -101,9 +110,10 @@ export const JoinModal: React.FC<JoinModalProps> = ({
           <div className="pt-2">
             <button
               type="submit"
+              disabled={isJoining}
               className="w-full py-3.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-semibold text-sm shadow-md shadow-blue-500/25 flex items-center justify-center gap-2 active:scale-98 transition-all cursor-pointer"
             >
-              <span>Join Call Now</span>
+              <span>{isJoining ? 'Joining...' : 'Join Call Now'}</span>
               <ArrowRight className="w-4 h-4" />
             </button>
           </div>

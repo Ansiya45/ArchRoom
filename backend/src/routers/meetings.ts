@@ -34,12 +34,14 @@ export const meetingsRouter = t.router({
       z.object({
         meetingCode: z.string().min(1),
         guestName: z.string().trim().min(1).max(120).optional(),
+        joinRequestId: z.string().uuid(),
       })
     )
     .mutation(async ({ input, ctx }) => {
       return meetingService.joinMeeting(input.meetingCode, {
         userId: ctx.user?.id,
         guestName: input.guestName,
+        joinRequestId: input.joinRequestId,
       });
     }),
 
@@ -120,9 +122,24 @@ export const meetingsRouter = t.router({
     .input(z.object({ meetingCode: z.string().min(1) }))
     .mutation(({ input, ctx }) => meetingService.endMeeting(input.meetingCode, ctx.user.id)),
 
+  livekitToken: t.procedure
+    .input(z.object({ meetingCode: z.string().min(1), participantId: z.string().uuid().optional() }))
+    .mutation(({ input, ctx }) => meetingService.createLiveKitToken(input.meetingCode, {
+      userId: ctx.user?.id,
+      participantId: input.participantId,
+    })),
+
   removeParticipant: protectedProcedure
     .input(z.object({ meetingCode: z.string().min(1), participantId: z.string().uuid() }))
     .mutation(async ({ input, ctx }) => {
       return meetingService.removeParticipant(input.meetingCode, input.participantId, ctx.user!.id);
     }),
+
+  muteParticipant: protectedProcedure
+    .input(z.object({ meetingCode: z.string().min(1), participantId: z.string().uuid() }))
+    .mutation(({ input, ctx }) => meetingService.muteParticipant(input.meetingCode, input.participantId, ctx.user!.id)),
+
+  muteAll: protectedProcedure
+    .input(z.object({ meetingCode: z.string().min(1) }))
+    .mutation(({ input, ctx }) => meetingService.muteAllParticipants(input.meetingCode, ctx.user!.id)),
 });

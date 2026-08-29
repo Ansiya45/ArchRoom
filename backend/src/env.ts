@@ -13,6 +13,10 @@ const envSchema = z.object({
   SUPABASE_URL: z.string().optional(),
   SUPABASE_SERVICE_ROLE_KEY: z.string().optional(),
   SUPABASE_STORAGE_BUCKET: z.string().default('meeting-recordings'),
+  SUPABASE_CHAT_FILES_BUCKET: z.string().default('meeting-chat-files'),
+  LIVEKIT_URL: z.string().url().optional(),
+  LIVEKIT_API_KEY: z.string().optional(),
+  LIVEKIT_API_SECRET: z.string().optional(),
 });
 
 export const env = envSchema.parse(process.env);

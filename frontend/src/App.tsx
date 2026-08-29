@@ -273,8 +273,8 @@ export default function App() {
       <JoinModal
         isOpen={isJoinOpen}
         onClose={() => setIsJoinOpen(false)}
-        onJoinSuccess={(code, name, participantId) => {
-          storeMeetingSession(code, { displayName: name, participantId });
+        onJoinSuccess={(code, name, participantId, joinRequestId) => {
+          storeMeetingSession(code, { displayName: name, participantId, joinRequestId });
           setCurrentMeeting({
             title: `Instant Meeting Room (${code})`,
             code,

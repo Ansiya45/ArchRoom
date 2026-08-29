@@ -27,6 +27,10 @@ interface ParticipantsPanelProps {
   onOpenInfo: () => void;
   isHost?: boolean;
   onRemoveParticipant?: (id: string) => void;
+  onMuteParticipant?: (id: string) => void;
+  onMuteAll?: () => void;
+  mutingParticipantIds?: Set<string>;
+  isMutingAll?: boolean;
 }
 
 export const ParticipantsPanel: React.FC<ParticipantsPanelProps> = ({
@@ -37,6 +41,10 @@ export const ParticipantsPanel: React.FC<ParticipantsPanelProps> = ({
   onOpenInfo,
   isHost = false,
   onRemoveParticipant,
+  onMuteParticipant,
+  onMuteAll,
+  mutingParticipantIds = new Set(),
+  isMutingAll = false,
 }) => {
   const [search, setSearch] = useState('');
 
@@ -84,11 +92,13 @@ export const ParticipantsPanel: React.FC<ParticipantsPanelProps> = ({
             <span>Invite People</span>
           </button>
           <button
+            onClick={onMuteAll}
+            disabled={!isHost || isMutingAll || !participants.some((participant) => participant.role !== 'host' && !participant.isMuted)}
             className="py-2 px-3 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold flex items-center space-x-1.5 border border-slate-200 transition-all"
             title="Mute All Attendees"
           >
             <VolumeX className="w-3.5 h-3.5 text-red-500" />
-            <span>Mute All</span>
+            <span>{isMutingAll ? 'Muting...' : 'Mute All'}</span>
           </button>
         </div>
       </div>
@@ -140,13 +150,14 @@ export const ParticipantsPanel: React.FC<ParticipantsPanelProps> = ({
                 )}
 
                 <button
-                  onClick={() => onToggleMute(p.id)}
+                  onClick={() => isSelf ? onToggleMute(p.id) : (isHost && !p.isMuted ? onMuteParticipant?.(p.id) : undefined)}
+                  disabled={(!isSelf && (!isHost || p.isMuted || p.role === 'host')) || mutingParticipantIds.has(p.id)}
                   className={`p-1.5 rounded-lg transition-colors ${
                     p.isMuted
                       ? 'bg-red-50 text-red-500 border border-red-100'
                       : 'hover:bg-slate-100 text-emerald-600'
                   }`}
-                  title={p.isMuted ? 'Unmute' : 'Mute'}
+                  title={isSelf ? (p.isMuted ? 'Unmute yourself' : 'Mute yourself') : (p.isMuted ? 'Participant must unmute themselves' : 'Mute participant')}
                 >
                   {p.isMuted ? <MicOff className="w-4 h-4" /> : <Mic className="w-4 h-4" />}
                 </button>

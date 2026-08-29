@@ -9,7 +9,9 @@ import {
   bigint,
   primaryKey,
   index,
+  uniqueIndex,
 } from 'drizzle-orm/pg-core';
+import { sql } from 'drizzle-orm';
 
 export const meetingStatusEnum = pgEnum('meeting_status', ['scheduled', 'live', 'ended']);
 export const participantRoleEnum = pgEnum('participant_role', ['host', 'participant']);
@@ -62,6 +64,7 @@ export const meetingParticipants = pgTable(
       onDelete: 'set null',
     }),
     guestName: varchar('guest_name', { length: 120 }),
+    joinRequestId: uuid('join_request_id'),
     role: participantRoleEnum('role').default('participant').notNull(),
     admission: participantAdmissionEnum('admission').default('pending').notNull(),
     joinedAt: timestamp('joined_at', { withTimezone: true }).defaultNow().notNull(),
@@ -70,6 +73,10 @@ export const meetingParticipants = pgTable(
   (table) => [
     index('participants_meeting_idx').on(table.meetingId),
     index('participants_user_idx').on(table.userId),
+    uniqueIndex('participants_meeting_request_uidx').on(table.meetingId, table.joinRequestId),
+    uniqueIndex('participants_active_user_uidx')
+      .on(table.meetingId, table.userId)
+      .where(sql`${table.userId} is not null and ${table.leftAt} is null`),
   ]
 );
 

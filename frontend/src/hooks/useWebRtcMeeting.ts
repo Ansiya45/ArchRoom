@@ -1,291 +1,361 @@
 import { useEffect, useRef, useState } from 'react';
-import { getAuthToken } from '@/lib/auth';
+import { Room, RoomEvent, Track, type Participant } from 'livekit-client';
 import { getMeetingSession } from '@/lib/meetingSession';
-import type { BackgroundChoice } from '@/types/meeting';
-import type { ChatMessage } from '@/types/meeting';
+import { trpc } from '@/lib/trpc';
+import type { BackgroundChoice, ChatMessage } from '@/types/meeting';
 
-function getCallUrl() {
-  const apiUrl = import.meta.env.VITE_API_BASE_URL;
-  if (apiUrl) return `${apiUrl.replace(/^http/, 'ws').replace(/\/$/, '')}/call`;
-  const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-  return `${protocol}//${window.location.host}/api/call`;
+const encoder = new TextEncoder();
+const decoder = new TextDecoder();
+
+function publicationTrack(participant: Participant, source: Track.Source) {
+  return participant.getTrackPublication(source)?.track?.mediaStreamTrack;
 }
 
-function getPeerConfiguration(): RTCConfiguration {
-  const turnUrl = import.meta.env.VITE_TURN_URL?.trim();
-  const turnUsername = import.meta.env.VITE_TURN_USERNAME?.trim();
-  const turnCredential = import.meta.env.VITE_TURN_CREDENTIAL?.trim();
-  const iceServers: RTCIceServer[] = [
-    { urls: ['stun:stun.l.google.com:19302', 'stun:stun1.l.google.com:19302'] },
-  ];
-
-  if (turnUrl && turnUsername && turnCredential) {
-    iceServers.push({
-      urls: turnUrl.split(',').map((url: string) => url.trim()).filter(Boolean),
-      username: turnUsername,
-      credential: turnCredential,
-    });
-  }
-
-  return { iceServers, iceCandidatePoolSize: 10 };
+function participantStream(participant: Participant) {
+  const stream = new MediaStream();
+  const video = publicationTrack(participant, Track.Source.ScreenShare)
+    || publicationTrack(participant, Track.Source.Camera);
+  const audio = publicationTrack(participant, Track.Source.Microphone);
+  if (video) stream.addTrack(video);
+  if (audio) stream.addTrack(audio);
+  return stream;
 }
 
-export function useWebRtcMeeting(meetingCode: string, enabled: boolean, micOn: boolean, cameraOn: boolean, background: BackgroundChoice) {
-  const socketRef = useRef<WebSocket | null>(null);
-  const localStreamRef = useRef<MediaStream | null>(null);
-  const displayStreamRef = useRef<MediaStream | null>(null);
-  const peersRef = useRef(new Map<string, RTCPeerConnection>());
+function backgroundOf(participant: Participant): BackgroundChoice {
+  const value = participant.attributes.background;
+  return ['none', 'blur', 'office', 'skyline', 'studio'].includes(value)
+    ? value as BackgroundChoice
+    : 'none';
+}
+
+export function useWebRtcMeeting(
+  meetingCode: string,
+  enabled: boolean,
+  micOn: boolean,
+  cameraOn: boolean,
+  background: BackgroundChoice,
+  handRaised: boolean,
+  microphoneDeviceId: string,
+  onMicrophoneStateChange: (enabled: boolean) => void,
+  cameraDeviceId: string,
+  onCameraStateChange: (enabled: boolean) => void
+) {
+  const roomRef = useRef<Room | null>(null);
   const [localStream, setLocalStream] = useState<MediaStream | null>(null);
+  const [displayStream, setDisplayStream] = useState<MediaStream | null>(null);
   const [remoteStreams, setRemoteStreams] = useState<Record<string, MediaStream>>({});
-  const [connectionError, setConnectionError] = useState<string | null>(null);
   const [remoteBackgrounds, setRemoteBackgrounds] = useState<Record<string, BackgroundChoice>>({});
   const [remoteScreenShares, setRemoteScreenShares] = useState<Record<string, boolean>>({});
-  const [displayStream, setDisplayStream] = useState<MediaStream | null>(null);
+  const [remoteRaisedHands, setRemoteRaisedHands] = useState<Record<string, boolean>>({});
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
-  const selfPeerIdRef = useRef<string | null>(null);
-  const backgroundRef = useRef(background);
-  backgroundRef.current = background;
+  const [connectionError, setConnectionError] = useState<string | null>(null);
+  const [microphoneError, setMicrophoneError] = useState<string | null>(null);
+  const [audioInputDevices, setAudioInputDevices] = useState<MediaDeviceInfo[]>([]);
+  const [remoteMicMuted, setRemoteMicMuted] = useState<Record<string, boolean>>({});
+  const [videoInputDevices, setVideoInputDevices] = useState<MediaDeviceInfo[]>([]);
+  const [remoteCameraOn, setRemoteCameraOn] = useState<Record<string, boolean>>({});
+  const [cameraError, setCameraError] = useState<string | null>(null);
+  const micStateCallbackRef = useRef(onMicrophoneStateChange);
+  micStateCallbackRef.current = onMicrophoneStateChange;
+  const cameraStateCallbackRef = useRef(onCameraStateChange);
+  cameraStateCallbackRef.current = onCameraStateChange;
 
-  useEffect(() => {
-    const socket = socketRef.current;
-    if (socket?.readyState === WebSocket.OPEN) {
-      socket.send(JSON.stringify({ type: 'background', background }));
-    }
-  }, [background]);
-
-  const sendSocket = (message: unknown) => {
-    const socket = socketRef.current;
-    if (socket?.readyState === WebSocket.OPEN) socket.send(JSON.stringify(message));
+  const describeCameraError = (error: unknown) => {
+    if (error instanceof DOMException && (error.name === 'NotAllowedError' || error.name === 'SecurityError')) return 'Camera access was denied. Allow camera permission in your browser settings, then try again.';
+    if (error instanceof DOMException && error.name === 'NotFoundError') return 'No camera is available. Connect one and try again.';
+    if (error instanceof DOMException && error.name === 'NotReadableError') return 'The camera is busy or unavailable to this browser.';
+    return error instanceof Error ? error.message : 'Unable to use the camera.';
   };
 
-  const stopScreenShare = () => {
-    const cameraTrack = localStreamRef.current?.getVideoTracks()[0] || null;
-    peersRef.current.forEach((peer) => {
-      const sender = peer.getSenders().find((item) => item.track?.kind === 'video');
-      if (sender) void sender.replaceTrack(cameraTrack);
-    });
-    displayStreamRef.current?.getTracks().forEach((track) => track.stop());
-    displayStreamRef.current = null;
-    setDisplayStream(null);
-    sendSocket({ type: 'screen-share', active: false });
-  };
-
-  const startScreenShare = async () => {
-    if (!navigator.mediaDevices?.getDisplayMedia) throw new Error('Screen sharing is not supported in this browser.');
-    const selected = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: false });
-    const displayTrack = selected.getVideoTracks()[0];
-    if (!displayTrack) throw new Error('No screen was selected.');
-    displayStreamRef.current?.getTracks().forEach((track) => track.stop());
-    displayStreamRef.current = selected;
-    setDisplayStream(selected);
-    peersRef.current.forEach((peer) => {
-      const sender = peer.getSenders().find((item) => item.track?.kind === 'video');
-      if (sender) void sender.replaceTrack(displayTrack);
-    });
-    displayTrack.addEventListener('ended', stopScreenShare, { once: true });
-    sendSocket({ type: 'screen-share', active: true });
-  };
-
-  const sendChatMessage = (text: string) => {
-    const cleanText = text.trim();
-    if (cleanText) sendSocket({ type: 'chat', text: cleanText });
+  const describeMicrophoneError = (error: unknown) => {
+    if (error instanceof DOMException && (error.name === 'NotAllowedError' || error.name === 'SecurityError')) return 'Microphone access was denied. Allow microphone permission in your browser settings, then try again.';
+    if (error instanceof DOMException && error.name === 'NotFoundError') return 'No microphone is available. Connect one and try again.';
+    if (error instanceof DOMException && error.name === 'NotReadableError') return 'The microphone is busy or unavailable to this browser.';
+    return error instanceof Error ? error.message : 'Unable to use the microphone.';
   };
 
   useEffect(() => {
-    localStreamRef.current?.getAudioTracks().forEach((track) => { track.enabled = micOn; });
+    if (!navigator.mediaDevices?.enumerateDevices) return;
+    let active = true;
+    const refresh = async () => {
+      try {
+        const devices = await navigator.mediaDevices.enumerateDevices();
+        if (active) {
+          setAudioInputDevices(devices.filter((device) => device.kind === 'audioinput'));
+          setVideoInputDevices(devices.filter((device) => device.kind === 'videoinput'));
+        }
+      } catch (error) {
+        if (active) setMicrophoneError(describeMicrophoneError(error));
+      }
+    };
+    void refresh();
+    navigator.mediaDevices.addEventListener?.('devicechange', refresh);
+    return () => {
+      active = false;
+      navigator.mediaDevices.removeEventListener?.('devicechange', refresh);
+    };
+  }, []);
+
+  const refreshMedia = (room: Room) => {
+    setLocalStream(participantStream(room.localParticipant));
+    const localMicrophone = room.localParticipant.getTrackPublication(Track.Source.Microphone);
+    if (localMicrophone) micStateCallbackRef.current(!localMicrophone.isMuted);
+    const localCamera = room.localParticipant.getTrackPublication(Track.Source.Camera);
+    if (localCamera) cameraStateCallbackRef.current(!localCamera.isMuted);
+    const localScreenTrack = publicationTrack(room.localParticipant, Track.Source.ScreenShare);
+    setDisplayStream(localScreenTrack ? new MediaStream([localScreenTrack]) : null);
+
+    const streams: Record<string, MediaStream> = {};
+    const backgrounds: Record<string, BackgroundChoice> = {};
+    const screenShares: Record<string, boolean> = {};
+    const raisedHands: Record<string, boolean> = {};
+    const muted: Record<string, boolean> = {};
+    const cameras: Record<string, boolean> = {};
+    room.remoteParticipants.forEach((participant) => {
+      streams[participant.identity] = participantStream(participant);
+      backgrounds[participant.identity] = backgroundOf(participant);
+      screenShares[participant.identity] = Boolean(publicationTrack(participant, Track.Source.ScreenShare));
+      raisedHands[participant.identity] = participant.attributes.handRaised === 'true';
+      const microphone = participant.getTrackPublication(Track.Source.Microphone);
+      muted[participant.identity] = !microphone || microphone.isMuted;
+      const camera = participant.getTrackPublication(Track.Source.Camera);
+      cameras[participant.identity] = Boolean(camera && !camera.isMuted && camera.track);
+    });
+    setRemoteStreams(streams);
+    setRemoteBackgrounds(backgrounds);
+    setRemoteScreenShares(screenShares);
+    setRemoteRaisedHands(raisedHands);
+    setRemoteMicMuted(muted);
+    setRemoteCameraOn(cameras);
+  };
+
+  useEffect(() => {
+    const room = roomRef.current;
+    if (room) void room.localParticipant.setMicrophoneEnabled(micOn, microphoneDeviceId !== 'default' ? { deviceId: microphoneDeviceId } : undefined)
+      .then(() => {
+        setMicrophoneError(null);
+        const publication = room.localParticipant.getTrackPublication(Track.Source.Microphone);
+        micStateCallbackRef.current(Boolean(publication && !publication.isMuted));
+        refreshMedia(room);
+      })
+      .catch((error) => {
+        setMicrophoneError(describeMicrophoneError(error));
+        micStateCallbackRef.current(false);
+      });
   }, [micOn]);
 
   useEffect(() => {
-    localStreamRef.current?.getVideoTracks().forEach((track) => { track.enabled = cameraOn; });
+    const room = roomRef.current;
+    if (!room || !microphoneDeviceId) return;
+    void room.switchActiveDevice('audioinput', microphoneDeviceId).then(() => {
+      setMicrophoneError(null);
+      refreshMedia(room);
+    }).catch(async (error) => {
+      setMicrophoneError(`${describeMicrophoneError(error)} Falling back to the default microphone.`);
+      try {
+        await room.switchActiveDevice('audioinput', 'default');
+        refreshMedia(room);
+      } catch {
+        micStateCallbackRef.current(false);
+      }
+    });
+  }, [microphoneDeviceId]);
+
+  useEffect(() => {
+    const room = roomRef.current;
+    if (room) void room.localParticipant.setCameraEnabled(cameraOn, cameraDeviceId !== 'default' ? { deviceId: cameraDeviceId } : undefined)
+      .then(() => {
+        setCameraError(null);
+        const publication = room.localParticipant.getTrackPublication(Track.Source.Camera);
+        cameraStateCallbackRef.current(Boolean(publication && !publication.isMuted));
+        refreshMedia(room);
+      })
+      .catch((error) => {
+        setCameraError(describeCameraError(error));
+        cameraStateCallbackRef.current(false);
+      });
   }, [cameraOn]);
+
+  useEffect(() => {
+    const room = roomRef.current;
+    if (!room || !cameraDeviceId) return;
+    void room.switchActiveDevice('videoinput', cameraDeviceId).then(() => {
+      setCameraError(null);
+      refreshMedia(room);
+    }).catch(async (error) => {
+      setCameraError(`${describeCameraError(error)} Falling back to the default camera.`);
+      try {
+        await room.switchActiveDevice('videoinput', 'default');
+        refreshMedia(room);
+      } catch {
+        cameraStateCallbackRef.current(false);
+      }
+    });
+  }, [cameraDeviceId]);
+
+  useEffect(() => {
+    const room = roomRef.current;
+    if (room) {
+      void room.localParticipant.setAttributes({ background })
+        .then(() => refreshMedia(room))
+        .catch(() => undefined);
+    }
+  }, [background]);
+
+  useEffect(() => {
+    const room = roomRef.current;
+    if (room) {
+      void room.localParticipant.setAttributes({ handRaised: String(handRaised) })
+        .then(() => refreshMedia(room))
+        .catch(() => undefined);
+    }
+  }, [handRaised]);
 
   useEffect(() => {
     if (!enabled) return;
     let cancelled = false;
-    const pendingIce = new Map<string, RTCIceCandidateInit[]>();
+    const room = new Room({ adaptiveStream: true, dynacast: true });
+    roomRef.current = room;
+    setConnectionError(null);
 
-    const send = (message: unknown) => {
-      const socket = socketRef.current;
-      if (socket?.readyState === WebSocket.OPEN) socket.send(JSON.stringify(message));
-    };
+    const refresh = () => refreshMedia(room);
+    const mediaEvents = [
+      RoomEvent.ParticipantConnected,
+      RoomEvent.ParticipantDisconnected,
+      RoomEvent.TrackSubscribed,
+      RoomEvent.TrackUnsubscribed,
+      RoomEvent.TrackPublished,
+      RoomEvent.TrackUnpublished,
+      RoomEvent.TrackMuted,
+      RoomEvent.TrackUnmuted,
+      RoomEvent.LocalTrackPublished,
+      RoomEvent.LocalTrackUnpublished,
+      RoomEvent.ParticipantAttributesChanged,
+    ];
+    mediaEvents.forEach((event) => room.on(event, refresh));
 
-    const createPeer = (peerId: string) => {
-      const existing = peersRef.current.get(peerId);
-      if (existing) return existing;
-      const peer = new RTCPeerConnection(getPeerConfiguration());
-      const remoteStream = new MediaStream();
-      peersRef.current.set(peerId, peer);
-      const cameraStream = localStreamRef.current;
-      cameraStream?.getAudioTracks().forEach((track) => peer.addTrack(track, cameraStream));
-      const videoTrack = displayStreamRef.current?.getVideoTracks()[0] || cameraStream?.getVideoTracks()[0];
-      if (videoTrack) peer.addTrack(videoTrack, displayStreamRef.current || cameraStream!);
-      peer.onicecandidate = (event) => {
-        if (event.candidate) send({ type: 'ice', target: peerId, payload: event.candidate });
-      };
-      peer.ontrack = (event) => {
-        // Some browsers omit event.streams. Build one stable stream per peer so
-        // separately negotiated audio and video tracks always reach the player.
-        const incomingStream = event.streams[0];
-        const tracks = incomingStream ? incomingStream.getTracks() : [event.track];
-        tracks.forEach((track) => {
-          if (!remoteStream.getTracks().some((current) => current.id === track.id)) {
-            remoteStream.addTrack(track);
-          }
-        });
-        setRemoteStreams((current) => ({ ...current, [peerId]: remoteStream }));
-      };
-      peer.onconnectionstatechange = () => {
-        if (peer.connectionState === 'failed') {
-          peer.restartIce();
-          return;
-        }
-        if (peer.connectionState === 'closed') {
-          peer.close();
-          peersRef.current.delete(peerId);
-          setRemoteStreams((current) => {
-            const next = { ...current };
-            delete next[peerId];
-            return next;
-          });
-        }
-      };
-      return peer;
-    };
-
-    const flushIce = async (peerId: string, peer: RTCPeerConnection) => {
-      const candidates = pendingIce.get(peerId) || [];
-      pendingIce.delete(peerId);
-      for (const candidate of candidates) await peer.addIceCandidate(candidate).catch(() => undefined);
-    };
-
-    const start = async () => {
+    room.on(RoomEvent.DataReceived, (payload, participant, _kind, topic) => {
+      if (topic !== 'meeting-chat' || !participant) return;
       try {
-        const stream = await navigator.mediaDevices.getUserMedia({
-          video: { width: { ideal: 1280 }, height: { ideal: 720 }, facingMode: 'user' },
-          audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
-        });
-        if (cancelled) {
-          stream.getTracks().forEach((track) => track.stop());
-          return;
-        }
-        stream.getAudioTracks().forEach((track) => { track.enabled = micOn; });
-        stream.getVideoTracks().forEach((track) => { track.enabled = cameraOn; });
-        localStreamRef.current = stream;
-        setLocalStream(stream);
-      } catch (error) {
-        setConnectionError(error instanceof Error ? error.message : 'Camera or microphone access failed');
+        const data = JSON.parse(decoder.decode(payload)) as {
+          id: string;
+          text: string;
+          sentAt: string;
+          fileAttachment?: ChatMessage['fileAttachment'];
+        };
+        setChatMessages((current) => [...current, {
+          id: data.id,
+          senderId: participant.identity,
+          senderName: participant.name || 'Participant',
+          senderAvatar: `https://api.dicebear.com/9.x/initials/svg?seed=${encodeURIComponent(participant.name || participant.identity)}`,
+          message: data.text,
+          timestamp: new Date(data.sentAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+          isHost: participant.attributes.role === 'host',
+          fileAttachment: data.fileAttachment,
+        }]);
+      } catch {
+        // Ignore malformed data packets from clients.
       }
+    });
 
-      if (cancelled) return;
-      const socket = new WebSocket(getCallUrl());
-      socketRef.current = socket;
-      socket.onopen = () => {
+    const connect = async () => {
+      try {
         const session = getMeetingSession(meetingCode);
-        socket.send(JSON.stringify({
-          type: 'join',
+        const credentials = await trpc.meetings.livekitToken.mutate({
           meetingCode,
-          token: getAuthToken(),
           participantId: session?.participantId,
-          background: backgroundRef.current,
-        }));
-      };
-      socket.onmessage = async (event) => {
-        const message = JSON.parse(String(event.data));
-        if (message.type === 'peers') {
-          const peers = message.peers as Array<{ peerId: string; background: BackgroundChoice }>;
-          selfPeerIdRef.current = message.selfId;
-          setChatMessages((message.messages || []).map((item: ChatMessage) => ({
-            ...item,
-            senderId: item.senderId === message.selfId ? 'user-self' : item.senderId,
-            timestamp: new Date(item.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-          })));
-          setRemoteBackgrounds(Object.fromEntries(peers.map((peer) => [peer.peerId, peer.background])));
-          setRemoteScreenShares(Object.fromEntries((message.peers || []).map((peer: { peerId: string; screenSharing?: boolean }) => [peer.peerId, Boolean(peer.screenSharing)])));
-          for (const { peerId } of peers) {
-            const peer = createPeer(peerId);
-            const offer = await peer.createOffer();
-            await peer.setLocalDescription(offer);
-            send({ type: 'offer', target: peerId, payload: offer });
-          }
-        } else if (message.type === 'offer') {
-          const peer = createPeer(message.peerId);
-          await peer.setRemoteDescription(message.payload);
-          await flushIce(message.peerId, peer);
-          const answer = await peer.createAnswer();
-          await peer.setLocalDescription(answer);
-          send({ type: 'answer', target: message.peerId, payload: answer });
-        } else if (message.type === 'answer') {
-          const peer = createPeer(message.peerId);
-          await peer.setRemoteDescription(message.payload);
-          await flushIce(message.peerId, peer);
-        } else if (message.type === 'ice') {
-          const peer = createPeer(message.peerId);
-          if (peer.remoteDescription) await peer.addIceCandidate(message.payload).catch(() => undefined);
-          else pendingIce.set(message.peerId, [...(pendingIce.get(message.peerId) || []), message.payload]);
-        } else if (message.type === 'peer-left') {
-          peersRef.current.get(message.peerId)?.close();
-          peersRef.current.delete(message.peerId);
-          setRemoteStreams((current) => {
-            const next = { ...current };
-            delete next[message.peerId];
-            return next;
-          });
-          setRemoteBackgrounds((current) => {
-            const next = { ...current };
-            delete next[message.peerId];
-            return next;
-          });
-          setRemoteScreenShares((current) => {
-            const next = { ...current };
-            delete next[message.peerId];
-            return next;
-          });
-        } else if (message.type === 'peer-joined' || message.type === 'background') {
-          setRemoteBackgrounds((current) => ({ ...current, [message.peerId]: message.background || 'none' }));
-          if (message.type === 'peer-joined') {
-            setRemoteScreenShares((current) => ({ ...current, [message.peerId]: Boolean(message.screenSharing) }));
-          }
-        } else if (message.type === 'screen-share') {
-          setRemoteScreenShares((current) => ({ ...current, [message.peerId]: Boolean(message.active) }));
-        } else if (message.type === 'chat') {
-          const item = message.message as ChatMessage;
-          setChatMessages((current) => [...current, {
-            ...item,
-            senderId: item.senderId === selfPeerIdRef.current ? 'user-self' : item.senderId,
-            timestamp: new Date(item.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-          }]);
-        } else if (message.type === 'error') {
-          setConnectionError(String(message.message));
+        });
+        if (cancelled) return;
+        await room.connect(credentials.url, credentials.token);
+        if (cancelled) return;
+        await room.localParticipant.setAttributes({ background, handRaised: String(handRaised) });
+        const [microphoneResult, cameraResult] = await Promise.allSettled([
+          room.localParticipant.setMicrophoneEnabled(micOn, microphoneDeviceId !== 'default' ? { deviceId: microphoneDeviceId } : undefined),
+          room.localParticipant.setCameraEnabled(cameraOn, cameraDeviceId !== 'default' ? { deviceId: cameraDeviceId } : undefined),
+        ]);
+        if (microphoneResult.status === 'rejected') {
+          setMicrophoneError(describeMicrophoneError(microphoneResult.reason));
+          micStateCallbackRef.current(false);
         }
-      };
-      socket.onerror = () => setConnectionError('Unable to connect to the meeting media server');
+        if (cameraResult.status === 'rejected') {
+          setCameraError(describeCameraError(cameraResult.reason));
+          cameraStateCallbackRef.current(false);
+        }
+        refreshMedia(room);
+      } catch (error) {
+        if (!cancelled) {
+          setConnectionError(error instanceof Error ? error.message : 'Unable to connect to LiveKit');
+        }
+      }
     };
+    void connect();
 
-    void start();
     return () => {
       cancelled = true;
-      socketRef.current?.close();
-      socketRef.current = null;
-      peersRef.current.forEach((peer) => peer.close());
-      peersRef.current.clear();
-      localStreamRef.current?.getTracks().forEach((track) => track.stop());
-      displayStreamRef.current?.getTracks().forEach((track) => track.stop());
-      displayStreamRef.current = null;
-      localStreamRef.current = null;
+      room.removeAllListeners();
+      void room.disconnect();
+      if (roomRef.current === room) roomRef.current = null;
       setLocalStream(null);
+      setDisplayStream(null);
       setRemoteStreams({});
       setRemoteBackgrounds({});
       setRemoteScreenShares({});
-      setDisplayStream(null);
+      setRemoteRaisedHands({});
       setChatMessages([]);
     };
   }, [enabled, meetingCode]);
+
+  const startScreenShare = async () => {
+    const room = roomRef.current;
+    if (!room) throw new Error('LiveKit is not connected yet.');
+    await room.localParticipant.setScreenShareEnabled(true, { audio: true, video: true });
+    refreshMedia(room);
+  };
+
+  const stopScreenShare = () => {
+    const room = roomRef.current;
+    if (!room) return;
+    void room.localParticipant.setScreenShareEnabled(false).then(() => refreshMedia(room));
+  };
+
+  const sendChatMessage = (text: string, fileAttachment?: ChatMessage['fileAttachment']) => {
+    const room = roomRef.current;
+    const cleanText = text.trim();
+    if (!room || (!cleanText && !fileAttachment)) return;
+    const data = {
+      id: crypto.randomUUID(),
+      text: cleanText.slice(0, 4000),
+      sentAt: new Date().toISOString(),
+      fileAttachment,
+    };
+    const encoded = encoder.encode(JSON.stringify(data));
+    const payload = new Uint8Array(encoded.byteLength);
+    payload.set(encoded);
+    void room.localParticipant.publishData(payload, { reliable: true, topic: 'meeting-chat' });
+    setChatMessages((current) => [...current, {
+      id: data.id,
+      senderId: 'user-self',
+      senderName: `${room.localParticipant.name || 'You'} (You)`,
+      senderAvatar: `https://api.dicebear.com/9.x/initials/svg?seed=${encodeURIComponent(room.localParticipant.name || 'You')}`,
+      message: data.text,
+      timestamp: new Date(data.sentAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+      isHost: room.localParticipant.attributes.role === 'host',
+      fileAttachment,
+    }]);
+  };
 
   return {
     localStream,
     remoteStreams,
     remoteBackgrounds,
     remoteScreenShares,
+    remoteRaisedHands,
+    remoteMicMuted,
+    remoteCameraOn,
+    audioInputDevices,
+    videoInputDevices,
+    microphoneError,
+    cameraError,
     displayStream,
     isScreenSharing: Boolean(displayStream),
     startScreenShare,

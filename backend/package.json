@@ -19,6 +19,7 @@
     "dotenv": "^17.2.3",
     "drizzle-orm": "^0.45.2",
     "jsonwebtoken": "^9.0.2",
+    "livekit-server-sdk": "^2.18.0",
     "postgres": "^3.4.9",
     "ws": "^8.21.3",
     "zod": "^4.4.3"

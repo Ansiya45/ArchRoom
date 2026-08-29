@@ -2,6 +2,8 @@ import { TRPCError } from '@trpc/server';
 import { and, eq, inArray, isNull } from 'drizzle-orm';
 import { db } from '../db/index.js';
 import { meetings, meetingParticipants, users } from '../db/schema.js';
+import { AccessToken, RoomServiceClient, TrackSource } from 'livekit-server-sdk';
+import { env } from '../env.js';
 
 export type CreateMeetingInput = {
   title: string;
@@ -13,6 +15,7 @@ export type CreateMeetingInput = {
 export type JoinMeetingIdentity = {
   userId?: string;
   guestName?: string;
+  joinRequestId: string;
 };
 
 export class MeetingService {
@@ -136,31 +139,49 @@ export class MeetingService {
           meetingId: meeting.id,
           userId: identity.userId,
           guestName: null,
+          joinRequestId: identity.joinRequestId,
           role: 'participant',
           admission: meeting.hostUserId === identity.userId ? 'admitted' : 'pending',
           joinedAt: new Date(),
           leftAt: null,
         })
+        .onConflictDoNothing()
         .returning();
 
-      return { ok: true, meeting, participant };
+      if (participant) return { ok: true, meeting, participant };
+      const concurrent = await db.query.meetingParticipants.findFirst({
+        where: and(eq(meetingParticipants.meetingId, meeting.id), eq(meetingParticipants.userId, identity.userId), isNull(meetingParticipants.leftAt)),
+      });
+      if (!concurrent) throw new TRPCError({ code: 'CONFLICT', message: 'Unable to resolve the active join request' });
+      return { ok: true, meeting, participant: concurrent };
     }
 
     const guestName = identity.guestName?.trim() || 'Guest User';
+    const existingRequest = await db.query.meetingParticipants.findFirst({
+      where: and(eq(meetingParticipants.meetingId, meeting.id), eq(meetingParticipants.joinRequestId, identity.joinRequestId)),
+    });
+    if (existingRequest) return { ok: true, meeting, participant: existingRequest };
     const [participant] = await db
       .insert(meetingParticipants)
       .values({
         meetingId: meeting.id,
         userId: null,
         guestName,
+        joinRequestId: identity.joinRequestId,
         role: 'participant',
         admission: 'pending',
         joinedAt: new Date(),
         leftAt: null,
       })
+      .onConflictDoNothing()
       .returning();
 
-    return { ok: true, meeting, participant };
+    if (participant) return { ok: true, meeting, participant };
+    const concurrent = await db.query.meetingParticipants.findFirst({
+      where: and(eq(meetingParticipants.meetingId, meeting.id), eq(meetingParticipants.joinRequestId, identity.joinRequestId)),
+    });
+    if (!concurrent) throw new TRPCError({ code: 'CONFLICT', message: 'Unable to resolve the active join request' });
+    return { ok: true, meeting, participant: concurrent };
   }
 
   async getAdmissionStatus(meetingCode: string, participantId: string) {
@@ -233,9 +254,21 @@ export class MeetingService {
         isNull(meetingParticipants.leftAt)
       ));
 
+    let visibleParticipants = participants;
+    if (env.LIVEKIT_URL && env.LIVEKIT_API_KEY && env.LIVEKIT_API_SECRET) {
+      try {
+        const livekit = new RoomServiceClient(env.LIVEKIT_URL.replace(/^ws/, 'http'), env.LIVEKIT_API_KEY, env.LIVEKIT_API_SECRET);
+        const liveParticipants = await livekit.listParticipants(`archroom-${meeting.id}`);
+        const liveIdentities = new Set(liveParticipants.map((entry) => entry.identity));
+        visibleParticipants = participants.filter((entry) => entry.id === requester.id || liveIdentities.has(entry.id));
+      } catch {
+        // Preserve database presence if LiveKit's management API is temporarily unavailable.
+      }
+    }
+
     return {
       ok: true,
-      participants: participants.map((participant) => ({
+      participants: visibleParticipants.map((participant) => ({
         id: participant.id,
         name: participant.guestName || participant.userName || 'Guest User',
         role: participant.role,
@@ -257,7 +290,13 @@ export class MeetingService {
       .returning();
 
     if (!participant) {
-      throw new TRPCError({ code: 'NOT_FOUND', message: 'Pending join request not found' });
+      const existing = await db.query.meetingParticipants.findFirst({
+        where: and(eq(meetingParticipants.id, participantId), eq(meetingParticipants.meetingId, meeting.id)),
+      });
+      const desiredAdmission = admit ? 'admitted' : 'denied';
+      if (existing?.admission === desiredAdmission) return { ok: true, participant: existing };
+      if (existing) throw new TRPCError({ code: 'CONFLICT', message: `Join request was already ${existing.admission}` });
+      throw new TRPCError({ code: 'NOT_FOUND', message: 'Join request not found' });
     }
 
     return { ok: true, participant };
@@ -330,9 +369,18 @@ export class MeetingService {
         isNull(meetingParticipants.leftAt)
       ),
     });
-    if (!participant) throw new TRPCError({ code: 'NOT_FOUND', message: 'Active participant not found' });
+    // Leaving can be reported more than once (for example by the Leave button
+    // followed by the browser's pagehide event). Treat repeated reports as a
+    // successful no-op so stale roster entries are never kept because of a race.
+    if (!participant) return { ok: true, meetingEnded: false };
 
     await db.update(meetingParticipants).set({ leftAt: new Date() }).where(eq(meetingParticipants.id, participant.id));
+    if (env.LIVEKIT_URL && env.LIVEKIT_API_KEY && env.LIVEKIT_API_SECRET) {
+      const livekit = new RoomServiceClient(env.LIVEKIT_URL.replace(/^ws/, 'http'), env.LIVEKIT_API_KEY, env.LIVEKIT_API_SECRET);
+      await livekit.removeParticipant(`archroom-${meeting.id}`, participant.id, {
+        revokeTokenTs: BigInt(Math.floor(Date.now() / 1000)),
+      }).catch(() => undefined);
+    }
     return { ok: true, meetingEnded: false };
   }
 
@@ -371,6 +419,54 @@ export class MeetingService {
     return { ok: true };
   }
 
+  async createLiveKitToken(meetingCode: string, identity: { userId?: string; participantId?: string }) {
+    if (!env.LIVEKIT_URL || !env.LIVEKIT_API_KEY || !env.LIVEKIT_API_SECRET) {
+      throw new TRPCError({ code: 'PRECONDITION_FAILED', message: 'LiveKit is not configured on the server' });
+    }
+    const meeting = await this.requireMeeting(meetingCode);
+    if (meeting.status === 'ended') {
+      throw new TRPCError({ code: 'FORBIDDEN', message: 'This meeting has ended' });
+    }
+    const participant = await db.query.meetingParticipants.findFirst({
+      where: and(
+        eq(meetingParticipants.meetingId, meeting.id),
+        identity.userId
+          ? eq(meetingParticipants.userId, identity.userId)
+          : eq(meetingParticipants.id, identity.participantId || '00000000-0000-0000-0000-000000000000'),
+        eq(meetingParticipants.admission, 'admitted'),
+        isNull(meetingParticipants.leftAt)
+      ),
+    });
+    if (!participant) {
+      throw new TRPCError({ code: 'FORBIDDEN', message: 'You must be admitted before joining media' });
+    }
+    const user = participant.userId
+      ? await db.query.users.findFirst({ where: eq(users.id, participant.userId) })
+      : null;
+    const name = participant.guestName || user?.fullName || 'Participant';
+    const roomName = `archroom-${meeting.id}`;
+    const accessToken = new AccessToken(env.LIVEKIT_API_KEY, env.LIVEKIT_API_SECRET, {
+      identity: participant.id,
+      name,
+      ttl: '6h',
+      attributes: {
+        meetingCode: meeting.meetingCode,
+        role: participant.role,
+        background: 'none',
+        handRaised: 'false',
+      },
+    });
+    accessToken.addGrant({
+      roomJoin: true,
+      room: roomName,
+      canPublish: true,
+      canSubscribe: true,
+      canPublishData: true,
+      canUpdateOwnMetadata: true,
+    });
+    return { ok: true, url: env.LIVEKIT_URL, token: await accessToken.toJwt(), participantId: participant.id };
+  }
+
   async removeParticipant(meetingCode: string, participantId: string, hostUserId: string) {
     const meeting = await this.requireHost(meetingCode, hostUserId);
     const [participant] = await db.update(meetingParticipants)
@@ -384,7 +480,62 @@ export class MeetingService {
       ))
       .returning();
     if (!participant) throw new TRPCError({ code: 'NOT_FOUND', message: 'Active participant not found' });
+
+    if (env.LIVEKIT_URL && env.LIVEKIT_API_KEY && env.LIVEKIT_API_SECRET) {
+      const livekit = new RoomServiceClient(
+        env.LIVEKIT_URL.replace(/^ws/, 'http'),
+        env.LIVEKIT_API_KEY,
+        env.LIVEKIT_API_SECRET
+      );
+      await livekit.removeParticipant(`archroom-${meeting.id}`, participant.id, {
+        revokeTokenTs: BigInt(Math.floor(Date.now() / 1000)),
+      })
+        .catch((error) => console.warn('LiveKit participant removal failed; membership polling will disconnect them.', error));
+    }
     return { ok: true };
+  }
+
+  async muteParticipant(meetingCode: string, participantId: string, hostUserId: string) {
+    const meeting = await this.requireHost(meetingCode, hostUserId);
+    const participant = await db.query.meetingParticipants.findFirst({
+      where: and(
+        eq(meetingParticipants.id, participantId),
+        eq(meetingParticipants.meetingId, meeting.id),
+        eq(meetingParticipants.admission, 'admitted'),
+        isNull(meetingParticipants.leftAt)
+      ),
+    });
+    if (!participant) throw new TRPCError({ code: 'NOT_FOUND', message: 'Active participant not found' });
+    if (participant.role === 'host') throw new TRPCError({ code: 'BAD_REQUEST', message: 'Use your own microphone control to mute yourself' });
+    if (!env.LIVEKIT_URL || !env.LIVEKIT_API_KEY || !env.LIVEKIT_API_SECRET) throw new TRPCError({ code: 'PRECONDITION_FAILED', message: 'LiveKit is not configured' });
+
+    const livekit = new RoomServiceClient(env.LIVEKIT_URL.replace(/^ws/, 'http'), env.LIVEKIT_API_KEY, env.LIVEKIT_API_SECRET);
+    const liveParticipant = await livekit.getParticipant(`archroom-${meeting.id}`, participant.id)
+      .catch(() => null);
+    if (!liveParticipant) throw new TRPCError({ code: 'NOT_FOUND', message: 'Participant is no longer connected' });
+    const microphone = liveParticipant.tracks.find((track) => track.source === TrackSource.MICROPHONE);
+    if (!microphone || microphone.muted) return { ok: true, alreadyMuted: true };
+    await livekit.mutePublishedTrack(`archroom-${meeting.id}`, participant.id, microphone.sid, true);
+    return { ok: true, alreadyMuted: false };
+  }
+
+  async muteAllParticipants(meetingCode: string, hostUserId: string) {
+    const meeting = await this.requireHost(meetingCode, hostUserId);
+    if (!env.LIVEKIT_URL || !env.LIVEKIT_API_KEY || !env.LIVEKIT_API_SECRET) throw new TRPCError({ code: 'PRECONDITION_FAILED', message: 'LiveKit is not configured' });
+    const attendees = await db.select({ id: meetingParticipants.id }).from(meetingParticipants).where(and(
+      eq(meetingParticipants.meetingId, meeting.id),
+      eq(meetingParticipants.role, 'participant'),
+      eq(meetingParticipants.admission, 'admitted'),
+      isNull(meetingParticipants.leftAt)
+    ));
+    const attendeeIds = new Set(attendees.map((entry) => entry.id));
+    const livekit = new RoomServiceClient(env.LIVEKIT_URL.replace(/^ws/, 'http'), env.LIVEKIT_API_KEY, env.LIVEKIT_API_SECRET);
+    const liveParticipants = await livekit.listParticipants(`archroom-${meeting.id}`);
+    const microphoneTracks = liveParticipants.flatMap((participant) => attendeeIds.has(participant.identity)
+      ? participant.tracks.filter((track) => track.source === TrackSource.MICROPHONE && !track.muted).map((track) => ({ identity: participant.identity, sid: track.sid }))
+      : []);
+    await Promise.all(microphoneTracks.map((track) => livekit.mutePublishedTrack(`archroom-${meeting.id}`, track.identity, track.sid, true)));
+    return { ok: true, mutedCount: microphoneTracks.length };
   }
 
   private async requireMeeting(meetingCode: string) {

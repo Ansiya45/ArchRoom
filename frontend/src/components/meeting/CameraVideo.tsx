@@ -12,6 +12,8 @@ interface CameraVideoProps {
   objectFit?: 'cover' | 'contain';
   isSelf?: boolean;
   mediaStream?: MediaStream | null;
+  cameraDeviceId?: string;
+  onCameraUnavailable?: (message: string) => void;
 }
 
 declare global {
@@ -68,6 +70,8 @@ export const CameraVideo: React.FC<CameraVideoProps> = ({
   objectFit = 'cover',
   isSelf = true,
   mediaStream,
+  cameraDeviceId = 'default',
+  onCameraUnavailable,
 }) => {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const previewVideoRef = useRef<HTMLVideoElement | null>(null);
@@ -78,6 +82,7 @@ export const CameraVideo: React.FC<CameraVideoProps> = ({
   const ownsStreamRef = useRef(false);
   const cameraRequestedRef = useRef(false);
   const cameraEnabledRef = useRef(isCameraOn);
+  const cameraDeviceRef = useRef(cameraDeviceId);
   const mountedRef = useRef(true);
   const selfieSegmentationRef = useRef<any>(null);
   cameraEnabledRef.current = isCameraOn;
@@ -88,6 +93,19 @@ export const CameraVideo: React.FC<CameraVideoProps> = ({
   const [isAiSegmentationReady, setIsAiSegmentationReady] = useState<boolean>(false);
 
   const currentBgUrl = BACKGROUND_IMAGES[activeBg];
+
+  useEffect(() => {
+    if (cameraDeviceRef.current === cameraDeviceId) return;
+    cameraDeviceRef.current = cameraDeviceId;
+    if (ownsStreamRef.current && streamRef.current) {
+      streamRef.current.getTracks().forEach((track) => track.stop());
+      activeCameraStreams.delete(streamRef.current);
+      streamRef.current = null;
+      ownsStreamRef.current = false;
+      cameraRequestedRef.current = false;
+      setStream(null);
+    }
+  }, [cameraDeviceId]);
 
   // Warm the local-only background assets while the meeting is idle so a
   // later selection can switch immediately without starting multiple loads.
@@ -164,7 +182,7 @@ export const CameraVideo: React.FC<CameraVideoProps> = ({
             video: {
               width: { ideal: 1280 },
               height: { ideal: 720 },
-              facingMode: 'user',
+              ...(cameraDeviceId !== 'default' ? { deviceId: { exact: cameraDeviceId } } : { facingMode: 'user' }),
             },
             audio: false,
           });
@@ -182,6 +200,12 @@ export const CameraVideo: React.FC<CameraVideoProps> = ({
           ownsStreamRef.current = true;
           activeCameraStreams.add(mediaStream);
           setStream(mediaStream);
+          mediaStream.getVideoTracks()[0]?.addEventListener('ended', () => {
+            if (!mountedRef.current) return;
+            setStream(null);
+            setHasError(true);
+            setErrorMessage('The selected camera was disconnected. Choose another camera or the default device.');
+          }, { once: true });
 
           if (videoRef.current) {
             videoRef.current.srcObject = mediaStream;
@@ -193,16 +217,16 @@ export const CameraVideo: React.FC<CameraVideoProps> = ({
         cameraRequestedRef.current = false;
         console.warn('Real webcam access error:', err);
         setHasError(true);
-        setErrorMessage(
-          err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError'
-            ? 'Camera permission denied in browser.'
-            : 'Webcam device not found or already in use.'
-        );
+        const message = err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError'
+          ? 'Camera permission was denied. Allow camera access in your browser settings, then try again.'
+          : 'The selected camera was not found or is already in use.';
+        setErrorMessage(message);
+        onCameraUnavailable?.(message);
       }
     }
 
     startCamera();
-  }, [isCameraOn, isSelf, mediaStream]);
+  }, [isCameraOn, isSelf, mediaStream, cameraDeviceId, onCameraUnavailable]);
 
   useEffect(() => {
     mountedRef.current = true;

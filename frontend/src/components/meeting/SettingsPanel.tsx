@@ -22,6 +22,11 @@ interface SettingsPanelProps {
   deviceSettings: DeviceSettings;
   setDeviceSettings: React.Dispatch<React.SetStateAction<DeviceSettings>>;
   onClose: () => void;
+  onEnsureCameraOn?: () => void;
+  audioInputDevices: MediaDeviceInfo[];
+  microphoneError: string | null;
+  videoInputDevices: MediaDeviceInfo[];
+  cameraError: string | null;
 }
 
 interface BackgroundPreset {
@@ -66,9 +71,15 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
   deviceSettings,
   setDeviceSettings,
   onClose,
+  onEnsureCameraOn,
+  audioInputDevices,
+  microphoneError,
+  videoInputDevices,
+  cameraError,
 }) => {
   const [activeTab, setActiveTab] = useState<'audio' | 'video' | 'network' | 'general'>('audio');
   const [isTestingAudio, setIsTestingAudio] = useState(false);
+  const [previewBackground, setPreviewBackground] = useState<BackgroundChoice>(deviceSettings.backgroundBlur);
 
   const handleTestAudio = () => {
     setIsTestingAudio(true);
@@ -131,10 +142,10 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                   }
                   className="w-full py-3 px-4 rounded-2xl bg-white border border-blue-100 text-slate-800 text-xs sm:text-sm font-medium focus:outline-none focus:border-blue-500 shadow-sm"
                 >
-                  <option value="default-mic">Built-in Microphone (MacBook Pro Array)</option>
-                  <option value="external-mic">USB Studio Condenser Mic (Podcast Pro)</option>
-                  <option value="bluetooth-mic">AirPods Pro Bluetooth Mic</option>
+                  <option value="default">Default microphone</option>
+                  {audioInputDevices.filter((device) => device.deviceId !== 'default').map((device, index) => <option key={device.deviceId} value={device.deviceId}>{device.label || `Microphone ${index + 1}`}</option>)}
                 </select>
+                {microphoneError && <p role="alert" className="rounded-xl border border-red-200 bg-red-50 p-3 text-xs font-medium text-red-700">{microphoneError}</p>}
               </div>
 
               {/* Speaker Select & Test */}
@@ -204,9 +215,10 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                   }
                   className="w-full py-3 px-4 rounded-2xl bg-white border border-blue-100 text-slate-800 text-xs sm:text-sm font-medium focus:outline-none focus:border-blue-500 shadow-sm"
                 >
-                  <option value="default-camera">FaceTime HD Camera (1080p Built-in)</option>
-                  <option value="external-webcam">Logitech Brio 4K Stream Cam</option>
+                  <option value="default">Default camera</option>
+                  {videoInputDevices.filter((device) => device.deviceId !== 'default').map((device, index) => <option key={device.deviceId} value={device.deviceId}>{device.label || `Camera ${index + 1}`}</option>)}
                 </select>
+                {cameraError && <p role="alert" className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs font-medium text-amber-800">{cameraError}</p>}
               </div>
 
               {/* Virtual Background Options (5 Collection) */}
@@ -217,14 +229,14 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                 </label>
                 <div className="grid grid-cols-5 gap-2">
                   {BACKGROUND_PRESETS.map((preset) => {
-                    const isSelected = deviceSettings.backgroundBlur === preset.id;
+                    const isSelected = previewBackground === preset.id;
                     return (
                       <button
                         key={preset.id}
                         type="button"
-                        onClick={() =>
-                          setDeviceSettings((prev) => ({ ...prev, backgroundBlur: preset.id }))
-                        }
+                        onClick={() => {
+                          setPreviewBackground(preset.id);
+                        }}
                         title={preset.name}
                         className={`relative aspect-square rounded-2xl overflow-hidden border-2 transition-all flex items-center justify-center ${
                           isSelected
@@ -307,7 +319,11 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
         {/* Footer */}
         <div className="pt-2 border-t border-blue-100/60 flex justify-end">
           <button
-            onClick={onClose}
+            onClick={() => {
+              onEnsureCameraOn?.();
+              setDeviceSettings((prev) => ({ ...prev, backgroundBlur: previewBackground }));
+              onClose();
+            }}
             className="py-2.5 px-6 rounded-2xl bg-blue-600 hover:bg-blue-700 text-white text-xs sm:text-sm font-bold shadow-md shadow-blue-200 transition-all active:scale-95"
           >
             Save & Apply

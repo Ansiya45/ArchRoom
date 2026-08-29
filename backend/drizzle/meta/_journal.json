@@ -22,6 +22,13 @@
       "when": 1787011200000,
       "tag": "0002_waiting_room",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1787990400000,
+      "tag": "0003_idempotent_join",
+      "breakpoints": true
     }
   ]
 }

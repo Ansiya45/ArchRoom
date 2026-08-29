@@ -3,6 +3,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import {
   Circle,
+  Download,
   Eraser,
   Minus,
   Pencil,
@@ -231,12 +232,45 @@ export const Whiteboard: React.FC<WhiteboardProps> = ({
   };
 
   const clear = () => {
+    if (!isHost) return;
     const canvas = canvasRef.current;
     const ctx = context();
     if (!canvas || !ctx) return;
     saveHistory();
     ctx.clearRect(0, 0, canvas.width, canvas.height);
     publish();
+  };
+
+  const downloadPdf = async () => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const { jsPDF } = await import('jspdf');
+    const pdf = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
+    const pageWidth = pdf.internal.pageSize.getWidth();
+    const pageHeight = pdf.internal.pageSize.getHeight();
+    const margin = 8;
+    const drawWidth = pageWidth - margin * 2;
+    const drawHeight = pageHeight - margin * 2;
+    const sliceHeight = Math.max(1, Math.floor(canvas.width * (drawHeight / drawWidth)));
+    const pages = Math.ceil(canvas.height / sliceHeight);
+
+    for (let page = 0; page < pages; page += 1) {
+      if (page > 0) pdf.addPage('a4', 'landscape');
+      const sourceY = page * sliceHeight;
+      const currentHeight = Math.min(sliceHeight, canvas.height - sourceY);
+      const pageCanvas = document.createElement('canvas');
+      pageCanvas.width = canvas.width;
+      pageCanvas.height = sliceHeight;
+      const pageContext = pageCanvas.getContext('2d');
+      if (!pageContext) continue;
+      pageContext.fillStyle = '#0f172a';
+      pageContext.fillRect(0, 0, pageCanvas.width, pageCanvas.height);
+      pageContext.drawImage(canvas, 0, sourceY, canvas.width, currentHeight, 0, 0, canvas.width, currentHeight);
+      const renderedHeight = drawHeight * (currentHeight / sliceHeight);
+      pdf.addImage(pageCanvas.toDataURL('image/png'), 'PNG', margin, margin, drawWidth, renderedHeight, undefined, 'FAST');
+    }
+
+    pdf.save(`whiteboard-${new Date().toISOString().replace(/[:.]/g, '-')}.pdf`);
   };
 
   const commitText = () => {
@@ -290,11 +324,22 @@ export const Whiteboard: React.FC<WhiteboardProps> = ({
           <button type="button" disabled={!canEdit} onClick={undo} title="Undo" aria-label="Undo" className="p-2 rounded-xl border border-slate-200 bg-white text-slate-600 hover:bg-blue-50 disabled:opacity-40">
             <Undo2 className="w-4 h-4" />
           </button>
-          <button type="button" disabled={!canEdit} onClick={clear} title="Clear board" aria-label="Clear board" className="p-2 rounded-xl border border-rose-200 bg-white text-rose-600 hover:bg-rose-50 disabled:opacity-40">
-            <Trash2 className="w-4 h-4" />
-          </button>
+          {isHost && (
+            <button type="button" disabled={!canEdit} onClick={clear} title="Clear board" aria-label="Clear board" className="p-2 rounded-xl border border-rose-200 bg-white text-rose-600 hover:bg-rose-50 disabled:opacity-40">
+              <Trash2 className="w-4 h-4" />
+            </button>
+          )}
         </div>
         <div className="relative flex items-center gap-1.5">
+          <button
+            type="button"
+            onClick={() => void downloadPdf()}
+            title="Download whiteboard as PDF"
+            aria-label="Download whiteboard as PDF"
+            className="p-2 rounded-xl border border-slate-200 bg-white text-slate-600 hover:bg-blue-50"
+          >
+            <Download className="w-5 h-5" />
+          </button>
           <button
             type="button"
             disabled={!isHost || !connected}

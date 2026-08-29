@@ -64,8 +64,8 @@ const ControlButton: React.FC<ControlButtonProps> = ({
       </button>
 
       {/* Control Label below icon */}
-      <span className="text-[10px] font-semibold text-slate-600 mt-1 hidden md:block">
-        {label}
+      <span aria-hidden={!label} className={`text-[10px] font-semibold mt-1 hidden md:block h-[15px] ${label ? 'text-slate-600' : 'invisible'}`}>
+        {label || 'Control'}
       </span>
     </div>
   );
@@ -89,7 +89,7 @@ export const BottomControls: React.FC<BottomControlsProps> = ({
         <ControlButton
           onClick={onToggleMic}
           icon={isMicOn ? <Mic /> : <MicOff />}
-          label={isMicOn ? 'Audio On' : 'Audio Off'}
+          label=""
           isActive={isMicOn}
           isDanger={!isMicOn}
           tooltip={isMicOn ? 'Mute Microphone' : 'Unmute Microphone'}
