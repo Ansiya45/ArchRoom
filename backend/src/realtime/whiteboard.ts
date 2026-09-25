@@ -3,6 +3,7 @@ import { WebSocket, WebSocketServer } from 'ws';
 import { and, eq, isNull } from 'drizzle-orm';
 import { db } from '../db/index.js';
 import { meetingParticipants, meetings, users } from '../db/schema.js';
+import { assertCurrentOccurrence, participantScope } from '../services/meeting-occurrence.service.js';
 import { verifyJwt } from '../utils/jwt.js';
 
 type Client = {
@@ -53,13 +54,16 @@ async function identify(input: any) {
     where: eq(meetings.meetingCode, meetingCode),
   });
   if (!meeting) return null;
+  try { assertCurrentOccurrence(meeting, input.occurrenceId); } catch { return null; }
+  const roomKey = (meeting.scheduleType === 'reusable' || meeting.scheduleType === 'recurring') ? `${meetingCode}:${meeting.activeOccurrenceId}` : meetingCode;
 
   if (input.token) {
     try {
       const identity = verifyJwt(String(input.token));
       const participant = await db.query.meetingParticipants.findFirst({
         where: and(
-          eq(meetingParticipants.meetingId, meeting.id),
+          eq(meetingParticipants.meetingId, meeting.id), participantScope(meeting),
+          (meeting.scheduleType === 'reusable' || meeting.scheduleType === 'recurring') ? eq(meetingParticipants.id, String(input.participantId || '00000000-0000-0000-0000-000000000000')) : undefined,
           eq(meetingParticipants.userId, identity.sub),
           eq(meetingParticipants.admission, 'admitted'),
           isNull(meetingParticipants.leftAt)
@@ -68,7 +72,7 @@ async function identify(input: any) {
       if (!participant) return null;
       const user = await db.query.users.findFirst({ where: eq(users.id, identity.sub) });
       return {
-        meetingCode,
+        meetingCode: roomKey,
         key: `user:${identity.sub}`,
         name: user?.fullName || identity.name || 'Participant',
         isHost: meeting.hostUserId === identity.sub,
@@ -82,14 +86,15 @@ async function identify(input: any) {
   const participant = await db.query.meetingParticipants.findFirst({
     where: and(
       eq(meetingParticipants.id, participantId),
-      eq(meetingParticipants.meetingId, meeting.id),
+      eq(meetingParticipants.meetingId, meeting.id), participantScope(meeting),
+          (meeting.scheduleType === 'reusable' || meeting.scheduleType === 'recurring') ? eq(meetingParticipants.id, String(input.participantId || '00000000-0000-0000-0000-000000000000')) : undefined,
       eq(meetingParticipants.admission, 'admitted'),
       isNull(meetingParticipants.leftAt)
     ),
   });
   if (!participant) return null;
   return {
-    meetingCode,
+    meetingCode: roomKey,
     key: `guest:${participant.id}`,
     name: participant.guestName || 'Guest User',
     isHost: false,
@@ -128,7 +133,11 @@ export function attachWhiteboardServer(server: Server) {
         currentRoom.clients.add(currentClient);
         broadcast(currentRoom);
 
-        socket.on('message', (nextRaw) => {
+        socket.on('message', async (nextRaw) => {
+          if (message.occurrenceId) {
+            try { if (!(await identify(message))) { socket.close(); return; } }
+            catch { send(socket, { type: 'error', message: 'Unable to verify the room session' }); return; }
+          }
           if (!currentRoom || !currentClient) return;
           try {
             const next = JSON.parse(nextRaw.toString());

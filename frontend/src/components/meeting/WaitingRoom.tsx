@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useCallback, useState } from 'react';
+import React, { useCallback } from 'react';
 import {
   Video,
   VideoOff,
@@ -33,11 +33,12 @@ interface WaitingRoomProps {
   onDisplayNameChange: (name: string) => void;
   deviceSettings: DeviceSettings;
   setDeviceSettings: React.Dispatch<React.SetStateAction<DeviceSettings>>;
-  audioInputDevices: MediaDeviceInfo[];
-  microphoneError: string | null;
-  videoInputDevices: MediaDeviceInfo[];
-  cameraError: string | null;
   isJoining: boolean;
+  accountEmail?: string;
+  checkingSession: boolean;
+  sessionError: string;
+  onRetrySession: () => void;
+  onOpenAuth: (mode: 'login' | 'signup') => void;
 }
 
 interface BackgroundPreset {
@@ -90,16 +91,15 @@ export const WaitingRoom: React.FC<WaitingRoomProps> = ({
   onDisplayNameChange,
   deviceSettings,
   setDeviceSettings,
-  audioInputDevices,
-  microphoneError,
-  videoInputDevices,
-  cameraError,
   isJoining,
+  accountEmail,
+  checkingSession,
+  sessionError,
+  onRetrySession,
+  onOpenAuth,
 }) => {
   const activeBg = deviceSettings.backgroundBlur || 'blur';
-  const [previewCameraError, setPreviewCameraError] = useState<string | null>(null);
-  const handleCameraUnavailable = useCallback((message: string) => {
-    setPreviewCameraError(message);
+  const handleCameraUnavailable = useCallback(() => {
     if (isCameraOn) onToggleCamera();
   }, [isCameraOn, onToggleCamera]);
 
@@ -128,10 +128,16 @@ export const WaitingRoom: React.FC<WaitingRoomProps> = ({
           </div>
         </div>
 
-        <div className="flex items-center space-x-2 text-xs text-emerald-700 bg-emerald-50 px-3 py-1.5 rounded-full border border-emerald-200/80 shadow-sm font-semibold">
-          <ShieldCheck className="w-4 h-4 text-emerald-600" />
-          <span className="hidden sm:inline">E2E Encrypted Room</span>
-        </div>
+        <nav aria-label="Account" className="flex flex-wrap items-center justify-end gap-2 text-sm">
+          {checkingSession ? <span role="status">Checking your session...</span> : accountEmail ? (
+            <span className="max-w-48 truncate text-xs font-semibold text-slate-700" title={accountEmail}>Signed in as {accountEmail}</span>
+          ) : (
+            <>
+              <button onClick={() => onOpenAuth('login')} className="rounded-xl px-3 py-2 font-semibold text-blue-600 hover:bg-blue-50">Log in</button>
+              <button onClick={() => onOpenAuth('signup')} className="rounded-xl bg-blue-600 px-3 py-2 font-semibold text-white hover:bg-blue-700">Sign up</button>
+            </>
+          )}
+        </nav>
       </header>
 
       {/* Main Content Area - Scaled for Desktop Viewports */}
@@ -237,16 +243,16 @@ export const WaitingRoom: React.FC<WaitingRoomProps> = ({
         </div>
 
         {/* Right Column: Meeting Join Settings */}
-        <div className="lg:col-span-5 space-y-4 sm:space-y-5 bg-white/80 border border-white p-5 sm:p-6 rounded-3xl backdrop-blur-2xl shadow-xl text-slate-800 h-full flex flex-col justify-between">
+        <div className="lg:col-span-5 self-center w-full bg-white/80 border border-white p-4 sm:p-5 rounded-3xl backdrop-blur-2xl shadow-xl text-slate-800 flex flex-col gap-5">
           <div className="space-y-1.5">
             <span className="text-[11px] font-bold text-blue-600 uppercase tracking-wider">
               Ready to connect
             </span>
-            <h2 className="text-xl sm:text-2xl font-bold text-slate-900 leading-tight">
+            <h2 className="text-lg sm:text-xl font-bold text-slate-900 leading-tight">
               {meetingTitle}
             </h2>
             <p className="text-xs text-slate-500">
-              Configure display name and hardware before entering the call.
+              {accountEmail ? 'Confirm your display name before entering the call.' : 'Sign up or log in to YLAAM-MEET before joining this meeting.'}
             </p>
           </div>
 
@@ -258,39 +264,22 @@ export const WaitingRoom: React.FC<WaitingRoomProps> = ({
             </label>
             <input
               type="text"
-              value={displayName}
+              disabled={!accountEmail}
+              value={accountEmail ? displayName : ''}
               onChange={(e) => onDisplayNameChange(e.target.value)}
               placeholder="Enter your name"
               className="w-full py-2.5 px-3.5 rounded-2xl bg-white border border-blue-100 text-slate-800 font-medium text-xs sm:text-sm focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100 transition-all shadow-sm"
             />
           </div>
 
-          {/* Browser media devices */}
-          <div className="space-y-2">
-            <div className="text-xs font-bold text-slate-700">Hardware Verification</div>
-            <select value={deviceSettings.micId} onChange={(event) => setDeviceSettings((settings) => ({ ...settings, micId: event.target.value }))} className="w-full p-2.5 rounded-2xl bg-white border border-blue-100 text-xs text-slate-700">
-              <option value="default">Default microphone</option>
-              {audioInputDevices.filter((device) => device.deviceId !== 'default').map((device, index) => <option key={device.deviceId} value={device.deviceId}>{device.label || `Microphone ${index + 1}`}</option>)}
-            </select>
-            {microphoneError && <p role="alert" className="rounded-xl border border-red-200 bg-red-50 p-2.5 text-[11px] font-medium text-red-700">{microphoneError}</p>}
-            <select value={deviceSettings.cameraId} onChange={(event) => setDeviceSettings((settings) => ({ ...settings, cameraId: event.target.value }))} className="w-full p-2.5 rounded-2xl bg-white border border-blue-100 text-xs text-slate-700">
-              <option value="default">Default camera</option>
-              {videoInputDevices.filter((device) => device.deviceId !== 'default').map((device, index) => <option key={device.deviceId} value={device.deviceId}>{device.label || `Camera ${index + 1}`}</option>)}
-            </select>
-            {(previewCameraError || cameraError) && <p role="alert" className="rounded-xl border border-amber-200 bg-amber-50 p-2.5 text-[11px] font-medium text-amber-800">{previewCameraError || cameraError}</p>}
-            <div className="p-2.5 rounded-2xl bg-white/90 border border-blue-100/80 text-xs text-slate-700 flex items-center justify-between shadow-sm">
-              <span className="truncate font-medium">FaceTime HD Camera (1080p)</span>
-              <Check className="w-4 h-4 text-emerald-600 flex-shrink-0" />
-            </div>
-          </div>
-
+          {sessionError && <p role="alert" className="text-sm text-red-600">{sessionError} <button onClick={onRetrySession} className="font-semibold underline">Try again</button></p>}
           {/* Join Call Action */}
           <button
             onClick={onJoin}
-            disabled={!displayName.trim() || isJoining}
-            className="w-full py-3.5 rounded-2xl bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed text-white font-bold text-sm sm:text-base flex items-center justify-center space-x-2 shadow-lg shadow-blue-200 transition-all active:scale-95"
+            disabled={checkingSession || !!sessionError || (!!accountEmail && !displayName.trim()) || isJoining}
+            className="w-full py-3 rounded-2xl bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed text-white font-bold text-sm flex items-center justify-center space-x-2 shadow-lg shadow-blue-200 transition-all active:scale-95"
           >
-            <span>{isJoining ? 'Joining...' : 'Join Meeting Now'}</span>
+            <span>{checkingSession ? 'Checking session...' : isJoining ? 'Joining...' : accountEmail ? 'Join Meeting Now' : 'Log in to join'}</span>
             <ArrowRight className="w-5 h-5" />
           </button>
         </div>

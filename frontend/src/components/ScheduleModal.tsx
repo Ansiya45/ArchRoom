@@ -1,14 +1,19 @@
 'use client';
 
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { X, CalendarPlus, Copy, Check } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { trpc } from '../lib/trpc';
+import { localScheduleFields, type MeetingRecord } from '../lib/meetingSchedule';
+
+import { RecurrenceControls, type Rule } from './RecurrenceControls';
 
 interface ScheduleModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onCreated: (meeting: { title: string; code: string; time: string }) => void;
+  onCreated: (meeting: MeetingRecord) => void;
+  editingMeeting?: MeetingRecord | null;
+  onUpdated: (meeting: MeetingRecord) => void;
 }
 
 const CODE_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
@@ -22,15 +27,23 @@ export const ScheduleModal: React.FC<ScheduleModalProps> = ({
   isOpen,
   onClose,
   onCreated,
+  editingMeeting,
+  onUpdated,
 }) => {
+  const [recurrence, setRecurrence] = useState<Rule | null>(null);
   const [title, setTitle] = useState('');
-  const [date, setDate] = useState('2026-07-22');
+  const [timeZone, setTimeZone] = useState(() => Intl.DateTimeFormat().resolvedOptions().timeZone);
+  const [date, setDate] = useState(() => localScheduleFields(new Date(), timeZone).date);
   const [time, setTime] = useState('14:00');
   const [loading, setLoading] = useState(false);
   const [meetingCode, setMeetingCode] = useState(generateMeetingCode);
   const [copied, setCopied] = useState(false);
-  const [meetingMode, setMeetingMode] = useState<'instant' | 'scheduled'>('instant');
+  const [meetingMode, setMeetingMode] = useState<'instant' | 'scheduled' | 'reusable'>('instant');
   const navigate = useNavigate();
+  const submitting = useRef(false);
+  const [error, setError] = useState('');
+  const timeZones = Array.from(new Set([timeZone, Intl.DateTimeFormat().resolvedOptions().timeZone,
+    ...(typeof Intl.supportedValuesOf === 'function' ? Intl.supportedValuesOf('timeZone') : [])]));
 
   const getMeetingOrigin = () =>
     typeof window !== 'undefined' ? window.location.origin : 'http://localhost:3000';
@@ -39,10 +52,19 @@ export const ScheduleModal: React.FC<ScheduleModalProps> = ({
 
   useEffect(() => {
     if (isOpen) {
-      setMeetingCode(generateMeetingCode());
+      const zone = editingMeeting?.timeZone || Intl.DateTimeFormat().resolvedOptions().timeZone;
+      const fields = localScheduleFields(editingMeeting?.scheduledAt ? new Date(editingMeeting.scheduledAt) : new Date(), zone);
+      setTimeZone(zone);
+      setDate(fields.date);
+      setTime(editingMeeting ? fields.time : '14:00');
+      setTitle(editingMeeting?.title || '');
+      setMeetingMode(editingMeeting ? 'scheduled' : 'instant');
+      setMeetingCode(editingMeeting?.meetingCode || generateMeetingCode());
+      setRecurrence(null);
+      setError('');
       setCopied(false);
     }
-  }, [isOpen]);
+  }, [isOpen, editingMeeting]);
 
   if (!isOpen) return null;
 
@@ -56,44 +78,42 @@ export const ScheduleModal: React.FC<ScheduleModalProps> = ({
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
+    if (submitting.current) return;
+    submitting.current = true;
     setLoading(true);
-
+    setError('');
     try {
-      const payload = await trpc.meetings.create.mutate({
-        title: title || 'Quick YLAAM-MEET Meeting',
-        meetingCode,
-        scheduledAt: meetingMode === 'scheduled' ? `${date}T${time}:00Z` : '',
-        startNow: meetingMode === 'instant',
-      });
-
-      const createdCode = payload.meeting.meetingCode;
-
-      onCreated({
-        title: payload.meeting.title || title || 'Quick YLAAM-MEET Meeting',
-        code: createdCode,
-        time: meetingMode === 'scheduled' ? `${date} at ${time}` : 'Now',
-      });
-
-      setLoading(false);
-      if (meetingMode === 'instant') {
-        navigate(`/meet/${createdCode}`);
-      } else {
+      const schedule = { localDateTime: `${date}T${time}`, timeZone };
+      if (editingMeeting) {
+        const payload = await trpc.meetings.reschedule.mutate({ meetingId: editingMeeting.id, schedule });
+        onUpdated(payload.meeting);
         onClose();
+      } else {
+        const payload = await trpc.meetings.create.mutate({
+          title: title || 'Quick YLAAM-MEET Meeting', meetingCode,
+          ...(meetingMode === 'scheduled' ? { schedule, ...(recurrence ? { recurrence } : {}) } : {}),
+          startNow: meetingMode === 'instant',
+          reusable: meetingMode === 'reusable',
+        });
+        onCreated(payload.meeting);
+        onClose();
+        if (meetingMode === 'instant') navigate(`/meet/${payload.meeting.meetingCode}`);
       }
     } catch (err) {
-      console.error(err);
-      alert(err instanceof Error ? err.message : 'Something went wrong.');
+      setError(err instanceof Error ? err.message : 'Unable to save this meeting.');
+    } finally {
+      submitting.current = false;
       setLoading(false);
-      setMeetingCode(generateMeetingCode());
     }
   };
 
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in duration-200">
-      <div className="bg-white rounded-3xl max-w-lg w-full p-6 sm:p-7 shadow-2xl border border-slate-100 relative">
+      <div className="bg-white rounded-3xl max-w-lg max-h-[90vh] overflow-y-auto w-full p-6 sm:p-7 shadow-2xl border border-slate-100 relative">
         <button
           onClick={onClose}
+          disabled={loading}
           className="absolute top-5 right-5 text-slate-400 hover:text-slate-700 p-1.5 rounded-xl hover:bg-slate-100 transition-colors cursor-pointer"
         >
           <X className="w-5 h-5" />
@@ -103,10 +123,11 @@ export const ScheduleModal: React.FC<ScheduleModalProps> = ({
           <CalendarPlus className="w-6 h-6 stroke-[2.2]" />
         </div>
 
-        <h3 className="text-xl font-bold text-slate-900 mb-1">Create or Schedule Meeting</h3>
-        <div className="flex rounded-xl bg-slate-100 p-1 mb-6">
+        <h3 className="text-xl font-bold text-slate-900 mb-1">{editingMeeting ? 'Reschedule Meeting' : 'Create or Schedule Meeting'}</h3>
+        {!editingMeeting && <div className="flex rounded-xl bg-slate-100 p-1 mb-6">
           <button
             type="button"
+            disabled={loading}
             onClick={() => setMeetingMode('instant')}
             className={`flex-1 py-2.5 rounded-lg text-sm font-semibold transition-all ${
               meetingMode === 'instant'
@@ -119,6 +140,7 @@ export const ScheduleModal: React.FC<ScheduleModalProps> = ({
 
           <button
             type="button"
+            disabled={loading}
             onClick={() => setMeetingMode('scheduled')}
             className={`flex-1 py-2.5 rounded-lg text-sm font-semibold transition-all ${
               meetingMode === 'scheduled'
@@ -128,8 +150,12 @@ export const ScheduleModal: React.FC<ScheduleModalProps> = ({
           >
             📅 Schedule Later
           </button>
-        </div>
-
+          <button type="button" disabled={loading} onClick={() => setMeetingMode('reusable')}
+            className={`flex-1 py-2.5 rounded-lg text-sm font-semibold transition-all ${meetingMode === 'reusable' ? 'bg-blue-600 text-white shadow' : 'text-slate-600 hover:bg-slate-200'}`}>
+            No fixed time
+          </button>
+        </div>}
+        {meetingMode === 'reusable' && <p className="mb-4 text-sm text-slate-500">Create a reusable room link. Open a new session whenever needed; participants wait for your admission each time.</p>}
         <form onSubmit={handleSubmit} className="space-y-4">
 
           {/* Meeting Title */}
@@ -141,6 +167,7 @@ export const ScheduleModal: React.FC<ScheduleModalProps> = ({
               type="text"
               placeholder="e.g. Weekly Product Design Sync"
               value={title}
+              readOnly={!!editingMeeting}
               onChange={(e) => setTitle(e.target.value)}
               className="w-full px-4 py-3 rounded-xl border border-slate-200 focus:border-blue-500 text-sm focus:outline-none"
             />
@@ -153,6 +180,7 @@ export const ScheduleModal: React.FC<ScheduleModalProps> = ({
                 <label className="block text-xs font-semibold mb-1.5">Date</label>
                 <input
                   type="date"
+                  required
                   value={date}
                   onChange={(e) => setDate(e.target.value)}
                   className="w-full px-3 py-3 rounded-xl border border-slate-200"
@@ -163,6 +191,7 @@ export const ScheduleModal: React.FC<ScheduleModalProps> = ({
                 <label className="block text-xs font-semibold mb-1.5">Time</label>
                 <input
                   type="time"
+                  required
                   value={time}
                   onChange={(e) => setTime(e.target.value)}
                   className="w-full px-3 py-3 rounded-xl border border-slate-200"
@@ -170,6 +199,18 @@ export const ScheduleModal: React.FC<ScheduleModalProps> = ({
               </div>
             </div>
           )}
+          {meetingMode === 'scheduled' && (
+            <div>
+              <label htmlFor="meeting-timezone" className="block text-xs font-semibold mb-1.5">Timezone</label>
+              <select id="meeting-timezone" value={timeZone} onChange={(event) => setTimeZone(event.target.value)}
+                className="w-full px-3 py-3 rounded-xl border border-slate-200 text-sm">
+                {timeZones.map((zone) => <option key={zone} value={zone}>{zone}</option>)}
+              </select>
+              {!editingMeeting?.timeZone && editingMeeting && <p className="mt-1 text-xs text-slate-500">The original timezone was not recorded. Confirm the date, time and timezone before saving.</p>}
+            </div>
+          )}
+          {meetingMode === 'scheduled' && !editingMeeting && <RecurrenceControls key={String(isOpen)} value={recurrence} onChange={setRecurrence} date={date} />}
+          {error && <p role="alert" className="rounded-xl bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}
 
         {/* Meeting Link */}
         <div>
@@ -194,7 +235,7 @@ export const ScheduleModal: React.FC<ScheduleModalProps> = ({
               {copied ? 'Copied' : 'Copy'}
             </button>
           </div>
-          <p className="mt-1.5 text-xs text-slate-500">This exact link becomes active when you create the meeting.</p>
+          <p className="mt-1.5 text-xs text-slate-500">{editingMeeting ? 'Rescheduling keeps this same meeting link.' : 'This exact link becomes active when you create the meeting.'}</p>
       </div>
 
       <button
@@ -202,7 +243,7 @@ export const ScheduleModal: React.FC<ScheduleModalProps> = ({
         disabled={loading}
         className="w-full py-3.5 rounded-xl bg-blue-600 text-white font-semibold"
       >
-        {meetingMode === "instant"
+        {editingMeeting ? (loading ? "Saving..." : "Save Schedule") : meetingMode === "reusable" ? (loading ? "Creating..." : "Create Reusable Room") : meetingMode === "instant"
           ? (loading ? "Starting..." : "Start Meeting")
           : (loading ? "Scheduling..." : "Schedule Meeting")}
       </button>

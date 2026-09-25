@@ -3,6 +3,7 @@ import { and, eq, isNull } from 'drizzle-orm';
 import { createClient } from '@supabase/supabase-js';
 import { db } from '../db/index.js';
 import { meetingParticipants, meetings } from '../db/schema.js';
+import { assertCurrentOccurrence, participantScope, attachmentPrefix } from './meeting-occurrence.service.js';
 import { env } from '../env.js';
 
 export class ChatAttachmentService {
@@ -37,14 +38,16 @@ export class ChatAttachmentService {
     await this.bucketReady;
   }
 
-  private async requireParticipant(meetingCode: string, identity: { userId?: string; participantId?: string }) {
+  private async requireParticipant(meetingCode: string, identity: { userId?: string; participantId?: string; occurrenceId?: string }) {
     const meeting = await db.query.meetings.findFirst({
       where: eq(meetings.meetingCode, meetingCode.trim().toUpperCase()),
     });
     if (!meeting || meeting.status === 'ended') throw new TRPCError({ code: 'NOT_FOUND', message: 'Active meeting not found' });
+    assertCurrentOccurrence(meeting, identity.occurrenceId);
     const participant = await db.query.meetingParticipants.findFirst({
       where: and(
-        eq(meetingParticipants.meetingId, meeting.id),
+        eq(meetingParticipants.meetingId, meeting.id), participantScope(meeting),
+        (meeting.scheduleType === 'reusable' || meeting.scheduleType === 'recurring') ? eq(meetingParticipants.id, identity.participantId || '00000000-0000-0000-0000-000000000000') : undefined,
         identity.userId
           ? eq(meetingParticipants.userId, identity.userId)
           : eq(meetingParticipants.id, identity.participantId || '00000000-0000-0000-0000-000000000000'),
@@ -56,19 +59,19 @@ export class ChatAttachmentService {
     return meeting;
   }
 
-  async createUpload(meetingCode: string, fileName: string, identity: { userId?: string; participantId?: string }) {
+  async createUpload(meetingCode: string, fileName: string, identity: { userId?: string; participantId?: string; occurrenceId?: string }) {
     await this.ensureBucket();
     const meeting = await this.requireParticipant(meetingCode, identity);
     const safeName = fileName.trim().replace(/[^a-zA-Z0-9._-]/g, '-').slice(-180) || 'attachment';
-    const storagePath = `meetings/${meeting.id}/${crypto.randomUUID()}-${safeName}`;
+    const storagePath = `${attachmentPrefix(meeting)}${crypto.randomUUID()}-${safeName}`;
     const { data, error } = await this.requireStorage().storage.from(env.SUPABASE_CHAT_FILES_BUCKET).createSignedUploadUrl(storagePath);
     if (error) throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: error.message });
     return { ok: true, storagePath, uploadUrl: data.signedUrl };
   }
 
-  async downloadUrl(meetingCode: string, storagePath: string, fileName: string, identity: { userId?: string; participantId?: string }) {
+  async downloadUrl(meetingCode: string, storagePath: string, fileName: string, identity: { userId?: string; participantId?: string; occurrenceId?: string }) {
     const meeting = await this.requireParticipant(meetingCode, identity);
-    if (!storagePath.startsWith(`meetings/${meeting.id}/`)) {
+    if (!storagePath.startsWith(attachmentPrefix(meeting))) {
       throw new TRPCError({ code: 'FORBIDDEN', message: 'This file does not belong to the meeting' });
     }
     const { data, error } = await this.requireStorage().storage.from(env.SUPABASE_CHAT_FILES_BUCKET)

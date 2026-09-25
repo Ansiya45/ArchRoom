@@ -1,22 +1,25 @@
+import { startHostedMeeting } from '../lib/startHostedMeeting';
 'use client';
 
 import React, { useRef, useState } from 'react';
-import { X, Video, KeyRound, Sparkles, User, ArrowRight } from 'lucide-react';
+import { X, Video, KeyRound, Sparkles, ArrowRight } from 'lucide-react';
+import { getStoredUser } from '../lib/auth';
 import { trpc } from '../lib/trpc';
 
 interface JoinModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onJoinSuccess: (code: string, name: string, participantId: string, joinRequestId: string) => void;
+  onJoinSuccess: (code: string, name: string, participantId: string, joinRequestId: string, occurrenceId?: string) => void;
+  accountName: string;
 }
 
 export const JoinModal: React.FC<JoinModalProps> = ({
   isOpen,
   onClose,
   onJoinSuccess,
+  accountName,
 }) => {
   const [meetingCode, setMeetingCode] = useState('');
-  const [guestName, setGuestName] = useState('');
   const [isJoining, setIsJoining] = useState(false);
   const joiningRef = useRef(false);
   const joinRequestIdRef = useRef(crypto.randomUUID());
@@ -29,20 +32,23 @@ export const JoinModal: React.FC<JoinModalProps> = ({
     joiningRef.current = true;
     setIsJoining(true);
 
-    const finalGuestName = guestName.trim() || 'Guest User';
-
     try {
+      let { meeting: room } = await trpc.meetings.getByCode.query({ meetingCode: meetingCode.trim() });
+      if ((room.scheduleType === 'reusable' || room.scheduleType === 'recurring') && !room.activeOccurrenceId && room.hostUserId === getStoredUser()?.id) {
+        ({ meeting: room } = await startHostedMeeting(room));
+      }
       const payload = await trpc.meetings.join.mutate({
+        occurrenceId: room.activeOccurrenceId ?? undefined,
         meetingCode: meetingCode.trim(),
-        guestName: finalGuestName,
         joinRequestId: joinRequestIdRef.current,
       });
 
       onJoinSuccess(
         payload.meeting.meetingCode,
-        payload.participant.guestName || finalGuestName,
+        accountName,
         payload.participant.id,
-        joinRequestIdRef.current
+        joinRequestIdRef.current,
+        payload.participant.occurrenceId ?? undefined
       );
       onClose();
     } catch (error) {
@@ -91,21 +97,7 @@ export const JoinModal: React.FC<JoinModalProps> = ({
             </div>
           </div>
 
-          <div>
-            <label className="block text-xs font-semibold text-slate-700 uppercase tracking-wider mb-1.5">
-              Your Display Name
-            </label>
-            <div className="relative">
-              <User className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
-              <input
-                type="text"
-                placeholder="e.g. Alex Morgan"
-                value={guestName}
-                onChange={(e) => setGuestName(e.target.value)}
-                className="w-full pl-10 pr-4 py-3 rounded-xl border border-slate-200 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 text-slate-900 text-sm font-medium focus:outline-none transition-all"
-              />
-            </div>
-          </div>
+          <p className="rounded-xl border border-blue-100 bg-blue-50 p-3 text-xs text-blue-800">Joining as <strong>{accountName}</strong>. Participant email delivery uses your signed-in account.</p>
 
           <div className="pt-2">
             <button

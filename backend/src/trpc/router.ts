@@ -6,9 +6,12 @@ import { meetingsRouter } from '../routers/meetings.js';
 import { recordingsRouter } from '../routers/recordings.js';
 import { chatAttachmentsRouter } from '../routers/chat-attachments.js';
 
+import { meetingNotificationsRouter } from '../routers/meeting-notifications.js';
+
 export const appRouter = t.router({
   auth: authRouter,
   meetings: meetingsRouter,
+  meetingNotifications: meetingNotificationsRouter,
   recordings: recordingsRouter,
   chatAttachments: chatAttachmentsRouter,
   health: t.procedure

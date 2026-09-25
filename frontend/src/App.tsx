@@ -1,6 +1,7 @@
+import { startHostedMeeting } from './lib/startHostedMeeting';
 'use client';
 
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import Header from './components/Header';
 import Sidebar, { SidebarTab } from './components/Sidebar';
@@ -16,6 +17,7 @@ import AuthModal from './components/AuthModal';
 import { CheckCircle2 } from 'lucide-react';
 import { clearStoredSession, getStoredUser } from './lib/auth';
 import { trpc } from './lib/trpc';
+import { formatMeetingTime, startMeetingOnce, type MeetingRecord } from './lib/meetingSchedule';
 import { storeMeetingSession } from './lib/meetingSession';
 
 export default function App() {
@@ -23,7 +25,11 @@ export default function App() {
   const [activeTab, setActiveTab] = useState<SidebarTab>('home');
   const [isJoinOpen, setIsJoinOpen] = useState(false);
   const [isCreateOpen, setIsCreateOpen] = useState(false);
+  const [editingMeeting, setEditingMeeting] = useState<MeetingRecord | null>(null);
+  const pendingStarts = useRef(new Set<string>());
+  const [startingCode, setStartingCode] = useState<string | null>(null);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [openJoinAfterAuth, setOpenJoinAfterAuth] = useState(false);
 
   // User Auth state (null by default so Sign Up and Login are displayed)
   const [user, setUser] = useState<{ name: string; email: string; isLoggedIn: boolean } | null>(() => {
@@ -109,11 +115,8 @@ export default function App() {
             id: meeting.id,
             title: meeting.title,
             code: meeting.meetingCode,
-            time: meeting.scheduledAt
-              ? new Date(meeting.scheduledAt).toLocaleString()
-              : meeting.status === 'live'
-                ? 'Live now'
-                : 'Not scheduled',
+            time: formatMeetingTime(meeting),
+            record: meeting,
             participantsCount: 1,
             hostName: account.user.fullName,
             isFavorite: false,
@@ -142,7 +145,18 @@ export default function App() {
       return;
     }
 
+    setEditingMeeting(null);
     setIsCreateOpen(true);
+  };
+
+  const requestJoinMeeting = () => {
+    if (!user) {
+      setOpenJoinAfterAuth(true);
+      setAuthModalState({ isOpen: true, mode: 'signup' });
+      showToast('Create an account or sign in before joining a meeting.', 'info');
+      return;
+    }
+    setIsJoinOpen(true);
   };
 
   const handleSidebarTabChange = (tab: SidebarTab) => {
@@ -173,25 +187,29 @@ export default function App() {
     }
   };
 
-  const handleStartMeeting = (meeting: MeetingItem) => {
+  const handleStartMeeting = async (meeting: MeetingItem, occurrenceId?: string) => {
     if (!user) {
       setAuthModalState({ isOpen: true, mode: 'login' });
       showToast('Please sign in before starting a meeting.', 'info');
       return;
     }
-
-    setCurrentMeeting({
-      title: meeting.title,
-      code: meeting.code,
-      hostName: meeting.hostName,
-      isLive: true,
-    });
-    setActiveTab('home');
-    navigate(`/meet/${meeting.code}`);
-
-    void trpc.meetings.start.mutate({ meetingCode: meeting.code }).catch((error) => {
-      console.error('Unable to mark meeting as started:', error);
-    });
+    try {
+      await startMeetingOnce(pendingStarts.current, meeting.code, async () => {
+        setStartingCode(meeting.code);
+        const { meeting: current } = await trpc.meetings.getByCode.query({ meetingCode: meeting.code });
+        await startHostedMeeting(current, occurrenceId);
+      }, () => {
+        setCurrentMeeting({ title: meeting.title, code: meeting.code, hostName: meeting.hostName, isLive: true });
+        setMeetings((current) => current.map((item) => item.id === meeting.id && item.record
+          ? { ...item, record: { ...item.record, status: 'live' } } : item));
+        setActiveTab('home');
+        navigate(`/meet/${meeting.code}`);
+      });
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : 'Unable to start meeting.', 'info');
+    } finally {
+      if (!pendingStarts.current.has(meeting.code)) setStartingCode((code) => code === meeting.code ? null : code);
+    }
   };
 
   return (
@@ -207,7 +225,7 @@ export default function App() {
       {/* Header */}
       <Header
         user={user}
-        onOpenJoin={() => setIsJoinOpen(true)}
+        onOpenJoin={requestJoinMeeting}
         onOpenCreate={requestCreateMeeting}
         onOpenAuth={(mode) => setAuthModalState({ isOpen: true, mode })}
         onLogout={() => {
@@ -228,7 +246,7 @@ export default function App() {
             {(activeTab === 'home' || activeTab === 'create') && (
               <Hero
                 currentMeeting={currentMeeting}
-                onJoinMeeting={() => setIsJoinOpen(true)}
+                onJoinMeeting={requestJoinMeeting}
                 onCreateMeeting={requestCreateMeeting}
                 onLeaveMeeting={() => {
                   showToast('Left meeting call.');
@@ -240,7 +258,11 @@ export default function App() {
             {/* Tab 3: Scheduled Meetings View */}
             {activeTab === 'scheduled' && (
               <ScheduledMeetingsView
+                hostUserId={getStoredUser()?.id}
+                onRescheduleMeeting={(record) => { setEditingMeeting(record); setIsCreateOpen(true); }}
                 meetings={meetings}
+                startingCode={startingCode}
+                onMeetingChanged={(record) => setMeetings(current => current.map(item => item.id === record.id ? { ...item, record, time: formatMeetingTime(record) } : item))}
                 onStartMeeting={handleStartMeeting}
                 onToggleFavorite={handleToggleFavorite}
                 onDeleteMeeting={handleDeleteMeeting}
@@ -252,6 +274,8 @@ export default function App() {
             {activeTab === 'favorite' && (
               <FavoritesView
                 meetings={meetings}
+                startingCode={startingCode}
+                onMeetingChanged={(record) => setMeetings(current => current.map(item => item.id === record.id ? { ...item, record, time: formatMeetingTime(record) } : item))}
                 onStartMeeting={handleStartMeeting}
                 onToggleFavorite={handleToggleFavorite}
                 onOpenCreateModal={requestCreateMeeting}
@@ -272,9 +296,10 @@ export default function App() {
       {/* Interactive Modals */}
       <JoinModal
         isOpen={isJoinOpen}
+        accountName={user?.name || ''}
         onClose={() => setIsJoinOpen(false)}
-        onJoinSuccess={(code, name, participantId, joinRequestId) => {
-          storeMeetingSession(code, { displayName: name, participantId, joinRequestId });
+        onJoinSuccess={(code, name, participantId, joinRequestId, occurrenceId) => {
+          storeMeetingSession(code, { displayName: name, participantId, joinRequestId, occurrenceId });
           setCurrentMeeting({
             title: `Instant Meeting Room (${code})`,
             code,
@@ -289,27 +314,26 @@ export default function App() {
 
       <ScheduleModal
         isOpen={isCreateOpen}
-        onClose={() => setIsCreateOpen(false)}
-        onCreated={(m) => {
-          storeMeetingSession(m.code, { displayName: user?.name || 'You' });
+        onClose={() => { setIsCreateOpen(false); setEditingMeeting(null); }}
+        editingMeeting={editingMeeting}
+        onUpdated={(record) => {
+          setMeetings((current) => current.map((item) => item.id === record.id
+            ? { ...item, record, time: formatMeetingTime(record) } : item));
+          showToast(`Meeting "${record.title}" rescheduled. The link is unchanged.`);
+        }}
+        onCreated={(record) => {
+          storeMeetingSession(record.meetingCode, { displayName: user?.name || 'You' });
           const newMeeting: MeetingItem = {
-            id: `m_${Date.now()}`,
-            title: m.title,
-            code: m.code,
-            time: m.time,
-            participantsCount: 1,
-            hostName: user?.name || 'You',
-            isFavorite: false,
+            id: record.id, title: record.title, code: record.meetingCode,
+            time: formatMeetingTime(record), record, participantsCount: 1,
+            hostName: user?.name || 'You', isFavorite: false,
           };
-          setMeetings((prev) => [newMeeting, ...prev]);
-          setCurrentMeeting({
-            title: m.title,
-            code: m.code,
-            hostName: user?.name || 'You',
-            isLive: true,
-          });
-          setActiveTab('home');
-          showToast(`Meeting "${m.title}" created! Code: ${m.code}`);
+          setMeetings((prev) => [newMeeting, ...prev.filter((item) => item.id !== record.id)]);
+          if (record.status === 'live') {
+            setCurrentMeeting({ title: record.title, code: record.meetingCode, hostName: user?.name || 'You', isLive: true });
+            setActiveTab('home');
+          } else setActiveTab('scheduled');
+          showToast(`Meeting "${record.title}" created! Code: ${record.meetingCode}`);
         }}
       />
 
@@ -329,6 +353,10 @@ export default function App() {
             isLoggedIn: true,
           });
           showToast(`Signed in successfully as ${authenticatedUser.email}`);
+          if (openJoinAfterAuth) {
+            setOpenJoinAfterAuth(false);
+            setIsJoinOpen(true);
+          }
         }}
       />
     </div>

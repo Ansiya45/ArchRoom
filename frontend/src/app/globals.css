@@ -235,3 +235,30 @@ textarea {
   color: #ffffff;
 }
 
+/* Shared auth form control. */
+.input {
+  width: 100%;
+  border: 1px solid rgb(226 232 240);
+  border-radius: 0.75rem;
+  padding: 0.75rem 1rem 0.75rem 2.5rem;
+  color: #ffffff;
+  caret-color: #ffffff;
+  font-size: 0.875rem;
+  outline: none;
+}
+
+.input::placeholder {
+  color: #8e96b3;
+  opacity: 1;
+}
+
+.input:-webkit-autofill,
+.input:-webkit-autofill:hover,
+.input:-webkit-autofill:focus {
+  -webkit-text-fill-color: #ffffff;
+  caret-color: #ffffff;
+}
+
+.input:focus {
+  border-color: rgb(59 130 246);
+}

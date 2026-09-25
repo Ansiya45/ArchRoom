@@ -1,0 +1,7 @@
+# Preserve exact bytes of applied migrations; Drizzle records their checksums.
+backend/drizzle/0004_*.sql -text
+backend/drizzle/0005_*.sql -text
+backend/drizzle/0006_*.sql -text
+backend/drizzle/0007_*.sql -text
+backend/drizzle/0008_*.sql -text
+backend/drizzle/0009_*.sql -text

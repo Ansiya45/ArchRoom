@@ -1,253 +1,92 @@
 'use client';
 
-import React, { useState, useEffect} from 'react';
-import { X, LogIn, UserPlus, Mail, Lock, User, ArrowRight, Eye, EyeOff } from 'lucide-react';
+import React, { useEffect, useState } from 'react';
+import { ArrowRight, Eye, EyeOff, Lock, LogIn, Mail, User, UserPlus, X } from 'lucide-react';
 import { storeSession, type SessionUser } from '../lib/auth';
 import { trpc } from '../lib/trpc';
 
-interface AuthModalProps {
-  isOpen: boolean;
-  mode: 'login' | 'signup';
-  onClose: () => void;
-  onSuccess: (user: SessionUser) => void;
-}
+interface AuthModalProps { isOpen: boolean; mode: 'login' | 'signup'; onClose: () => void; onSuccess: (user: SessionUser) => void }
+type View = 'login' | 'signup' | 'verify' | 'forgot' | 'reset';
+const passwordRegex = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d).{8,}$/;
 
-export const AuthModal: React.FC<AuthModalProps> = ({
-  isOpen,
-  mode,
-  onClose,
-  onSuccess,
-}) => {
-  const [isLogin, setIsLogin] = useState(mode === 'login');
-  useEffect(() => {
-    setIsLogin(mode === 'login');
-    if (!isOpen) {
-      setFormError('');
-      setSubmitAttempted(false);
-      setShowPassword(false);
-      setShowConfirmPassword(false);
-    }
-  }, [mode, isOpen]);
+export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, mode, onClose, onSuccess }) => {
+  const [view, setView] = useState<View>(mode);
+  const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
-  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [code, setCode] = useState('');
   const [showPassword, setShowPassword] = useState(false);
-  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
-  const [submitAttempted, setSubmitAttempted] = useState(false);
-  const [formError, setFormError] = useState('');
-  const passwordRegex = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d).{8,}$/;
+  const [submitting, setSubmitting] = useState(false);
+  const [message, setMessage] = useState('');
+  const [error, setError] = useState('');
 
-  const isPasswordValid = passwordRegex.test(password);
-
-  const doPasswordsMatch = 
-    password === confirmPassword && confirmPassword !== "";
-  const [name, setName] = useState('');
+  useEffect(() => {
+    setView(mode);
+    if (!isOpen) { setError(''); setMessage(''); setCode(''); setPassword(''); setConfirmPassword(''); }
+  }, [mode, isOpen]);
 
   if (!isOpen) return null;
+  const needsNewPassword = view === 'signup' || view === 'reset';
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setSubmitAttempted(true);
-    setFormError('');
-
-    if (!email || !password || isSubmitting) return;
-
-    if (!isLogin) {
-      if (name.trim().length < 2) {
-        setFormError('Please enter your full name.');
-        return;
-      }
-
-      if (!isPasswordValid) {
-        setFormError('Password must contain at least 8 characters, including uppercase, lowercase, and a number.');
-        return;
-      }
-
-      if (!doPasswordsMatch) {
-        return;
-      }
-    }
-
-    setIsSubmitting(true);
-
+  const submit = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (submitting) return;
+    setError(''); setMessage('');
+    if (needsNewPassword && !passwordRegex.test(password)) return setError('Use 8+ characters with uppercase, lowercase, and a number.');
+    if (needsNewPassword && password !== confirmPassword) return setError('Passwords do not match.');
+    setSubmitting(true);
     try {
-      if (isLogin) {
-        const result = await trpc.auth.login.mutate({
-          email,
-          password,
-        });
-        storeSession(result.token, result.user);
-        onSuccess(result.user);
+      if (view === 'signup') {
+        await trpc.auth.signup.mutate({ fullName: name, email, password });
+        setPassword(''); setConfirmPassword(''); setView('verify'); setMessage('We sent a 6-digit verification code to your email.');
+      } else if (view === 'verify') {
+        const result = await trpc.auth.verifyEmail.mutate({ email, code });
+        storeSession(result.token, result.user); onSuccess(result.user); onClose();
+      } else if (view === 'forgot') {
+        const result = await trpc.auth.requestPasswordReset.mutate({ email });
+        setCode(''); setPassword(''); setConfirmPassword(''); setView('reset'); setMessage(result.message);
+      } else if (view === 'reset') {
+        await trpc.auth.resetPassword.mutate({ email, code, password });
+        setView('login'); setCode(''); setPassword(''); setConfirmPassword(''); setMessage('Password updated. You can now sign in.');
       } else {
-        const result = await trpc.auth.signup.mutate({
-          fullName: name,
-          email,
-          password,
-        });
-        storeSession(result.token, result.user);
-        onSuccess(result.user);
+        const result = await trpc.auth.login.mutate({ email, password });
+        storeSession(result.token, result.user); onSuccess(result.user); onClose();
       }
-
-      onClose();
-    } catch (err) {
-      console.error(err);
-      setFormError(err instanceof Error ? err.message : 'Something went wrong.');
-    } finally {
-      setIsSubmitting(false);
+    } catch (caught) {
+      const detail = caught instanceof Error ? caught.message : 'Something went wrong.';
+      setError(detail);
     }
+    finally { setSubmitting(false); }
   };
 
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in duration-200">
-      <div className="bg-white rounded-3xl max-w-md w-full p-6 sm:p-7 shadow-2xl border border-slate-100 relative">
-        <button
-          onClick={onClose}
-          className="absolute top-5 right-5 text-slate-400 hover:text-slate-700 p-1.5 rounded-xl hover:bg-slate-100 transition-colors cursor-pointer"
-        >
-          <X className="w-5 h-5" />
-        </button>
+  const title = { login: 'Welcome back', signup: 'Create your account', verify: 'Verify your email', forgot: 'Forgot your password?', reset: 'Choose a new password' }[view];
+  const description = { login: 'Sign in to access your meetings.', signup: 'We will verify your email before activating your account.', verify: `Enter the code sent to ${email}.`, forgot: 'Enter your account email to receive a reset code.', reset: `Enter the reset code sent to ${email}.` }[view];
 
-        <div className="w-12 h-12 rounded-2xl bg-blue-50 text-blue-600 flex items-center justify-center mb-4 border border-blue-100">
-          {isLogin ? <LogIn className="w-6 h-6 stroke-[2.2]" /> : <UserPlus className="w-6 h-6 stroke-[2.2]" />}
-        </div>
-
-        <h3 className="text-xl font-bold text-slate-900 mb-1">
-          {isLogin ? 'Welcome back to YLAAM-MEET' : 'Create your YLAAM-MEET Account'}
-        </h3>
-        <p className="text-sm text-slate-500 mb-6">
-          {isLogin
-            ? 'Sign in to access your scheduled meetings and saved rooms.'
-            : 'Join thousands of professionals hosting crystal-clear video calls.'}
-        </p>
-
-        <form onSubmit={handleSubmit} className="space-y-4">
-          {!isLogin && (
-            <div>
-              <label className="block text-xs font-semibold text-slate-700 uppercase tracking-wider mb-1.5">
-                Full Name
-              </label>
-              <div className="relative">
-                <User className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
-                <input
-                  type="text"
-                  required
-                  placeholder="e.g. Jordan Miller"
-                  value={name}
-                  onChange={(e) => setName(e.target.value)}
-                  className="w-full pl-10 pr-4 py-3 rounded-xl border border-slate-200 focus:border-blue-500 text-slate-900 text-sm focus:outline-none"
-                />
-              </div>
-            </div>
-          )}
-
-          <div>
-            <label className="block text-xs font-semibold text-slate-700 uppercase tracking-wider mb-1.5">
-              Work Email
-            </label>
-            <div className="relative">
-              <Mail className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
-              <input
-                type="email"
-                required
-                placeholder="name@company.com"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                className="w-full pl-10 pr-4 py-3 rounded-xl border border-slate-200 focus:border-blue-500 text-slate-900 text-sm focus:outline-none"
-              />
-            </div>
-          </div>
-
-          <div>
-            <label className="block text-xs font-semibold text-slate-700 uppercase tracking-wider mb-1.5">
-              Password
-            </label>
-            <div className="relative">
-              <Lock className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
-              <input
-                type={showPassword ? 'text' : 'password'}
-                required
-                autoComplete={isLogin ? 'current-password' : 'new-password'}
-                placeholder="••••••••••••"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                className="w-full pl-10 pr-11 py-3 rounded-xl border border-slate-200 focus:border-blue-500 text-slate-900 text-sm focus:outline-none"
-              />
-              <button type="button" onClick={() => setShowPassword((value) => !value)} aria-label={showPassword ? 'Hide password' : 'Show password'} className="absolute right-3.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-700 cursor-pointer">
-                {showPassword ? <EyeOff className="w-4.5 h-4.5" /> : <Eye className="w-4.5 h-4.5" />}
-              </button>
-            </div>
-            {!isLogin && submitAttempted && !isPasswordValid && (
-              <p className="mt-1.5 text-xs font-medium text-red-600">Use 8+ characters with uppercase, lowercase, and a number.</p>
-            )}
-          </div>
-
-          {!isLogin && (
-            <div>
-              <label className="block text-xs font-semibold text-slate-700 uppercase tracking-wider mb-1.5">
-                Confirm Password
-              </label>
-              <div className="relative">
-                <Lock className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
-                <input
-                  type={showConfirmPassword ? 'text' : 'password'}
-                  required
-                  autoComplete="new-password"
-                  placeholder="Retype your password"
-                  value={confirmPassword}
-                  onChange={(e) => setConfirmPassword(e.target.value)}
-                  className={`w-full pl-10 pr-11 py-3 rounded-xl border text-slate-900 text-sm focus:outline-none ${submitAttempted && !doPasswordsMatch ? 'border-red-400 focus:border-red-500' : 'border-slate-200 focus:border-blue-500'}`}
-                />
-                <button type="button" onClick={() => setShowConfirmPassword((value) => !value)} aria-label={showConfirmPassword ? 'Hide confirmation password' : 'Show confirmation password'} className="absolute right-3.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-700 cursor-pointer">
-                  {showConfirmPassword ? <EyeOff className="w-4.5 h-4.5" /> : <Eye className="w-4.5 h-4.5" />}
-                </button>
-              </div>
-              {submitAttempted && !doPasswordsMatch && (
-                <p className="mt-1.5 text-xs font-medium text-red-600">Passwords do not match.</p>
-              )}
-            </div>
-          )}
-
-          {formError && <p role="alert" className="text-xs font-medium text-red-600">{formError}</p>}
-
-          <button
-            type="submit"
-            disabled={isSubmitting}
-            className="w-full py-3.5 rounded-xl bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 disabled:cursor-not-allowed text-white font-semibold text-sm shadow-md shadow-blue-500/25 flex items-center justify-center gap-2 active:scale-98 transition-all cursor-pointer"
-          >
-            <span>{isSubmitting ? 'Please wait...' : isLogin ? 'Sign In' : 'Create Free Account'}</span>
-            <ArrowRight className="w-4 h-4" />
-          </button>
-        </form>
-
-        <div className="mt-5 text-center text-xs text-slate-500">
-          {isLogin ? (
-            <span>
-              Don't have an account?{' '}
-              <button
-                type="button"
-                onClick={() => setIsLogin(false)}
-                className="text-blue-600 font-semibold hover:underline cursor-pointer"
-              >
-                Sign Up free
-              </button>
-            </span>
-          ) : (
-            <span>
-              Already have an account?{' '}
-              <button
-                type="button"
-                onClick={() => setIsLogin(true)}
-                className="text-blue-600 font-semibold hover:underline cursor-pointer"
-              >
-                Log In
-              </button>
-            </span>
-          )}
-        </div>
+  return <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 p-4 backdrop-blur-sm">
+    <div className="relative w-full max-w-md rounded-3xl border border-slate-100 bg-white p-6 shadow-2xl sm:p-7">
+      <button onClick={onClose} aria-label="Close" className="absolute right-5 top-5 rounded-xl p-1.5 text-slate-400 hover:bg-slate-100"><X className="h-5 w-5" /></button>
+      <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-2xl border border-blue-100 bg-blue-50 text-blue-600">{view === 'login' ? <LogIn /> : view === 'signup' ? <UserPlus /> : <Mail />}</div>
+      <h3 className="mb-1 text-xl font-bold text-slate-900">{title}</h3><p className="mb-6 text-sm text-slate-500">{description}</p>
+      <form onSubmit={submit} className="space-y-4">
+        {view === 'signup' && <Field label="Full name" icon={<User />}><input required minLength={2} value={name} onChange={e => setName(e.target.value)} placeholder="Jordan Miller" className="input" /></Field>}
+        {(view === 'login' || view === 'signup' || view === 'forgot') && <Field label="Email" icon={<Mail />}><input required type="email" value={email} onChange={e => setEmail(e.target.value)} placeholder="name@company.com" className="input" /></Field>}
+        {(view === 'verify' || view === 'reset') && <Field label="6-digit code" icon={<Mail />}><input required inputMode="numeric" pattern="[0-9]{6}" maxLength={6} value={code} onChange={e => setCode(e.target.value.replace(/\D/g, ''))} placeholder="123456" className="input tracking-[0.35em]" /></Field>}
+        {(view === 'login' || needsNewPassword) && <Field label={view === 'reset' ? 'New password' : 'Password'} icon={<Lock />}><input required type={showPassword ? 'text' : 'password'} value={password} onChange={e => setPassword(e.target.value)} autoComplete={view === 'login' ? 'current-password' : 'new-password'} className="input pr-12" /><button type="button" onClick={() => setShowPassword(value => !value)} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400">{showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}</button></Field>}
+        {needsNewPassword && <Field label="Confirm password" icon={<Lock />}><input required type="password" value={confirmPassword} onChange={e => setConfirmPassword(e.target.value)} autoComplete="new-password" className="input" /></Field>}
+        {view === 'login' && <button type="button" disabled={submitting} onClick={() => { setView('forgot'); setError(''); setMessage(''); }} className="text-xs font-semibold text-blue-600 hover:underline">Forgot password?</button>}
+        {message && <p className="rounded-xl bg-emerald-50 p-3 text-xs text-emerald-700">{message}</p>}{error && <p role="alert" className="rounded-xl bg-red-50 p-3 text-xs text-red-700">{error}</p>}
+        <button disabled={submitting} className="flex w-full items-center justify-center gap-2 rounded-xl bg-blue-600 py-3.5 text-sm font-semibold text-white disabled:bg-blue-400"><span>{submitting ? 'Please wait...' : view === 'login' ? 'Sign in' : view === 'signup' ? 'Create account' : view === 'verify' ? 'Verify email' : view === 'forgot' ? 'Send reset code' : 'Reset password'}</span><ArrowRight className="h-4 w-4" /></button>
+      </form>
+      <div className="mt-5 text-center text-xs text-slate-500">
+        {view === 'verify' && <button type="button" disabled={submitting} onClick={async () => { if (submitting) return; setSubmitting(true); setError(''); setMessage(''); try { const result = await trpc.auth.resendVerification.mutate({ email }); setCode(''); setMessage(result.message); } catch (e) { setError(e instanceof Error ? e.message : 'Unable to resend code.'); } finally { setSubmitting(false); } }} className="font-semibold text-blue-600 hover:underline disabled:opacity-50">{submitting ? 'Please wait...' : 'Resend code'}</button>}
+        {(view === 'forgot' || view === 'reset') && <button onClick={() => setView('login')} className="font-semibold text-blue-600 hover:underline">Back to sign in</button>}
+        {(view === 'login' || view === 'signup') && <button onClick={() => { setView(view === 'login' ? 'signup' : 'login'); setError(''); setMessage(''); }} className="font-semibold text-blue-600 hover:underline">{view === 'login' ? 'Create a free account' : 'Already have an account? Sign in'}</button>}
       </div>
     </div>
-  );
+  </div>;
 };
+
+const Field = ({ label, icon, children }: { label: string; icon: React.ReactElement; children: React.ReactNode }) => <div><label className="mb-1.5 block text-xs font-semibold uppercase tracking-wider text-slate-700">{label}</label><div className="relative">{React.cloneElement(icon, { className: 'absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400' } as React.HTMLAttributes<SVGElement>)}{children}</div></div>;
 
 export default AuthModal;

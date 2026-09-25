@@ -2,11 +2,12 @@ import { TRPCError } from '@trpc/server';
 import { and, desc, eq } from 'drizzle-orm';
 import { createClient } from '@supabase/supabase-js';
 import { db } from '../db/index.js';
-import { meetings, recordings } from '../db/schema.js';
+import { meetings, recordings, meetingOccurrences } from '../db/schema.js';
 import { env } from '../env.js';
 
 export type CreateRecordingInput = {
   meetingCode: string;
+  occurrenceId?: string;
   fileName: string;
   mimeType: string;
   fileSize: number;
@@ -85,13 +86,20 @@ export class RecordingService {
     const supabase = this.requireStorage();
     await this.ensurePrivateBucket();
     const meeting = await this.requireHostByCode(input.meetingCode, userId);
+    if ((meeting.scheduleType === 'reusable' || meeting.scheduleType === 'recurring')) {
+      const occurrence = input.occurrenceId && await db.query.meetingOccurrences.findFirst({
+        where: and(eq(meetingOccurrences.id, input.occurrenceId), eq(meetingOccurrences.meetingId, meeting.id)),
+      });
+      if (!occurrence) throw new TRPCError({ code: 'BAD_REQUEST', message: 'Choose the room session in which this recording was made.' });
+    } else if (input.occurrenceId) throw new TRPCError({ code: 'BAD_REQUEST', message: 'This meeting has no room sessions.' });
     const safeName = input.fileName.trim().replace(/[^a-zA-Z0-9._-]/g, '-');
-    const storagePath = `meetings/${meeting.id}/${crypto.randomUUID()}-${safeName}`;
+    const storagePath = `meetings/${meeting.id}/${input.occurrenceId ? `sessions/${input.occurrenceId}/` : ''}${crypto.randomUUID()}-${safeName}`;
     const { data, error } = await supabase.storage.from(env.SUPABASE_STORAGE_BUCKET).createSignedUploadUrl(storagePath);
     if (error) throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: error.message });
 
     const [recording] = await db.insert(recordings).values({
       meetingId: meeting.id,
+      occurrenceId: input.occurrenceId ?? null,
       createdByUserId: userId,
       storagePath,
       fileName: safeName,

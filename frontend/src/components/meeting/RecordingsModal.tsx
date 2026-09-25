@@ -57,6 +57,7 @@ export const RecordingsModal: React.FC<RecordingsModalProps> = ({
     try {
       const created = await trpc.recordings.createUpload.mutate({
         meetingCode,
+        occurrenceId: preview.occurrenceId,
         fileName: preview.fileName,
         mimeType: preview.mimeType || 'video/webm',
         fileSize: preview.blob.size,
@@ -132,6 +133,7 @@ export const RecordingsModal: React.FC<RecordingsModalProps> = ({
                     <div className="rounded-xl bg-blue-50 p-2 text-blue-600"><Film className="h-5 w-5" /></div>
                     <div className="min-w-0 flex-1">
                       <p className="truncate text-sm font-semibold text-slate-900">{recording.fileName}</p>
+                      {recording.occurrenceId && <p className="text-xs text-slate-500">Room session: {recording.occurrenceId.slice(0, 8)}</p>}
                       <p className="text-xs text-slate-500">{Math.round((recording.fileSize || 0) / 1024 / 1024 * 10) / 10} MB · {recording.durationSeconds || 0}s</p>
                     </div>
                     <button onClick={() => void downloadSaved(recording.id)} className="flex items-center gap-2 rounded-xl bg-slate-900 px-3 py-2 text-xs font-semibold text-white hover:bg-slate-700">

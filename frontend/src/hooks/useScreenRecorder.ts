@@ -6,6 +6,7 @@ export type RecordingPreview = {
   fileName: string;
   mimeType: string;
   durationSeconds: number;
+  occurrenceId?: string;
 };
 
 function preferredMimeType() {
@@ -32,7 +33,7 @@ export function useScreenRecorder() {
     if (recorder && recorder.state !== 'inactive') recorder.stop();
   }, []);
 
-  const start = useCallback(async () => {
+  const start = useCallback(async (occurrenceId?: string) => {
     if (!navigator.mediaDevices?.getDisplayMedia || typeof MediaRecorder === 'undefined') {
       throw new Error('Screen recording is not supported in this browser. Use the latest Chrome or Edge.');
     }
@@ -74,7 +75,8 @@ export function useScreenRecorder() {
       const durationSeconds = Math.max(1, Math.round((Date.now() - startedAtRef.current) / 1000));
       const blob = new Blob(chunksRef.current, { type: recorder.mimeType || 'video/webm' });
       const stamp = new Date().toISOString().replace(/[:.]/g, '-');
-      setPreview({ blob, url: URL.createObjectURL(blob), fileName: `meeting-recording-${stamp}.webm`, mimeType: blob.type, durationSeconds });
+      setPreview({
+        occurrenceId, blob, url: URL.createObjectURL(blob), fileName: `meeting-recording-${stamp}.webm`, mimeType: blob.type, durationSeconds });
       setIsRecording(false);
       stopTracks();
     };

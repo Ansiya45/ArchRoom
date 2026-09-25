@@ -17,6 +17,14 @@ const envSchema = z.object({
   LIVEKIT_URL: z.string().url().optional(),
   LIVEKIT_API_KEY: z.string().optional(),
   LIVEKIT_API_SECRET: z.string().optional(),
+  APP_PUBLIC_URL: z.string().url().optional(),
+  MEETING_EMAIL_FROM: z.string().optional(),
+  OPENAI_API_KEY: z.string().optional(),
+  OPENAI_TRANSCRIPTION_MODEL: z.string().default('gpt-4o-transcribe'),
+  OPENAI_SUMMARY_MODEL: z.string().default('gpt-4.1-mini'),
+  RESEND_API_KEY: z.string().optional(),
+  EMAIL_FROM: z.string().default('YLAAM-MEET <onboarding@resend.dev>'),
+  TRANSCRIPT_EMAIL_FROM: z.string().default('YLAAM-MEET <onboarding@resend.dev>'),
 });
 
 export const env = envSchema.parse(process.env);

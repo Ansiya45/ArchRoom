@@ -9,7 +9,9 @@
     "start": "node dist/index.js",
     "typecheck": "tsc --noEmit --project tsconfig.json",
     "drizzle:generate": "drizzle-kit generate",
-    "drizzle:migrate": "drizzle-kit migrate"
+    "drizzle:migrate": "drizzle-kit migrate",
+    "notifications:worker": "tsx src/meeting-notification-worker.ts",
+    "notifications:once": "tsx src/meeting-notification-worker.ts --once"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.112.3",

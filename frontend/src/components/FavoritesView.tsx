@@ -1,6 +1,8 @@
 'use client';
 
+import { RecurringOccurrences } from './RecurringOccurrences';
 import React, { useState } from 'react';
+import type { MeetingRecord } from '../lib/meetingSchedule';
 import { Star, Video, Trash2, Copy, Check, Clock, Users, Plus, ExternalLink } from 'lucide-react';
 
 export interface MeetingItem {
@@ -11,18 +13,23 @@ export interface MeetingItem {
   participantsCount: number;
   hostName: string;
   isFavorite: boolean;
+  record?: MeetingRecord;
 }
 
 interface FavoritesViewProps {
   meetings: MeetingItem[];
-  onStartMeeting: (meeting: MeetingItem) => void;
+  startingCode?: string | null;
+  onMeetingChanged: (meeting: MeetingRecord) => void;
+  onStartMeeting: (meeting: MeetingItem, occurrenceId?: string) => void;
   onToggleFavorite: (id: string) => void;
   onOpenCreateModal: () => void;
 }
 
 export const FavoritesView: React.FC<FavoritesViewProps> = ({
   meetings,
+  startingCode,
   onStartMeeting,
+  onMeetingChanged,
   onToggleFavorite,
   onOpenCreateModal,
 }) => {
@@ -108,10 +115,12 @@ export const FavoritesView: React.FC<FavoritesViewProps> = ({
                 </div>
               </div>
 
+              {m.record?.scheduleType === 'recurring' && <RecurringOccurrences onChanged={onMeetingChanged} meeting={m.record} busy={startingCode === m.code} onStart={id => onStartMeeting(m, id)} />}
               <div className="pt-3 border-t border-slate-100 flex items-center gap-2">
                 <button
                   onClick={() => onStartMeeting(m)}
-                  className="flex-1 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-semibold text-xs shadow-xs flex items-center justify-center gap-1.5 transition-all cursor-pointer"
+                  disabled={startingCode === m.code || !!m.record?.recurrenceCancelledAt || (m.record?.scheduleType === 'one_time' && m.record.status === 'ended')}
+                  className="flex-1 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed text-white font-semibold text-xs shadow-xs flex items-center justify-center gap-1.5 transition-all cursor-pointer"
                 >
                   <Video className="w-3.5 h-3.5" />
                   Enter Call

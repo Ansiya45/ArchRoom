@@ -1,3 +1,4 @@
+import { startHostedMeeting } from '../../lib/startHostedMeeting';
 'use client';
 
 import React, { useEffect, useRef, useState } from 'react';
@@ -17,6 +18,7 @@ import { stopAllCameraStreams } from './CameraVideo';
 import { Whiteboard } from './Whiteboard';
 import {
   PenTool,
+  Menu,
   X,
   PhoneOff,
   BarChart3,
@@ -25,12 +27,15 @@ import {
   UserCheck,
 } from 'lucide-react';
 import { trpc } from '@/lib/trpc';
-import { clearMeetingSession, getMeetingSession, storeMeetingSession } from '@/lib/meetingSession';
+import { clearMeetingSession, getMeetingSession, storeMeetingSession, type MeetingSession } from '@/lib/meetingSession';
 import { useSharedWhiteboard } from '@/hooks/useSharedWhiteboard';
-import { getStoredUser } from '@/lib/auth';
+import { clearStoredSession, getAuthToken, getStoredUser, type SessionUser } from '@/lib/auth';
+import AuthModal from '../AuthModal';
 import { useWebRtcMeeting } from '@/hooks/useWebRtcMeeting';
 import { useScreenRecorder } from '@/hooks/useScreenRecorder';
 import { RecordingsModal } from './RecordingsModal';
+import { TranscriptModal } from './TranscriptModal';
+import { useMeetingSummaryCapture } from '@/hooks/useMeetingSummaryCapture';
 
 interface MeetingRoomProps {
   meetingCode?: string;
@@ -40,6 +45,20 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
   meetingCode = 'YLM-9284-XKP',
 }) => {
   const navigate = useNavigate();
+  const [user, setUser] = useState<SessionUser | null>(null);
+  const [checkingSession, setCheckingSession] = useState(true);
+  const [sessionError, setSessionError] = useState('');
+  const [sessionAttempt, setSessionAttempt] = useState(0);
+  const [authMode, setAuthMode] = useState<'login' | 'signup' | null>(null);
+  const sessionRef = useRef<MeetingSession | null>(getMeetingSession(meetingCode));
+  const rememberSession = (code: string, session: MeetingSession) => {
+    sessionRef.current = session;
+    storeMeetingSession(code, session);
+  };
+  const forgetSession = (code: string) => {
+    if (getMeetingSession(code)?.participantId === sessionRef.current?.participantId) clearMeetingSession(code);
+    sessionRef.current = null;
+  };
   const meeting = useMeeting(meetingCode);
   const call = useWebRtcMeeting(
     meetingCode,
@@ -51,9 +70,11 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
     meeting.deviceSettings.micId,
     meeting.setMicEnabled,
     meeting.deviceSettings.cameraId,
-    meeting.setCameraEnabled
+    meeting.setCameraEnabled,
+    sessionRef.current
   );
-  const sharedWhiteboard = useSharedWhiteboard(meetingCode, meeting.inMeeting);
+  const sharedWhiteboard = useSharedWhiteboard(meetingCode, meeting.inMeeting, sessionRef.current);
+  const [isLeftPanelOpen, setIsLeftPanelOpen] = useState(false);
   const [isBgPickerOpen, setIsBgPickerOpen] = useState<boolean>(false);
   const [admission, setAdmission] = useState<'idle' | 'pending' | 'denied'>('idle');
   const [isJoining, setIsJoining] = useState(false);
@@ -65,6 +86,8 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
   const [isHost, setIsHost] = useState(false);
   const [joinRequests, setJoinRequests] = useState<Array<{ id: string; name: string }>>([]);
   const [isRecordingsOpen, setIsRecordingsOpen] = useState(false);
+  const [summaryReview, setSummaryReview] = useState<{ speech: string; occurrenceId?: string; warning: string } | null>(null);
+  const [closingForSummary, setClosingForSummary] = useState(false);
   const [unreadChatCount, setUnreadChatCount] = useState(0);
   const [chatToast, setChatToast] = useState<{ sender: string; message: string } | null>(null);
   const seenChatIdsRef = useRef(new Set<string>());
@@ -74,9 +97,41 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
   const loadingRequestsRef = useRef(false);
   const admissionActionsRef = useRef(new Set<string>());
   const recorder = useScreenRecorder();
+  const transcript = useMeetingSummaryCapture(
+    meeting.inMeeting && isHost, meetingCode, sessionRef.current?.occurrenceId,
+    call.localStream, meeting.isMicOn, call.remoteStreams, call.remoteMicMuted,
+  );
+
+  useEffect(() => {
+    let cancelled = false;
+    setCheckingSession(true);
+    setSessionError('');
+    if (!getAuthToken()) {
+      setUser(null);
+      setCheckingSession(false);
+      return;
+    }
+    void trpc.auth.me.query().then(({ user: account }) => {
+      if (cancelled) return;
+      setUser(account);
+      meeting.setDisplayName(account.fullName);
+    }).catch((error) => {
+      if (cancelled) return;
+      setUser(null);
+      if (error?.data?.code === 'UNAUTHORIZED') clearStoredSession();
+      else setSessionError('Unable to check your session. Please try again.');
+    }).finally(() => {
+      if (!cancelled) setCheckingSession(false);
+    });
+    return () => { cancelled = true; };
+  }, [sessionAttempt]);
 
   useEffect(() => meeting.syncParticipantAudio(call.remoteMicMuted), [call.remoteMicMuted]);
   useEffect(() => meeting.syncParticipantVideo(call.remoteCameraOn), [call.remoteCameraOn]);
+
+  useEffect(() => {
+    if (meeting.inMeeting && !meeting.isCameraOn) stopAllCameraStreams();
+  }, [meeting.inMeeting, meeting.isCameraOn]);
 
   useEffect(() => {
     if (meeting.deviceSettings.micId !== 'default' && !call.audioInputDevices.some((device) => device.deviceId === meeting.deviceSettings.micId)) {
@@ -116,45 +171,51 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
   }, [call.chatMessages, meeting.activeSidebarTab]);
 
   useEffect(() => {
-    void trpc.meetings.getByCode.query({ meetingCode }).then(({ meeting: room }) => {
+    if (!user) return;
+    void trpc.meetings.getByCode.query({ meetingCode, occurrenceId: sessionRef.current?.occurrenceId }).then(({ meeting: room }) => {
       meeting.setMeetingTitle(room.title);
       setIsHost(getStoredUser()?.id === room.hostUserId);
     }).catch(() => undefined);
-  }, [meetingCode]);
+  }, [meetingCode, user?.id]);
 
   useEffect(() => {
-    if (meeting.inMeeting || admission !== 'idle') return;
-    const session = getMeetingSession(meetingCode);
+    if (!user || meeting.inMeeting || admission !== 'idle') return;
+    const session = sessionRef.current;
     if (!session?.participantId) return;
     let cancelled = false;
-    void trpc.meetings.admissionStatus.query({ meetingCode, participantId: session.participantId })
+    void trpc.meetings.admissionStatus.query({ meetingCode, occurrenceId: sessionRef.current?.occurrenceId,
+          participantId: session.participantId })
       .then(async (status) => {
         if (cancelled) return;
+        if (status.sessionEnded) { forgetSession(meetingCode); return; }
         if (status.admission === 'pending') setAdmission('pending');
         else if (status.admission === 'denied') setAdmission('denied');
         else {
-          await trpc.meetings.rejoin.mutate({ meetingCode, participantId: session.participantId! });
+          await trpc.meetings.rejoin.mutate({ meetingCode, occurrenceId: sessionRef.current?.occurrenceId,
+          participantId: session.participantId! });
           if (!cancelled) meeting.joinMeeting();
         }
       })
       .catch(() => undefined);
     return () => { cancelled = true; };
-  }, [admission, meeting.inMeeting, meetingCode]);
+  }, [admission, meeting.inMeeting, meetingCode, user?.id]);
 
   useEffect(() => {
     if (admission !== 'pending') return;
-    const session = getMeetingSession(meetingCode);
+    const session = sessionRef.current;
     if (!session?.participantId) return;
     let checking = false;
 
     const checkAdmission = async () => {
-      if (checking) return;
+      if (checking || leavingRef.current) return;
       checking = true;
       try {
         const result = await trpc.meetings.admissionStatus.query({
           meetingCode,
+          occurrenceId: sessionRef.current?.occurrenceId,
           participantId: session.participantId!,
         });
+        if (result.sessionEnded) { forgetSession(meetingCode); setAdmission('idle'); joiningRef.current = false; setIsJoining(false); return; }
         if (result.admission === 'admitted') {
           setAdmission('idle');
           meeting.joinMeeting();
@@ -179,7 +240,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
       if (loadingRequestsRef.current) return;
       loadingRequestsRef.current = true;
       try {
-        const result = await trpc.meetings.pendingAdmissions.query({ meetingCode });
+        const result = await trpc.meetings.pendingAdmissions.query({ meetingCode, occurrenceId: sessionRef.current?.occurrenceId });
         setJoinRequests([...new Map(result.requests.map(({ id, name }) => [id, { id, name }])).values()]);
       } catch {
         // Preserve the last known list during temporary network failures.
@@ -196,9 +257,10 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
     if (!meeting.inMeeting) return;
     const loadParticipants = async () => {
       try {
-        const session = getMeetingSession(meetingCode);
+        const session = sessionRef.current;
         const result = await trpc.meetings.participants.query({
           meetingCode,
+          occurrenceId: sessionRef.current?.occurrenceId,
           participantId: session?.participantId,
         });
         meeting.syncParticipants(result.participants);
@@ -215,24 +277,27 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
     if (!meeting.inMeeting) return;
     let checking = false;
     const checkMembership = async () => {
-      if (checking) return;
+      if (checking || leavingRef.current) return;
       checking = true;
       try {
-        const session = getMeetingSession(meetingCode);
+        const session = sessionRef.current;
         if (session?.participantId) {
           const status = await trpc.meetings.admissionStatus.query({
             meetingCode,
+            occurrenceId: sessionRef.current?.occurrenceId,
             participantId: session.participantId,
           });
-          if (status.meeting.status === 'ended' || status.leftAt || status.admission !== 'admitted') {
-            clearMeetingSession(meetingCode);
+          if (leavingRef.current) return;
+          if (status.sessionEnded || status.meeting.status === 'ended' || status.leftAt || status.admission !== 'admitted') {
+            forgetSession(meetingCode);
             stopAllCameraStreams();
             meeting.leaveMeeting();
-            alert(status.meeting.status === 'ended' ? 'The host ended the meeting.' : 'The host removed you from the meeting.');
+            alert(status.sessionEnded || status.meeting.status === 'ended' ? 'The host ended the meeting.' : 'The host removed you from the meeting.');
             navigate('/');
           }
         } else {
-          const { meeting: room } = await trpc.meetings.getByCode.query({ meetingCode });
+          const { meeting: room } = await trpc.meetings.getByCode.query({ meetingCode, occurrenceId: sessionRef.current?.occurrenceId });
+          if (leavingRef.current) return;
           if (room.status === 'ended') {
             stopAllCameraStreams();
             meeting.leaveMeeting();
@@ -257,10 +322,11 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
     const reportPageExit = () => {
       if (leavingRef.current) return;
       leavingRef.current = true;
-      const session = getMeetingSession(meetingCode);
+      const session = sessionRef.current;
       const apiBase = import.meta.env.VITE_API_BASE_URL || '/api';
       const body = JSON.stringify({
-        0: { json: { meetingCode, participantId: session?.participantId } },
+        0: { json: { meetingCode, occurrenceId: sessionRef.current?.occurrenceId,
+          participantId: session?.participantId } },
       });
 
       // keepalive lets the request finish while a refresh or tab close is
@@ -278,37 +344,54 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
     return () => window.removeEventListener('pagehide', reportPageExit);
   }, [meeting.inMeeting, meetingCode]);
 
+  const closeWithSummary = async (end: boolean) => {
+    if (leavingRef.current) return;
+    leavingRef.current = true;
+    setClosingForSummary(true);
+    const session = sessionRef.current;
+    const occurrenceId = session?.occurrenceId;
+    try {
+      const speech = await transcript.finish();
+      if (end) {
+        await trpc.meetings.end.mutate({ meetingCode, occurrenceId });
+        forgetSession(meetingCode);
+      } else {
+        await trpc.meetings.leave.mutate({ meetingCode, occurrenceId, participantId: session?.participantId });
+      }
+      setSummaryReview({ speech, occurrenceId, warning: transcript.getWarning() });
+      stopAllCameraStreams();
+      meeting.leaveMeeting();
+    } catch (error) {
+      leavingRef.current = false;
+      void transcript.resume();
+      alert(error instanceof Error ? error.message : 'Unable to close the meeting. Please retry.');
+    } finally { setClosingForSummary(false); }
+  };
+
   const handleLeave = async () => {
-    const session = getMeetingSession(meetingCode);
+    if (isHost) { await closeWithSummary(false); return; }
+    if (leavingRef.current) return;
+    const session = sessionRef.current;
     leavingRef.current = true;
     stopAllCameraStreams();
     meeting.leaveMeeting();
     try {
-      await trpc.meetings.leave.mutate({ meetingCode, participantId: session?.participantId });
+      await trpc.meetings.leave.mutate({ meetingCode, occurrenceId: session?.occurrenceId, participantId: session?.participantId });
     } catch (error) {
-      console.warn('The local meeting was closed, but presence cleanup will rely on LiveKit disconnect timeout.', error);
+      console.warn('Presence cleanup will rely on LiveKit disconnect timeout.', error);
     }
     navigate('/');
   };
 
-  const handleEndMeeting = async () => {
-    if (!isHost || !window.confirm('End this meeting for everyone? Participants will not be able to rejoin.')) return;
-    try {
-      await trpc.meetings.end.mutate({ meetingCode });
-      clearMeetingSession(meetingCode);
-      stopAllCameraStreams();
-      meeting.leaveMeeting();
-      navigate('/');
-    } catch (error) {
-      alert(error instanceof Error ? error.message : 'Unable to end the meeting.');
-    }
+  const handleEndMeeting = () => {
+    if (isHost) void closeWithSummary(true);
   };
 
   const removeParticipant = async (participantId: string) => {
     if (isRemovingParticipant) return;
     setIsRemovingParticipant(true);
     try {
-      await trpc.meetings.removeParticipant.mutate({ meetingCode, participantId });
+      await trpc.meetings.removeParticipant.mutate({ meetingCode, occurrenceId: sessionRef.current?.occurrenceId, participantId });
       setParticipantToRemove(null);
     } catch (error) {
       alert(error instanceof Error ? error.message : 'Unable to remove participant.');
@@ -321,7 +404,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
     if (mutingParticipantIds.has(participantId)) return;
     setMutingParticipantIds((current) => new Set(current).add(participantId));
     try {
-      await trpc.meetings.muteParticipant.mutate({ meetingCode, participantId });
+      await trpc.meetings.muteParticipant.mutate({ meetingCode, occurrenceId: sessionRef.current?.occurrenceId, participantId });
     } catch (error) {
       alert(error instanceof Error ? error.message : 'Unable to mute participant.');
     } finally {
@@ -334,10 +417,10 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
   };
 
   const muteAllParticipants = async () => {
-    if (isMutingAll) return;
+    if (!isHost || isMutingAll) return;
     setIsMutingAll(true);
     try {
-      await trpc.meetings.muteAll.mutate({ meetingCode });
+      await trpc.meetings.muteAll.mutate({ meetingCode, occurrenceId: sessionRef.current?.occurrenceId });
     } catch (error) {
       alert(error instanceof Error ? error.message : 'Unable to mute participants.');
     } finally {
@@ -352,7 +435,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
       return;
     }
     try {
-      await recorder.start();
+      await recorder.start(sessionRef.current?.occurrenceId);
     } catch (error) {
       alert(error instanceof Error ? error.message : 'Unable to start screen recording.');
     }
@@ -360,9 +443,10 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
 
   const uploadChatFile = async (file: File) => {
     if (file.size > 25 * 1024 * 1024) throw new Error('Files must be 25 MB or smaller.');
-    const session = getMeetingSession(meetingCode);
+    const session = sessionRef.current;
     const upload = await trpc.chatAttachments.createUpload.mutate({
       meetingCode,
+      occurrenceId: sessionRef.current?.occurrenceId,
       participantId: session?.participantId,
       fileName: file.name,
       fileSize: file.size,
@@ -393,9 +477,10 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
       return;
     }
     try {
-      const session = getMeetingSession(meetingCode);
+      const session = sessionRef.current;
       const result = await trpc.chatAttachments.downloadUrl.mutate({
         meetingCode,
+        occurrenceId: sessionRef.current?.occurrenceId,
         participantId: session?.participantId,
         storagePath: attachment.storagePath,
         fileName: attachment.name,
@@ -407,33 +492,51 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
   };
 
   const handleJoin = async () => {
+    if (checkingSession || sessionError) return;
+    if (!user) {
+      setAuthMode('login');
+      return;
+    }
     const displayName = meeting.displayName.trim();
     if (!displayName || joiningRef.current || admission === 'pending') return;
     joiningRef.current = true;
     setIsJoining(true);
 
     try {
-      const existingSession = getMeetingSession(meeting.meetingCode);
-      const joinRequestId = existingSession?.joinRequestId || crypto.randomUUID();
-      storeMeetingSession(meeting.meetingCode, { ...existingSession, displayName, joinRequestId });
+      let { meeting: room } = await trpc.meetings.getByCode.query({ meetingCode });
+      if ((room.scheduleType === 'reusable' || room.scheduleType === 'recurring')) {
+        if (!room.activeOccurrenceId && room.hostUserId === user.id) {
+          ({ meeting: room } = await startHostedMeeting(room));
+        }
+        if (!room.activeOccurrenceId) throw new Error('The host has not opened this room yet. Please try again when the host starts it.');
+        if (sessionRef.current?.occurrenceId !== room.activeOccurrenceId) {
+          rememberSession(meetingCode, { displayName, occurrenceId: room.activeOccurrenceId, joinRequestId: crypto.randomUUID() });
+        }
+      }
+      const existingSession = sessionRef.current;
+      let joinRequestId = existingSession?.joinRequestId || crypto.randomUUID();
+      rememberSession(meeting.meetingCode, { ...existingSession, displayName, joinRequestId });
 
       if (existingSession?.participantId) {
         let rejoined;
         try {
           rejoined = await trpc.meetings.rejoin.mutate({
             meetingCode: meeting.meetingCode,
+            occurrenceId: sessionRef.current?.occurrenceId,
             participantId: existingSession.participantId,
           });
         } catch (error) {
           if (!(error instanceof Error) || !error.message.includes('A new admission is required')) throw error;
-          clearMeetingSession(meeting.meetingCode);
+          joinRequestId = crypto.randomUUID();
+          rememberSession(meeting.meetingCode, { displayName, occurrenceId: sessionRef.current?.occurrenceId, joinRequestId });
           const joined = await trpc.meetings.join.mutate({
             meetingCode: meeting.meetingCode,
-            guestName: displayName,
+            occurrenceId: sessionRef.current?.occurrenceId,
             joinRequestId,
           });
-          storeMeetingSession(meeting.meetingCode, {
+          rememberSession(meeting.meetingCode, {
             displayName,
+            occurrenceId: joined.participant.occurrenceId ?? undefined,
             participantId: joined.participant.id,
             joinRequestId,
           });
@@ -444,6 +547,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
         try {
           await trpc.meetings.updateGuestName.mutate({
             meetingCode: meeting.meetingCode,
+            occurrenceId: sessionRef.current?.occurrenceId,
             participantId: existingSession.participantId,
             guestName: displayName,
           });
@@ -455,11 +559,12 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
       } else {
         const joined = await trpc.meetings.join.mutate({
           meetingCode: meeting.meetingCode,
-          guestName: displayName,
+          occurrenceId: sessionRef.current?.occurrenceId,
           joinRequestId,
         });
-        storeMeetingSession(meeting.meetingCode, {
+        rememberSession(meeting.meetingCode, {
           displayName,
+          occurrenceId: joined.participant.occurrenceId ?? undefined,
           participantId: joined.participant.id,
           joinRequestId,
         });
@@ -478,7 +583,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
     admissionActionsRef.current.add(participantId);
     setAdmissionActions((current) => new Set(current).add(participantId));
     try {
-      await trpc.meetings.decideAdmission.mutate({ meetingCode, participantId, admit });
+      await trpc.meetings.decideAdmission.mutate({ meetingCode, occurrenceId: sessionRef.current?.occurrenceId, participantId, admit });
       setJoinRequests((requests) => requests.filter((request) => request.id !== participantId));
     } finally {
       admissionActionsRef.current.delete(participantId);
@@ -512,9 +617,18 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
   }
 
   // If in waiting room mode, render WaitingRoom
+  if (summaryReview) return <TranscriptModal meetingCode={meetingCode} occurrenceId={summaryReview.occurrenceId}
+    speech={summaryReview.speech} warning={summaryReview.warning} onClose={() => navigate('/')} />;
+
   if (!meeting.inMeeting) {
     return (
+      <>
       <WaitingRoom
+        accountEmail={user?.email}
+        checkingSession={checkingSession}
+        sessionError={sessionError}
+        onRetrySession={() => setSessionAttempt((attempt) => attempt + 1)}
+        onOpenAuth={setAuthMode}
         meetingCode={meeting.meetingCode}
         meetingTitle={meeting.meetingTitle}
         isMicOn={meeting.isMicOn}
@@ -526,12 +640,20 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
         onDisplayNameChange={meeting.setDisplayName}
         deviceSettings={meeting.deviceSettings}
         setDeviceSettings={meeting.setDeviceSettings}
-        audioInputDevices={call.audioInputDevices}
-        microphoneError={call.microphoneError}
-        videoInputDevices={call.videoInputDevices}
-        cameraError={call.cameraError}
         isJoining={isJoining}
       />
+      <AuthModal
+        isOpen={authMode !== null}
+        mode={authMode || 'login'}
+        onClose={() => setAuthMode(null)}
+        onSuccess={(account) => {
+          meeting.setDisplayName(account.fullName);
+          setUser(account);
+          setSessionError('');
+          setAuthMode(null);
+        }}
+      />
+      </>
     );
   }
 
@@ -615,9 +737,34 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
         onEndMeeting={() => void handleEndMeeting()}
       />
 
+      <div className="relative z-40 shrink-0 px-3 sm:px-4 pt-2">
+        <button
+          type="button"
+          onClick={() => setIsLeftPanelOpen((open) => !open)}
+          aria-label={isLeftPanelOpen ? 'Hide meeting toolbar' : 'Show meeting toolbar'}
+          aria-expanded={isLeftPanelOpen}
+          aria-controls="meeting-left-toolbar"
+          title={isLeftPanelOpen ? 'Hide meeting toolbar' : 'Show meeting toolbar'}
+          className="flex h-10 w-10 items-center justify-center rounded-xl border border-white/20 bg-slate-900/80 text-white shadow-md transition-colors hover:bg-violet-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-400"
+        >
+          <Menu className="h-5 w-5" aria-hidden="true" />
+        </button>
+      </div>
+
       {/* MAIN CONTENT AREA: Left Panel + Video Stage + Right Sidebar */}
       <div className="flex-1 min-h-0 w-full flex items-stretch overflow-hidden relative p-3 sm:p-4 gap-3 sm:gap-4">
-        {/* LEFT PANEL */}
+        {/* Keep the toolbar mounted so hiding it only changes presentation. */}
+        <div
+          id="meeting-left-toolbar"
+          aria-hidden={!isLeftPanelOpen}
+          inert={!isLeftPanelOpen}
+          className={`relative z-40 shrink-0 transition-[width,margin-right] duration-300 ease-in-out motion-reduce:transition-none ${
+            isLeftPanelOpen ? 'w-16 sm:w-20 mr-0' : 'w-0 -mr-3 sm:-mr-4 pointer-events-none'
+          }`}
+        >
+          <div className={`h-full w-16 sm:w-20 transition-transform duration-300 ease-in-out motion-reduce:transition-none ${
+            isLeftPanelOpen ? 'translate-x-0' : '-translate-x-[calc(100%+2rem)]'
+          }`}>
         <LeftPanel
           isWhiteboardOpen={meeting.isWhiteboardOpen}
           onToggleWhiteboard={() => meeting.setIsWhiteboardOpen((prev) => !prev)}
@@ -638,7 +785,9 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
           isHost={isHost}
           onOpenRecordings={() => setIsRecordingsOpen(true)}
           unreadChatCount={unreadChatCount}
-      />
+        />
+          </div>
+        </div>
 
       <RecordingsModal
         isOpen={isHost && isRecordingsOpen}
@@ -647,6 +796,13 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
         onClose={() => setIsRecordingsOpen(false)}
         onDiscardPreview={recorder.clearPreview}
       />
+
+      {closingForSummary && <div role="status" className="fixed inset-0 z-[110] bg-black/80 text-white flex items-center justify-center">Finishing speech capture and closing the call...</div>}
+      <div className="fixed bottom-24 left-4 z-30 max-w-sm rounded-lg bg-zinc-900/90 p-2 text-xs text-zinc-300">
+        {isHost ? transcript.error || 'Meeting speech is processed by OpenAI for an English summary.' : 'The host can process meeting speech with OpenAI for an English summary.'}
+        {isHost && transcript.error && <button className="block underline" onClick={() => void transcript.resume()}>Enable summary capture</button>}
+      </div>
+
 
         {/* CENTER VIDEO GRID & STAGE */}
         <div className="flex-1 h-full min-h-0 overflow-hidden flex flex-col relative">

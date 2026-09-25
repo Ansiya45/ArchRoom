@@ -26,7 +26,7 @@ interface VideoCardProps {
   mediaStream?: MediaStream | null;
 }
 
-const SharedScreenVideo: React.FC<{ stream: MediaStream; muted: boolean }> = ({ stream, muted }) => {
+const SharedScreenVideo: React.FC<{ stream: MediaStream }> = ({ stream }) => {
   const ref = useRef<HTMLVideoElement | null>(null);
   useEffect(() => {
     if (ref.current && ref.current.srcObject !== stream) {
@@ -34,7 +34,26 @@ const SharedScreenVideo: React.FC<{ stream: MediaStream; muted: boolean }> = ({ 
       void ref.current.play().catch(() => undefined);
     }
   }, [stream]);
-  return <video ref={ref} autoPlay playsInline muted={muted} className="absolute inset-0 h-full w-full bg-black object-contain" />;
+  return <video ref={ref} autoPlay playsInline muted className="absolute inset-0 h-full w-full bg-black object-contain" />;
+};
+
+const RemoteMicrophoneAudio: React.FC<{ stream: MediaStream }> = ({ stream }) => {
+  const ref = useRef<HTMLAudioElement | null>(null);
+
+  useEffect(() => {
+    const audio = ref.current;
+    if (!audio) return;
+
+    const nextStream = new MediaStream(stream.getAudioTracks());
+    audio.srcObject = nextStream;
+    void audio.play().catch(() => undefined);
+
+    return () => {
+      if (audio.srcObject === nextStream) audio.srcObject = null;
+    };
+  }, [stream]);
+
+  return <audio ref={ref} autoPlay />;
 };
 
 export const VideoCard: React.FC<VideoCardProps> = ({
@@ -69,9 +88,13 @@ export const VideoCard: React.FC<VideoCardProps> = ({
           : 'border-white/80 bg-white/40 shadow-xl hover:border-white'
       } ${isMainStage ? 'w-full h-full min-h-[380px]' : 'w-full h-full min-h-[160px]'}`}
     >
+      {!isSelf && !isMuted && mediaStream && mediaStream.getAudioTracks().length > 0 && (
+        <RemoteMicrophoneAudio stream={mediaStream} />
+      )}
+
       {/* Screen Share / Active Video Canvas Mock */}
       {isScreenSharing ? (
-        mediaStream ? <SharedScreenVideo stream={mediaStream} muted={isSelf} /> : <div className="absolute inset-0 bg-slate-950 flex flex-col justify-between p-4 overflow-hidden">
+        mediaStream ? <SharedScreenVideo stream={mediaStream} /> : <div className="absolute inset-0 bg-slate-950 flex flex-col justify-between p-4 overflow-hidden">
           {/* Mock Blueprint / Code Slide Screen */}
           <div className="absolute inset-0 bg-gradient-to-br from-slate-900 via-blue-950/40 to-slate-950 opacity-90" />
           

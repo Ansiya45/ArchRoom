@@ -12,7 +12,7 @@ export default defineConfig({
         target: 'http://127.0.0.1:3001',
         changeOrigin: true,
         ws: true,
-        rewrite: (path) => path.replace(/^\/api/, ''),
+        rewrite: (path) => path.replace(/^\/api(?=\/|$)/, ''),
       },
     },
   },

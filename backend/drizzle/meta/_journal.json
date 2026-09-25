@@ -29,6 +29,48 @@
       "when": 1787990400000,
       "tag": "0003_idempotent_join",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1788307200000,
+      "tag": "0004_email_auth",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1789631531134,
+      "tag": "0005_one_time_scheduling",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1789810245943,
+      "tag": "0006_reusable_sessions",
+      "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1789811481362,
+      "tag": "0007_recurring_meetings",
+      "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1789812354798,
+      "tag": "0008_meeting_notifications",
+      "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1789966364266,
+      "tag": "0009_recurring_edits",
+      "breakpoints": true
     }
   ]
 }

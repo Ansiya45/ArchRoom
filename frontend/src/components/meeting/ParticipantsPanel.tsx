@@ -91,15 +91,17 @@ export const ParticipantsPanel: React.FC<ParticipantsPanelProps> = ({
             <UserPlus className="w-3.5 h-3.5" />
             <span>Invite People</span>
           </button>
-          <button
-            onClick={onMuteAll}
-            disabled={!isHost || isMutingAll || !participants.some((participant) => participant.role !== 'host' && !participant.isMuted)}
-            className="py-2 px-3 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold flex items-center space-x-1.5 border border-slate-200 transition-all"
-            title="Mute All Attendees"
-          >
-            <VolumeX className="w-3.5 h-3.5 text-red-500" />
-            <span>{isMutingAll ? 'Muting...' : 'Mute All'}</span>
-          </button>
+          {isHost && (
+            <button
+              onClick={onMuteAll}
+              disabled={isMutingAll || !participants.some((participant) => participant.role !== 'host' && !participant.isMuted)}
+              className="py-2 px-3 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold flex items-center space-x-1.5 border border-slate-200 transition-all"
+              title="Mute All Attendees"
+            >
+              <VolumeX className="w-3.5 h-3.5 text-red-500" />
+              <span>{isMutingAll ? 'Muting...' : 'Mute All'}</span>
+            </button>
+          )}
         </div>
       </div>
 

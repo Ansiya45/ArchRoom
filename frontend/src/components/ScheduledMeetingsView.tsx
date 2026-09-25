@@ -1,12 +1,19 @@
 'use client';
 
+import { RecurringOccurrences } from './RecurringOccurrences';
+import { MeetingNotifications } from './MeetingNotifications';
 import React, { useState } from 'react';
 import { CalendarDays, Clock, Users, Video, Copy, Check, Star, Trash2, Plus, Search } from 'lucide-react';
 import { MeetingItem } from './FavoritesView';
+import type { MeetingRecord } from '../lib/meetingSchedule';
 
 interface ScheduledMeetingsViewProps {
   meetings: MeetingItem[];
-  onStartMeeting: (meeting: MeetingItem) => void;
+  startingCode?: string | null;
+  hostUserId?: string;
+  onRescheduleMeeting: (meeting: MeetingRecord) => void;
+  onMeetingChanged: (meeting: MeetingRecord) => void;
+  onStartMeeting: (meeting: MeetingItem, occurrenceId?: string) => void;
   onToggleFavorite: (id: string) => void;
   onDeleteMeeting: (id: string) => void;
   onOpenCreateModal: () => void;
@@ -14,7 +21,11 @@ interface ScheduledMeetingsViewProps {
 
 export const ScheduledMeetingsView: React.FC<ScheduledMeetingsViewProps> = ({
   meetings,
+  startingCode,
+  hostUserId,
+  onRescheduleMeeting,
   onStartMeeting,
+  onMeetingChanged,
   onToggleFavorite,
   onDeleteMeeting,
   onOpenCreateModal,
@@ -127,13 +138,20 @@ export const ScheduledMeetingsView: React.FC<ScheduledMeetingsViewProps> = ({
                 </div>
               </div>
 
+              {m.record && m.record.hostUserId === hostUserId && <MeetingNotifications meeting={m.record} />}
+              {m.record?.scheduleType !== 'recurring' && m.record?.status === 'scheduled' && m.record.scheduledAt && m.record.hostUserId === hostUserId && (
+                <button type="button" onClick={() => onRescheduleMeeting(m.record!)}
+                  className="text-left text-xs font-semibold text-blue-600 hover:text-blue-700">Reschedule</button>
+              )}
+              {m.record?.scheduleType === 'recurring' && <RecurringOccurrences onChanged={onMeetingChanged} meeting={m.record} busy={startingCode === m.code} onStart={id => onStartMeeting(m, id)} />}
               <div className="pt-3 border-t border-slate-100 flex items-center gap-2">
                 <button
                   onClick={() => onStartMeeting(m)}
-                  className="flex-1 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-semibold text-xs shadow-xs flex items-center justify-center gap-1.5 transition-all cursor-pointer"
+                  disabled={startingCode === m.code || !!m.record?.recurrenceCancelledAt || (m.record?.scheduleType === 'one_time' && m.record.status === 'ended')}
+                  className="flex-1 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed text-white font-semibold text-xs shadow-xs flex items-center justify-center gap-1.5 transition-all cursor-pointer"
                 >
                   <Video className="w-3.5 h-3.5" />
-                  Start Call
+                  {m.record?.recurrenceCancelledAt ? 'Series cancelled' : startingCode === m.code ? 'Starting...' : m.record?.scheduleType === 'one_time' && m.record.status === 'ended' ? 'Ended' : m.record?.scheduleType === 'recurring' ? (m.record.status === 'live' ? 'Join occurrence' : 'Start next occurrence') : 'Start Call'}
                 </button>
 
                 <button

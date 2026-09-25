@@ -145,20 +145,29 @@ export const CameraVideo: React.FC<CameraVideoProps> = ({
     }
   }, [fallbackAvatar]);
 
-  // Keep the camera stream alive while this component is mounted. Toggling the
-  // camera only enables/disables its video track, avoiding slow hardware restarts.
+  // Stop locally owned preview tracks when the camera is off so the browser
+  // releases the physical camera, then acquire a fresh track when it is on.
   useEffect(() => {
     async function startCamera() {
       if (mediaStream !== undefined) {
+        if (ownsStreamRef.current && streamRef.current && streamRef.current !== mediaStream) {
+          streamRef.current.getTracks().forEach((track) => track.stop());
+          activeCameraStreams.delete(streamRef.current);
+        }
         ownsStreamRef.current = false;
         streamRef.current = mediaStream;
         setStream(mediaStream);
         return;
       }
       if (!isCameraOn || !isSelf) {
-        streamRef.current?.getVideoTracks().forEach((track) => {
-          track.enabled = false;
-        });
+        if (ownsStreamRef.current && streamRef.current) {
+          streamRef.current.getTracks().forEach((track) => track.stop());
+          activeCameraStreams.delete(streamRef.current);
+          streamRef.current = null;
+          ownsStreamRef.current = false;
+          cameraRequestedRef.current = false;
+          setStream(null);
+        }
         return;
       }
 
@@ -192,9 +201,15 @@ export const CameraVideo: React.FC<CameraVideoProps> = ({
             return;
           }
 
-          mediaStream.getVideoTracks().forEach((track) => {
-            track.enabled = cameraEnabledRef.current;
-          });
+          // Permission/capture can resolve after the user has already switched
+          // the camera off. Never retain that late stream because it would keep
+          // the physical camera active while the meeting shows video as off.
+          if (!cameraEnabledRef.current) {
+            mediaStream.getTracks().forEach((track) => track.stop());
+            cameraRequestedRef.current = false;
+            setStream(null);
+            return;
+          }
 
           streamRef.current = mediaStream;
           ownsStreamRef.current = true;
@@ -492,7 +507,7 @@ export const CameraVideo: React.FC<CameraVideoProps> = ({
             <video
               autoPlay
               playsInline
-              muted={isSelf}
+              muted
               ref={previewVideoRef}
               className={`w-full h-full ${
                 objectFit === 'cover' ? 'object-cover' : 'object-contain'

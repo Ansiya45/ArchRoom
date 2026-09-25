@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { getAuthToken } from '@/lib/auth';
-import { getMeetingSession } from '@/lib/meetingSession';
+import { getMeetingSession, type MeetingSession } from '@/lib/meetingSession';
 
 export interface WhiteboardParticipant {
   id: string;
@@ -17,7 +17,7 @@ function getWhiteboardUrl() {
   return `${protocol}//${window.location.host}/api/whiteboard`;
 }
 
-export function useSharedWhiteboard(meetingCode: string, enabled: boolean) {
+export function useSharedWhiteboard(meetingCode: string, enabled: boolean, sessionIdentity?: MeetingSession | null) {
   const socketRef = useRef<WebSocket | null>(null);
   const [connected, setConnected] = useState(false);
   const [shared, setShared] = useState(false);
@@ -30,7 +30,7 @@ export function useSharedWhiteboard(meetingCode: string, enabled: boolean) {
 
   useEffect(() => {
     if (!enabled) return;
-    const session = getMeetingSession(meetingCode);
+    const session = sessionIdentity === undefined ? getMeetingSession(meetingCode) : sessionIdentity;
     const socket = new WebSocket(getWhiteboardUrl());
     socketRef.current = socket;
     setConnectionError(null);
@@ -41,6 +41,7 @@ export function useSharedWhiteboard(meetingCode: string, enabled: boolean) {
         meetingCode,
         token: getAuthToken(),
         participantId: session?.participantId,
+        occurrenceId: session?.occurrenceId,
       }));
     };
     socket.onmessage = (event) => {
@@ -72,6 +73,10 @@ export function useSharedWhiteboard(meetingCode: string, enabled: boolean) {
       socket.close();
       socketRef.current = null;
       setConnected(false);
+      setSnapshot(null);
+      setShared(false);
+      setCanEdit(false);
+      setParticipants([]);
     };
   }, [enabled, meetingCode]);
 
