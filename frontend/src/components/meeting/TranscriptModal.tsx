@@ -4,8 +4,8 @@ import { trpc } from '@/lib/trpc';
 // Kept for the existing LiveKit data-message types.
 export type TranscriptSegment = { id: string; speaker: string; text: string; timestamp: string };
 type Attendee = { id: string; name: string; email: string };
-export function TranscriptModal({ meetingCode, occurrenceId, speech, warning, onClose }: {
-  meetingCode: string; occurrenceId?: string; speech: string; warning: string; onClose: () => void;
+export function TranscriptModal({ meetingCode, occurrenceId, speech, warning, onClose, onOpenRecordings }: {
+  meetingCode: string; occurrenceId?: string; speech: string; warning: string; onClose: () => void; onOpenRecordings?: () => void;
 }) {
   const [summary, setSummary] = useState('');
   const [attendees, setAttendees] = useState<Attendee[]>([]);
@@ -66,6 +66,7 @@ export function TranscriptModal({ meetingCode, occurrenceId, speech, warning, on
         {!attendees.length && !busy && <p className="text-sm text-zinc-400">No attendee email addresses are available.</p>}
       </fieldset>}
       <div className="flex gap-3 flex-wrap">
+        {onOpenRecordings && <button className="px-4 py-2 rounded-lg bg-violet-600" onClick={onOpenRecordings}>Save recording</button>}
         <button className="px-4 py-2 rounded-lg bg-white/10 disabled:opacity-40" disabled={!summary} onClick={download}>Download</button>
         <button className="px-4 py-2 rounded-lg bg-blue-600 disabled:opacity-40" disabled={!summary || busy || !selected.some(id => !sent.includes(id))} onClick={() => void send()}>Send summary</button>
         <button className="px-4 py-2 rounded-lg bg-white/10" disabled={busy} onClick={onClose}>Done</button>

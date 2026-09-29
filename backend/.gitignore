@@ -4,4 +4,5 @@ dist/
 __pycache__/
 *.pyc
 .env
+.notification-worker*.log
 db.sqlite3

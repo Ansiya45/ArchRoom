@@ -4,6 +4,7 @@ import { AuthService } from '../services/auth.service.js';
 import { protectedProcedure } from '../trpc/protected.js';
 
 const authService = new AuthService();
+const newPassword = z.string().regex(/^(?=.*[a-z])(?=.*[A-Z])(?=.*\d).{8,}$/, 'Use 8+ characters with uppercase, lowercase, and a number.');
 
 export const authRouter = t.router({
   signup: t.procedure
@@ -11,7 +12,8 @@ export const authRouter = t.router({
       z.object({
         fullName: z.string().min(2),
         email: z.string().email(),
-        password: z.string().min(8),
+        // Match AuthModal's signup policy, including its character semantics.
+        password: newPassword,
       })
     )
     .mutation(async ({ input }) => {
@@ -45,7 +47,7 @@ export const authRouter = t.router({
     .input(z.object({
       email: z.string().email(),
       code: z.string().regex(/^\d{6}$/),
-      password: z.string().min(8).regex(/[a-z]/).regex(/[A-Z]/).regex(/\d/),
+      password: newPassword,
     }))
     .mutation(({ input }) => authService.resetPassword(input.email, input.code, input.password)),
 

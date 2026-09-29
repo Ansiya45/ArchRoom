@@ -1,4 +1,5 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import { DriveRecordingUpload } from './DriveRecordingUpload';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { CloudUpload, Download, Film, Loader2, X } from 'lucide-react';
 import { trpc } from '@/lib/trpc';
 import type { RecordingPreview } from '@/hooks/useScreenRecorder';
@@ -30,6 +31,10 @@ export const RecordingsModal: React.FC<RecordingsModalProps> = ({
   const [recordings, setRecordings] = useState<SavedRecording[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
+  const [driveBusy, setDriveBusy] = useState(false);
+  const [savedPreview, setSavedPreview] = useState('');
+  const uploadLock = useRef(false);
+  const uploadAttempt = useRef<{ previewUrl: string; created: Awaited<ReturnType<typeof trpc.recordings.createUpload.mutate>>; transferred: boolean } | null>(null);
   const [message, setMessage] = useState<string | null>(null);
 
   const loadRecordings = useCallback(async () => {
@@ -48,33 +53,51 @@ export const RecordingsModal: React.FC<RecordingsModalProps> = ({
     if (isOpen) void loadRecordings();
   }, [isOpen, loadRecordings]);
 
-  if (!isOpen) return null;
+  useEffect(() => {
+    if (!isUploading && !driveBusy) return;
+    const protect = (event: BeforeUnloadEvent) => { event.preventDefault(); event.returnValue = ''; };
+    window.addEventListener('beforeunload', protect);
+    return () => window.removeEventListener('beforeunload', protect);
+  }, [isUploading, driveBusy]);
 
   const uploadPreview = async () => {
-    if (!preview || isUploading) return;
+    if (!preview || uploadLock.current || driveBusy || savedPreview === preview.url) return;
+    uploadLock.current = true;
     setIsUploading(true);
     setMessage(null);
     try {
-      const created = await trpc.recordings.createUpload.mutate({
-        meetingCode,
-        occurrenceId: preview.occurrenceId,
-        fileName: preview.fileName,
-        mimeType: preview.mimeType || 'video/webm',
-        fileSize: preview.blob.size,
-        durationSeconds: preview.durationSeconds,
-      });
-      const body = new FormData();
-      body.append('cacheControl', '3600');
-      body.append('', preview.blob, preview.fileName);
-      const response = await fetch(created.uploadUrl, { method: 'PUT', headers: { 'x-upsert': 'false' }, body });
-      if (!response.ok) throw new Error(`Upload failed (${response.status})`);
-      await trpc.recordings.complete.mutate({ recordingId: created.recording.id });
-      onDiscardPreview();
+      if (uploadAttempt.current?.previewUrl !== preview.url) {
+        const created = await trpc.recordings.createUpload.mutate({
+          meetingCode,
+          occurrenceId: preview.occurrenceId,
+          fileName: preview.fileName,
+          mimeType: preview.mimeType || 'video/webm',
+          fileSize: preview.blob.size,
+          durationSeconds: preview.durationSeconds,
+        });
+        uploadAttempt.current = { previewUrl: preview.url, created, transferred: false };
+      } else if (!uploadAttempt.current.transferred) {
+        const retry = await trpc.recordings.retryUpload.mutate({ recordingId: uploadAttempt.current.created.recording.id });
+        uploadAttempt.current.transferred = retry.transferred;
+        if (retry.uploadUrl) uploadAttempt.current.created.uploadUrl = retry.uploadUrl;
+      }
+      const attempt = uploadAttempt.current;
+      if (!attempt.transferred) {
+        const body = new FormData();
+        body.append('cacheControl', '3600');
+        body.append('', preview.blob, preview.fileName);
+        const response = await fetch(attempt.created.uploadUrl, { method: 'PUT', headers: { 'x-upsert': 'false' }, body, signal: AbortSignal.timeout(300000) });
+        if (!response.ok) throw new Error(`Supabase upload failed (${response.status}). Keep the recording and retry, or download it.`);
+        attempt.transferred = true;
+      }
+      await trpc.recordings.complete.mutate({ recordingId: attempt.created.recording.id });
+      setSavedPreview(preview.url);
       setMessage('Recording saved privately to Supabase.');
       await loadRecordings();
     } catch (error) {
       setMessage(error instanceof Error ? error.message : 'Unable to upload recording.');
     } finally {
+      uploadLock.current = false;
       setIsUploading(false);
     }
   };
@@ -89,14 +112,14 @@ export const RecordingsModal: React.FC<RecordingsModalProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-[120] flex items-center justify-center bg-slate-950/65 p-4 backdrop-blur-sm">
+    <div className={`${isOpen ? 'flex' : 'hidden'} fixed inset-0 z-[120] items-center justify-center bg-slate-950/65 p-4 backdrop-blur-sm`}>
       <div role="dialog" aria-modal="true" aria-label="Host recordings" className="flex max-h-[90vh] w-full max-w-3xl flex-col overflow-hidden rounded-3xl border border-white/70 bg-white shadow-2xl">
         <div className="flex items-center justify-between border-b border-slate-200 px-6 py-4">
           <div>
             <h2 className="text-lg font-bold text-slate-900">Meeting recordings</h2>
-            <p className="text-xs text-slate-500">Private host access · {meetingCode}</p>
+            <p className="text-xs text-slate-500">Private host access Â· {meetingCode}</p>
           </div>
-          <button onClick={onClose} className="rounded-xl p-2 text-slate-500 hover:bg-slate-100" aria-label="Close recordings">
+          <button disabled={isUploading || driveBusy} onClick={onClose} className="rounded-xl p-2 text-slate-500 hover:bg-slate-100" aria-label="Close recordings">
             <X className="h-5 w-5" />
           </button>
         </div>
@@ -105,16 +128,18 @@ export const RecordingsModal: React.FC<RecordingsModalProps> = ({
           {preview && (
             <section className="mb-6 rounded-2xl border border-blue-200 bg-blue-50/60 p-4">
               <h3 className="mb-3 text-sm font-bold text-slate-900">Recording preview</h3>
+              <p className="mb-3 text-xs text-slate-600">Choose where to save. Nothing uploads automatically. You can use more than one option; keep this page open until finished.</p>
               <video src={preview.url} controls className="aspect-video w-full rounded-xl bg-black" />
               <div className="mt-4 flex flex-wrap gap-2">
                 <button onClick={() => downloadLocal(preview)} className="flex items-center gap-2 rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">
                   <Download className="h-4 w-4" /> Download to computer
                 </button>
-                <button onClick={() => void uploadPreview()} disabled={isUploading} className="flex items-center gap-2 rounded-xl bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-500 disabled:opacity-60">
+                <button onClick={() => void uploadPreview()} disabled={isUploading || driveBusy || savedPreview === preview.url} className="flex items-center gap-2 rounded-xl bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-500 disabled:opacity-60">
                   {isUploading ? <Loader2 className="h-4 w-4 animate-spin" /> : <CloudUpload className="h-4 w-4" />}
-                  {isUploading ? 'Uploading…' : 'Save to Supabase'}
+                  {isUploading ? 'Uploading...' : savedPreview === preview.url ? 'Uploaded to Supabase' : 'Upload to Supabase'}
                 </button>
-                <button onClick={onDiscardPreview} disabled={isUploading} className="px-3 py-2 text-sm font-semibold text-slate-500 hover:text-red-600">Discard</button>
+                <DriveRecordingUpload key={preview.url} preview={preview} meetingCode={meetingCode} disabled={isUploading} onBusyChange={setDriveBusy} />
+                <button onClick={onDiscardPreview} disabled={isUploading || driveBusy} className="px-3 py-2 text-sm font-semibold text-slate-500 hover:text-red-600">Discard</button>
               </div>
             </section>
           )}
@@ -134,7 +159,7 @@ export const RecordingsModal: React.FC<RecordingsModalProps> = ({
                     <div className="min-w-0 flex-1">
                       <p className="truncate text-sm font-semibold text-slate-900">{recording.fileName}</p>
                       {recording.occurrenceId && <p className="text-xs text-slate-500">Room session: {recording.occurrenceId.slice(0, 8)}</p>}
-                      <p className="text-xs text-slate-500">{Math.round((recording.fileSize || 0) / 1024 / 1024 * 10) / 10} MB · {recording.durationSeconds || 0}s</p>
+                      <p className="text-xs text-slate-500">{Math.round((recording.fileSize || 0) / 1024 / 1024 * 10) / 10} MB Â· {recording.durationSeconds || 0}s</p>
                     </div>
                     <button onClick={() => void downloadSaved(recording.id)} className="flex items-center gap-2 rounded-xl bg-slate-900 px-3 py-2 text-xs font-semibold text-white hover:bg-slate-700">
                       <Download className="h-4 w-4" /> Download

@@ -92,11 +92,11 @@ export const ScheduledMeetingsView: React.FC<ScheduledMeetingsViewProps> = ({
           </p>
         </div>
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
+        <div className="grid min-w-0 grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
           {filteredMeetings.map((m) => (
             <div
               key={m.id}
-              className="bg-white rounded-3xl p-5 shadow-lg shadow-slate-200/50 border border-slate-200/80 hover:border-blue-300 transition-all duration-200 flex flex-col justify-between space-y-4 group relative"
+              className="min-w-0 bg-white rounded-3xl p-5 shadow-lg shadow-slate-200/50 border border-slate-200/80 hover:border-blue-300 transition-all duration-200 flex flex-col justify-between space-y-4 group relative"
             >
               <div>
                 <div className="flex items-center justify-between text-xs text-slate-500 mb-2">

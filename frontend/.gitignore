@@ -15,3 +15,16 @@ out/
 .env.local
 
 tsconfig.tsbuildinfo
+
+# Playwright output and credential-bearing browser state
+/playwright-report/
+/test-results/
+/blob-report/
+/playwright/.cache/
+/playwright/.auth/
+
+/test-results-real/
+
+/test-results-signup/
+/test-results-dashboard-real/
+/test-results-instant-real/

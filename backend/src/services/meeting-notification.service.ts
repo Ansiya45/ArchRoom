@@ -90,7 +90,7 @@ export class MeetingNotificationService {
         if (!invitation) [invitation] = await tx.insert(meetingInvitations).values({ meetingId, email }).returning();
         await tx.insert(meetingDeliveries).values({ invitationId: invitation.id, meetingId, kind: 'invitation', deliveryKey: `invite:${invitation.id}`, scheduledAt: meeting.scheduledAt, dueAt: now, expiresAt: new Date(now.getTime() + 23 * 3600000) }).onConflictDoNothing();
       }
-      return { ok: true, message: 'Invitations queued. Previously invited addresses are not sent another invitation.' };
+      return { ok: true, message: 'Invitation request processed. New addresses receive one invitation; previously invited addresses are not sent another.' };
     });
   }
   async myReminder(meetingId: string, userId: string, enabled: boolean) {

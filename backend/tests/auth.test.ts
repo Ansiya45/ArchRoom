@@ -35,6 +35,15 @@ test('login distinguishes wrong passwords from unregistered emails', async () =>
   assert.ok(result.token);
 });
 
+test('unverified login checks password before requiring verification and sends no email', async () => {
+  const { service, sent } = serviceFor({ ...user, emailVerifiedAt: null } as unknown as typeof user);
+  await assert.rejects(service.login({ email: user.email, password: 'bad' }), { code: 'UNAUTHORIZED' });
+  await assert.rejects(service.login({ email: user.email, password: 'CorrectPassword1' }), {
+    code: 'FORBIDDEN', message: 'Your registration is incomplete. Complete the email verification from sign up before logging in.',
+  });
+  assert.deepEqual(sent, []);
+});
+
 test('login router accepts short incorrect passwords so users get the password error', async () => {
   const original = db.query.users.findFirst;
   db.query.users.findFirst = (async () => user) as typeof original;
@@ -47,9 +56,9 @@ test('login router accepts short incorrect passwords so users get the password e
 test('password reset sends only to the registered normalized email', async () => {
   const { service, sent } = serviceFor();
   const result = await service.requestPasswordReset(' MEMBER@example.com ');
-  assert.equal(result.message, 'A reset code has been sent to your email.');
+  assert.match(result.message, /^If an account exists/);
   assert.deepEqual(sent, [{ email: user.email, purpose: 'reset_password' }]);
-  await assert.rejects(service.requestPasswordReset('missing@example.com'), { message: 'Email ID is not registered.' });
+  assert.deepEqual(await service.requestPasswordReset('missing@example.com'), result);
   assert.equal(sent.length, 1);
 });
 
@@ -67,10 +76,10 @@ test('verification resend rejects missing or already verified accounts without s
   assert.equal(sent.length, 0);
 });
 
-test('email failures propagate instead of reporting a successful reset or resend', async () => {
+test('reset response hides provider failure while verification resend reports it', async () => {
   const { service } = serviceFor({ ...user, emailVerifiedAt: null } as unknown as typeof user);
   Object.assign(service, { sendCode: async () => { throw new Error('Email delivery failed'); } });
-  await assert.rejects(service.requestPasswordReset(user.email), { message: 'Email delivery failed' });
+  assert.match((await service.requestPasswordReset(user.email)).message, /^If an account exists/);
   await assert.rejects(service.resendVerification(user.email), { message: 'Email delivery failed' });
 });
 
@@ -80,6 +89,10 @@ test('resend replaces the code on success and preserves it when the email provid
   const originalKey = env.RESEND_API_KEY;
   let codes: Array<{ codeHash: string; expiresAt: Date }> = [{ codeHash: 'previous-code', expiresAt: new Date(Date.now() + 600000) }];
   const tx = {
+    execute: async (query: unknown) => {
+      const { PgDialect } = await import('drizzle-orm/pg-core');
+      return new PgDialect().sqlToQuery(query as any).sql.includes('for update') ? [{ email_verified_at: null }] : [];
+    },
     delete: () => ({ where: async () => { codes = []; } }),
     insert: () => ({ values: async (value: typeof codes[number]) => { codes.push(value); } }),
   };

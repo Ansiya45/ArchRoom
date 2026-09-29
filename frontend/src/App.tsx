@@ -1,7 +1,7 @@
 import { startHostedMeeting } from './lib/startHostedMeeting';
 'use client';
 
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import Header from './components/Header';
 import Sidebar, { SidebarTab } from './components/Sidebar';
@@ -15,7 +15,7 @@ import SettingsView from './components/SettingsView';
 import SettingsModal from './components/SettingsModal';
 import AuthModal from './components/AuthModal';
 import { CheckCircle2 } from 'lucide-react';
-import { clearStoredSession, getStoredUser } from './lib/auth';
+import { clearStoredSession, getAuthToken, getStoredUser, subscribeToSessionRemoval } from './lib/auth';
 import { trpc } from './lib/trpc';
 import { formatMeetingTime, startMeetingOnce, type MeetingRecord } from './lib/meetingSchedule';
 import { storeMeetingSession } from './lib/meetingSession';
@@ -27,9 +27,11 @@ export default function App() {
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [editingMeeting, setEditingMeeting] = useState<MeetingRecord | null>(null);
   const pendingStarts = useRef(new Set<string>());
+  const sessionGeneration = useRef(0);
   const [startingCode, setStartingCode] = useState<string | null>(null);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [openJoinAfterAuth, setOpenJoinAfterAuth] = useState(false);
+  const [isAccountLoading, setIsAccountLoading] = useState(false);
 
   // User Auth state (null by default so Sign Up and Login are displayed)
   const [user, setUser] = useState<{ name: string; email: string; isLoggedIn: boolean } | null>(() => {
@@ -45,26 +47,7 @@ export default function App() {
   }>({ isOpen: false, mode: 'login' });
 
   // Scheduled & Favorite Meetings list
-  const [meetings, setMeetings] = useState<MeetingItem[]>([
-    {
-      id: 'm2',
-      title: 'Design Critique & UI Motion Specs',
-      code: 'YLM-402-991',
-      time: 'Tomorrow • 10:30 AM - 11:30 AM',
-      participantsCount: 5,
-      hostName: 'Mike Chen',
-      isFavorite: true,
-    },
-    {
-      id: 'm3',
-      title: 'Client Demo: WebRTC & Spatial Audio',
-      code: 'YLM-118-203',
-      time: 'Thursday, July 23 • 4:00 PM',
-      participantsCount: 12,
-      hostName: 'Emma Watson',
-      isFavorite: false,
-    },
-  ]);
+  const [meetings, setMeetings] = useState<MeetingItem[]>([]);
 
   // Active meeting running in MeetingCard
   const [currentMeeting, setCurrentMeeting] = useState<{
@@ -72,12 +55,7 @@ export default function App() {
     code: string;
     hostName: string;
     isLive: boolean;
-  } | null>({
-    title: 'Design Critique & UI Motion Specs',
-    code: 'YLM-402-991',
-    hostName: 'Mike Chen',
-    isLive: true,
-  });
+  } | null>(null);
 
   // Notification Banner Toast State
   const [toast, setToast] = useState<{
@@ -90,19 +68,43 @@ export default function App() {
     setTimeout(() => setToast(null), 3500);
   };
 
+  const clearAccountUI = useCallback(() => {
+    sessionGeneration.current += 1;
+    setUser(null);
+    setMeetings([]);
+    setCurrentMeeting(null);
+    setEditingMeeting(null);
+    setIsCreateOpen(false);
+    setIsJoinOpen(false);
+    setIsSettingsOpen(false);
+    setOpenJoinAfterAuth(false);
+    setAuthModalState({ isOpen: false, mode: 'login' });
+    setStartingCode(null);
+    pendingStarts.current.clear();
+    setActiveTab('home');
+    setToast(null);
+    setIsAccountLoading(false);
+  }, []);
+
+  useEffect(() => subscribeToSessionRemoval(clearAccountUI), [clearAccountUI]);
+
   useEffect(() => {
     if (!user) return;
 
     let cancelled = false;
+    const generation = sessionGeneration.current;
+    const token = getAuthToken();
+    const isCurrent = () => !cancelled && generation === sessionGeneration.current && token === getAuthToken();
 
     async function loadAccount() {
+      setIsAccountLoading(true);
       try {
         const [account, meetingList] = await Promise.all([
           trpc.auth.me.query(),
           trpc.meetings.list.query(),
         ]);
 
-        if (cancelled) return;
+        if (!isCurrent()) return;
 
         setUser({
           name: account.user.fullName,
@@ -122,11 +124,15 @@ export default function App() {
             isFavorite: false,
           }))
         );
+        setIsAccountLoading(false);
       } catch (error) {
-        if (cancelled) return;
+        if (!isCurrent()) return;
         console.error(error);
         clearStoredSession();
         setUser(null);
+        setMeetings([]);
+        setCurrentMeeting(null);
+        setIsAccountLoading(false);
         showToast('Your session expired. Please sign in again.', 'info');
       }
     }
@@ -160,6 +166,11 @@ export default function App() {
   };
 
   const handleSidebarTabChange = (tab: SidebarTab) => {
+    if (!user && tab !== 'home') {
+      setAuthModalState({ isOpen: true, mode: 'login' });
+      showToast('Please sign in to access your dashboard.', 'info');
+      return;
+    }
     setActiveTab(tab);
     if (tab === 'create') {
       requestCreateMeeting();
@@ -235,17 +246,20 @@ export default function App() {
         }}
       />
 
-      <div className="flex-1 flex w-full overflow-hidden">
+      <div className="flex-1 flex min-h-0 w-full overflow-hidden">
         {/* Fixed Left Sidebar */}
         <Sidebar activeTab={activeTab} setActiveTab={handleSidebarTabChange} />
 
         {/* Main Content Area */}
-        <main className="flex-1 sm:pl-[72px] flex flex-col justify-between h-[calc(100vh-56px)] overflow-hidden">
-          <div className="flex-1 flex flex-col justify-center overflow-y-auto py-2 sm:py-4">
+        <main className="flex-1 min-h-0 pb-16 sm:pb-0 sm:pl-[72px] flex flex-col justify-between h-[calc(100vh-56px)] overflow-hidden">
+          <div data-testid="dashboard-scroll" className="flex-1 min-h-0 flex flex-col justify-start overflow-y-auto overflow-x-hidden py-2 sm:py-4">
+            {user && isAccountLoading ? (
+              <div role="status" className="m-auto text-sm font-semibold text-slate-500">Loading your dashboard...</div>
+            ) : <>
             {/* Tab 1 & Tab 2: Home View */}
             {(activeTab === 'home' || activeTab === 'create') && (
               <Hero
-                currentMeeting={currentMeeting}
+                currentMeeting={user ? currentMeeting : null}
                 onJoinMeeting={requestJoinMeeting}
                 onCreateMeeting={requestCreateMeeting}
                 onLeaveMeeting={() => {
@@ -260,7 +274,7 @@ export default function App() {
               <ScheduledMeetingsView
                 hostUserId={getStoredUser()?.id}
                 onRescheduleMeeting={(record) => { setEditingMeeting(record); setIsCreateOpen(true); }}
-                meetings={meetings}
+                meetings={user ? meetings : []}
                 startingCode={startingCode}
                 onMeetingChanged={(record) => setMeetings(current => current.map(item => item.id === record.id ? { ...item, record, time: formatMeetingTime(record) } : item))}
                 onStartMeeting={handleStartMeeting}
@@ -273,7 +287,7 @@ export default function App() {
             {/* Tab 4: Favorites View */}
             {activeTab === 'favorite' && (
               <FavoritesView
-                meetings={meetings}
+                meetings={user ? meetings : []}
                 startingCode={startingCode}
                 onMeetingChanged={(record) => setMeetings(current => current.map(item => item.id === record.id ? { ...item, record, time: formatMeetingTime(record) } : item))}
                 onStartMeeting={handleStartMeeting}
@@ -286,6 +300,7 @@ export default function App() {
             {activeTab === 'settings' && (
               <SettingsView onShowToast={(msg) => showToast(msg)} />
             )}
+            </>}
           </div>
 
           {/* Footer */}
@@ -294,7 +309,7 @@ export default function App() {
       </div>
 
       {/* Interactive Modals */}
-      <JoinModal
+      {user && <JoinModal
         isOpen={isJoinOpen}
         accountName={user?.name || ''}
         onClose={() => setIsJoinOpen(false)}
@@ -310,9 +325,9 @@ export default function App() {
           navigate(`/meet/${code}`);
           showToast(`Successfully joined room ${code} as ${name}`);
         }}
-      />
+      />}
 
-      <ScheduleModal
+      {user && <ScheduleModal
         isOpen={isCreateOpen}
         onClose={() => { setIsCreateOpen(false); setEditingMeeting(null); }}
         editingMeeting={editingMeeting}
@@ -335,7 +350,7 @@ export default function App() {
           } else setActiveTab('scheduled');
           showToast(`Meeting "${record.title}" created! Code: ${record.meetingCode}`);
         }}
-      />
+      />}
 
       <SettingsModal
         isOpen={isSettingsOpen}
@@ -343,6 +358,7 @@ export default function App() {
       />
 
       <AuthModal
+        key={sessionGeneration.current}
         isOpen={authModalState.isOpen}
         mode={authModalState.mode}
         onClose={() => setAuthModalState({ isOpen: false, mode: 'login' })}

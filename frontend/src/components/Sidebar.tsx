@@ -80,7 +80,9 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, setActiveTab }) => 
     icon: Settings,
   };
 
-  return (
+  const allItems = [...topNavItems, settingsItem];
+
+  return <>
     <aside className="fixed left-0 top-[56px] bottom-0 z-30 w-[72px] bg-white border-r border-slate-200 flex flex-col items-center justify-between py-6 shadow-2xs hidden sm:flex">
       {/* Top Navigation Icon Buttons */}
       <div className="flex flex-col items-center gap-6 w-full px-2">
@@ -105,7 +107,18 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, setActiveTab }) => 
         />
       </div>
     </aside>
-  );
+    <nav aria-label="Mobile dashboard navigation" className="fixed inset-x-0 bottom-0 z-40 flex h-16 items-center justify-around border-t border-slate-200 bg-white px-1 sm:hidden">
+      {allItems.map((item) => {
+        const Icon = item.icon;
+        const selected = activeTab === item.id;
+        return <button key={item.id} type="button" aria-label={item.label} aria-current={selected ? 'page' : undefined}
+          onClick={() => setActiveTab(item.id)} className={`flex min-w-0 flex-1 flex-col items-center gap-1 py-2 text-[10px] font-semibold ${selected ? 'text-blue-600' : 'text-slate-500'}`}>
+          <Icon className="h-4 w-4" />
+          <span className="max-w-full truncate">{item.label}</span>
+        </button>;
+      })}
+    </nav>
+  </>;
 };
 
 export default Sidebar;

@@ -82,9 +82,7 @@ export class RecordingService {
     return row.recording;
   }
 
-  async createUpload(input: CreateRecordingInput, userId: string) {
-    const supabase = this.requireStorage();
-    await this.ensurePrivateBucket();
+  async authorizeExport(input: { meetingCode: string; occurrenceId?: string }, userId: string) {
     const meeting = await this.requireHostByCode(input.meetingCode, userId);
     if ((meeting.scheduleType === 'reusable' || meeting.scheduleType === 'recurring')) {
       const occurrence = input.occurrenceId && await db.query.meetingOccurrences.findFirst({
@@ -92,6 +90,13 @@ export class RecordingService {
       });
       if (!occurrence) throw new TRPCError({ code: 'BAD_REQUEST', message: 'Choose the room session in which this recording was made.' });
     } else if (input.occurrenceId) throw new TRPCError({ code: 'BAD_REQUEST', message: 'This meeting has no room sessions.' });
+    return meeting;
+  }
+
+  async createUpload(input: CreateRecordingInput, userId: string) {
+    const meeting = await this.authorizeExport(input, userId);
+    const supabase = this.requireStorage();
+    await this.ensurePrivateBucket();
     const safeName = input.fileName.trim().replace(/[^a-zA-Z0-9._-]/g, '-');
     const storagePath = `meetings/${meeting.id}/${input.occurrenceId ? `sessions/${input.occurrenceId}/` : ''}${crypto.randomUUID()}-${safeName}`;
     const { data, error } = await supabase.storage.from(env.SUPABASE_STORAGE_BUCKET).createSignedUploadUrl(storagePath);
@@ -112,10 +117,31 @@ export class RecordingService {
   }
 
   async completeRecording(recordingId: string, userId: string) {
-    await this.requireOwnedRecording(recordingId, userId);
+    const recording = await this.requireOwnedRecording(recordingId, userId);
+    if (recording.status === 'completed') return { ok: true, recording };
+    const { data, error } = await this.requireStorage().storage.from(env.SUPABASE_STORAGE_BUCKET).info(recording.storagePath);
+    if (error || !data || data.size !== recording.fileSize) {
+      throw new TRPCError({ code: 'PRECONDITION_FAILED', message: 'The recording file is missing or incomplete. Retry the upload before saving.' });
+    }
     const [completed] = await db.update(recordings).set({ status: 'completed', completedAt: new Date() })
       .where(and(eq(recordings.id, recordingId), eq(recordings.createdByUserId, userId))).returning();
     return { ok: true, recording: completed };
+  }
+
+  async retryUpload(recordingId: string, userId: string) {
+    const recording = await this.requireOwnedRecording(recordingId, userId);
+    const storage = this.requireStorage().storage.from(env.SUPABASE_STORAGE_BUCKET);
+    const existing = await storage.info(recording.storagePath);
+    if (existing.data) {
+      if (existing.data.size !== recording.fileSize) throw new TRPCError({ code: 'CONFLICT', message: 'The stored recording has an unexpected size.' });
+      return { transferred: true, uploadUrl: null };
+    }
+    if (existing.error && !['404', '400'].includes(String(existing.error.statusCode))) {
+      throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: 'Unable to check the previous upload. Please retry.' });
+    }
+    const { data, error } = await storage.createSignedUploadUrl(recording.storagePath);
+    if (error) throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: error.message });
+    return { transferred: false, uploadUrl: data.signedUrl };
   }
 
   async getForMeeting(meetingCode: string, userId: string) {

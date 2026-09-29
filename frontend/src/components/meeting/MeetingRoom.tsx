@@ -351,6 +351,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
     const session = sessionRef.current;
     const occurrenceId = session?.occurrenceId;
     try {
+      await recorder.stop();
       const speech = await transcript.finish();
       if (end) {
         await trpc.meetings.end.mutate({ meetingCode, occurrenceId });
@@ -431,9 +432,10 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
   const toggleRecording = async () => {
     if (!isHost) return;
     if (recorder.isRecording) {
-      recorder.stop();
+      await recorder.stop();
       return;
     }
+    if (recorder.preview) { setIsRecordingsOpen(true); return; }
     try {
       await recorder.start(sessionRef.current?.occurrenceId);
     } catch (error) {
@@ -617,8 +619,13 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
   }
 
   // If in waiting room mode, render WaitingRoom
-  if (summaryReview) return <TranscriptModal meetingCode={meetingCode} occurrenceId={summaryReview.occurrenceId}
-    speech={summaryReview.speech} warning={summaryReview.warning} onClose={() => navigate('/')} />;
+  if (summaryReview) return <>
+    <TranscriptModal meetingCode={meetingCode} occurrenceId={summaryReview.occurrenceId}
+      speech={summaryReview.speech} warning={summaryReview.warning} onClose={() => navigate('/')}
+      onOpenRecordings={recorder.preview ? () => setIsRecordingsOpen(true) : undefined} />
+    <RecordingsModal isOpen={isRecordingsOpen} meetingCode={meetingCode} preview={recorder.preview}
+      onClose={() => setIsRecordingsOpen(false)} onDiscardPreview={recorder.clearPreview} />
+  </>;
 
   if (!meeting.inMeeting) {
     return (

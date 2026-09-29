@@ -6,6 +6,13 @@ import { protectedProcedure } from '../trpc/protected.js';
 const recordingService = new RecordingService();
 
 export const recordingsRouter = t.router({
+  authorizeExport: protectedProcedure.input(z.object({
+    meetingCode: z.string().min(1), occurrenceId: z.string().uuid().optional(),
+  })).mutation(async ({ input, ctx }) => {
+    await recordingService.authorizeExport(input, ctx.user.id);
+    return { ok: true };
+  }),
+
   createUpload: protectedProcedure.input(z.object({
     meetingCode: z.string().min(1),
     occurrenceId: z.string().uuid().optional(),
@@ -17,6 +24,9 @@ export const recordingsRouter = t.router({
 
   complete: protectedProcedure.input(z.object({ recordingId: z.string().uuid() }))
     .mutation(({ input, ctx }) => recordingService.completeRecording(input.recordingId, ctx.user.id)),
+
+  retryUpload: protectedProcedure.input(z.object({ recordingId: z.string().uuid() }))
+    .mutation(({ input, ctx }) => recordingService.retryUpload(input.recordingId, ctx.user.id)),
 
   getForMeeting: protectedProcedure.input(z.object({ meetingCode: z.string().min(1) }))
     .query(({ input, ctx }) => recordingService.getForMeeting(input.meetingCode, ctx.user.id)),

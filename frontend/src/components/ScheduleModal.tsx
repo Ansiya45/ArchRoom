@@ -100,7 +100,9 @@ export const ScheduleModal: React.FC<ScheduleModalProps> = ({
         if (meetingMode === 'instant') navigate(`/meet/${payload.meeting.meetingCode}`);
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Unable to save this meeting.');
+      const message = err instanceof Error ? err.message : 'Unable to save this meeting.';
+      setError(message);
+      if (!editingMeeting && message.includes('Meeting code is already in use')) setMeetingCode(generateMeetingCode());
     } finally {
       submitting.current = false;
       setLoading(false);
@@ -110,10 +112,11 @@ export const ScheduleModal: React.FC<ScheduleModalProps> = ({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in duration-200">
-      <div className="bg-white rounded-3xl max-w-lg max-h-[90vh] overflow-y-auto w-full p-6 sm:p-7 shadow-2xl border border-slate-100 relative">
+      <div role="dialog" aria-modal="true" aria-labelledby="meeting-form-title" className="bg-white rounded-3xl max-w-lg max-h-[90vh] overflow-y-auto w-full p-6 sm:p-7 shadow-2xl border border-slate-100 relative">
         <button
           onClick={onClose}
           disabled={loading}
+          aria-label="Close meeting form"
           className="absolute top-5 right-5 text-slate-400 hover:text-slate-700 p-1.5 rounded-xl hover:bg-slate-100 transition-colors cursor-pointer"
         >
           <X className="w-5 h-5" />
@@ -123,11 +126,12 @@ export const ScheduleModal: React.FC<ScheduleModalProps> = ({
           <CalendarPlus className="w-6 h-6 stroke-[2.2]" />
         </div>
 
-        <h3 className="text-xl font-bold text-slate-900 mb-1">{editingMeeting ? 'Reschedule Meeting' : 'Create or Schedule Meeting'}</h3>
+        <h3 id="meeting-form-title" className="text-xl font-bold text-slate-900 mb-1">{editingMeeting ? 'Reschedule Meeting' : 'Create or Schedule Meeting'}</h3>
         {!editingMeeting && <div className="flex rounded-xl bg-slate-100 p-1 mb-6">
           <button
             type="button"
             disabled={loading}
+            aria-pressed={meetingMode === 'instant'}
             onClick={() => setMeetingMode('instant')}
             className={`flex-1 py-2.5 rounded-lg text-sm font-semibold transition-all ${
               meetingMode === 'instant'
@@ -141,6 +145,7 @@ export const ScheduleModal: React.FC<ScheduleModalProps> = ({
           <button
             type="button"
             disabled={loading}
+            aria-pressed={meetingMode === 'scheduled'}
             onClick={() => setMeetingMode('scheduled')}
             className={`flex-1 py-2.5 rounded-lg text-sm font-semibold transition-all ${
               meetingMode === 'scheduled'
@@ -150,7 +155,7 @@ export const ScheduleModal: React.FC<ScheduleModalProps> = ({
           >
             📅 Schedule Later
           </button>
-          <button type="button" disabled={loading} onClick={() => setMeetingMode('reusable')}
+          <button type="button" disabled={loading} aria-pressed={meetingMode === 'reusable'} onClick={() => setMeetingMode('reusable')}
             className={`flex-1 py-2.5 rounded-lg text-sm font-semibold transition-all ${meetingMode === 'reusable' ? 'bg-blue-600 text-white shadow' : 'text-slate-600 hover:bg-slate-200'}`}>
             No fixed time
           </button>
@@ -160,11 +165,12 @@ export const ScheduleModal: React.FC<ScheduleModalProps> = ({
 
           {/* Meeting Title */}
           <div>
-            <label className="block text-xs font-semibold text-slate-700 uppercase tracking-wider mb-1.5">
+            <label htmlFor="meeting-title" className="block text-xs font-semibold text-slate-700 uppercase tracking-wider mb-1.5">
               Meeting Topic / Title
             </label>
             <input
               type="text"
+              id="meeting-title"
               placeholder="e.g. Weekly Product Design Sync"
               value={title}
               readOnly={!!editingMeeting}
@@ -214,13 +220,14 @@ export const ScheduleModal: React.FC<ScheduleModalProps> = ({
 
         {/* Meeting Link */}
         <div>
-          <label className="block text-xs font-semibold text-slate-700 uppercase tracking-wider mb-1.5">
+          <label htmlFor="meeting-link" className="block text-xs font-semibold text-slate-700 uppercase tracking-wider mb-1.5">
           Meeting Link
           </label>
 
           <div className="flex min-w-0 flex-col gap-2 sm:flex-row">
             <input
               type="text"
+              id="meeting-link"
               readOnly
               value={meetingLink}
               onFocus={(event) => event.currentTarget.select()}

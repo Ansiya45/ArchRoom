@@ -1,0 +1,5 @@
+{
+  "extends": "../tsconfig.json",
+  "compilerOptions": { "incremental": false },
+  "include": ["./**/*.ts", "../playwright.config.ts", "../playwright.real.config.ts", "../playwright.signup.config.ts", "../playwright.verification.config.ts", "../playwright.reset.config.ts", "../vite.e2e.config.ts"]
+}

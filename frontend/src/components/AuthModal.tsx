@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useEffect, useState } from 'react';
+import { TRPCClientError } from '@trpc/client';
 import { ArrowRight, Eye, EyeOff, Lock, LogIn, Mail, User, UserPlus, X } from 'lucide-react';
 import { storeSession, type SessionUser } from '../lib/auth';
 import { trpc } from '../lib/trpc';
@@ -55,6 +56,17 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, mode, onClose, onS
       }
     } catch (caught) {
       const detail = caught instanceof Error ? caught.message : 'Something went wrong.';
+      // Login checks the password before returning this unverified-account error.
+      // Opening the dialog grants no session and never sends an email itself.
+      if (view === 'login' && caught instanceof TRPCClientError && caught.data?.code === 'FORBIDDEN' &&
+          detail === 'Your registration is incomplete. Complete the email verification from sign up before logging in.') {
+        setPassword(''); setConfirmPassword(''); setCode(''); setView('verify');
+        setMessage('Your email still needs verification. Enter your latest code, or choose Resend code if it has expired.');
+        return;
+      }
+      if (view === 'signup' && caught instanceof TRPCClientError && caught.data?.code === 'CONFLICT') {
+        setMessage('Already registered? Choose “Already have an account? Sign in” below. Sign in with your password to continue email verification if needed.');
+      }
       setError(detail);
     }
     finally { setSubmitting(false); }
@@ -75,6 +87,10 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, mode, onClose, onS
         {(view === 'login' || needsNewPassword) && <Field label={view === 'reset' ? 'New password' : 'Password'} icon={<Lock />}><input required type={showPassword ? 'text' : 'password'} value={password} onChange={e => setPassword(e.target.value)} autoComplete={view === 'login' ? 'current-password' : 'new-password'} className="input pr-12" /><button type="button" onClick={() => setShowPassword(value => !value)} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400">{showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}</button></Field>}
         {needsNewPassword && <Field label="Confirm password" icon={<Lock />}><input required type="password" value={confirmPassword} onChange={e => setConfirmPassword(e.target.value)} autoComplete="new-password" className="input" /></Field>}
         {view === 'login' && <button type="button" disabled={submitting} onClick={() => { setView('forgot'); setError(''); setMessage(''); }} className="text-xs font-semibold text-blue-600 hover:underline">Forgot password?</button>}
+        {view === 'forgot' && <button type="button" disabled={submitting} onClick={event => {
+          if (!event.currentTarget.form?.reportValidity()) return;
+          setCode(''); setPassword(''); setConfirmPassword(''); setError(''); setMessage(''); setView('reset');
+        }} className="text-xs font-semibold text-blue-600 hover:underline">I already have a reset code</button>}
         {message && <p className="rounded-xl bg-emerald-50 p-3 text-xs text-emerald-700">{message}</p>}{error && <p role="alert" className="rounded-xl bg-red-50 p-3 text-xs text-red-700">{error}</p>}
         <button disabled={submitting} className="flex w-full items-center justify-center gap-2 rounded-xl bg-blue-600 py-3.5 text-sm font-semibold text-white disabled:bg-blue-400"><span>{submitting ? 'Please wait...' : view === 'login' ? 'Sign in' : view === 'signup' ? 'Create account' : view === 'verify' ? 'Verify email' : view === 'forgot' ? 'Send reset code' : 'Reset password'}</span><ArrowRight className="h-4 w-4" /></button>
       </form>
