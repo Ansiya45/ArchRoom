@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { getAuthToken } from '@/lib/auth';
+import { getValidAccessToken } from '@/lib/sessionRenewal';
 import { getMeetingSession, type MeetingSession } from '@/lib/meetingSession';
 
 export interface WhiteboardParticipant {
@@ -35,14 +35,20 @@ export function useSharedWhiteboard(meetingCode: string, enabled: boolean, sessi
     socketRef.current = socket;
     setConnectionError(null);
 
-    socket.onopen = () => {
-      socket.send(JSON.stringify({
-        type: 'join',
-        meetingCode,
-        token: getAuthToken(),
-        participantId: session?.participantId,
-        occurrenceId: session?.occurrenceId,
-      }));
+    socket.onopen = async () => {
+      try {
+        const token = await getValidAccessToken();
+        if (socket.readyState !== WebSocket.OPEN) return;
+        socket.send(JSON.stringify({
+          type: 'join',
+          meetingCode,
+          token,
+          participantId: session?.participantId,
+          occurrenceId: session?.occurrenceId,
+        }));
+      } catch {
+        setConnectionError('Unable to connect to the whiteboard. Please try again.');
+      }
     };
     socket.onmessage = (event) => {
       const message = JSON.parse(String(event.data));

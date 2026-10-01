@@ -2,7 +2,9 @@ import { startHostedMeeting } from './lib/startHostedMeeting';
 'use client';
 
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { TRPCClientError } from '@trpc/client';
+import { logoutSession } from './lib/sessionRenewal';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import Header from './components/Header';
 import Sidebar, { SidebarTab } from './components/Sidebar';
 import Hero from './components/Hero';
@@ -15,13 +17,15 @@ import SettingsView from './components/SettingsView';
 import SettingsModal from './components/SettingsModal';
 import AuthModal from './components/AuthModal';
 import { CheckCircle2 } from 'lucide-react';
-import { clearStoredSession, getAuthToken, getStoredUser, subscribeToSessionRemoval } from './lib/auth';
+import { clearStoredSession, getAuthToken, getSessionIdentity, getStoredUser, subscribeToSessionRemoval } from './lib/auth';
 import { trpc } from './lib/trpc';
 import { formatMeetingTime, startMeetingOnce, type MeetingRecord } from './lib/meetingSchedule';
 import { storeMeetingSession } from './lib/meetingSession';
 
 export default function App() {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const invitedMeeting = searchParams.get('join');
   const [activeTab, setActiveTab] = useState<SidebarTab>('home');
   const [isJoinOpen, setIsJoinOpen] = useState(false);
   const [isCreateOpen, setIsCreateOpen] = useState(false);
@@ -32,6 +36,8 @@ export default function App() {
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [openJoinAfterAuth, setOpenJoinAfterAuth] = useState(false);
   const [isAccountLoading, setIsAccountLoading] = useState(false);
+  const [accountError, setAccountError] = useState('');
+  const [accountAttempt, setAccountAttempt] = useState(0);
 
   // User Auth state (null by default so Sign Up and Login are displayed)
   const [user, setUser] = useState<{ name: string; email: string; isLoggedIn: boolean } | null>(() => {
@@ -45,6 +51,15 @@ export default function App() {
     isOpen: boolean;
     mode: 'login' | 'signup';
   }>({ isOpen: false, mode: 'login' });
+
+  useEffect(() => {
+    if (!invitedMeeting) return;
+    if (getAuthToken()) {
+      navigate(`/meet/${encodeURIComponent(invitedMeeting)}`, { replace: true });
+    } else {
+      setAuthModalState({ isOpen: true, mode: 'signup' });
+    }
+  }, [invitedMeeting, navigate]);
 
   // Scheduled & Favorite Meetings list
   const [meetings, setMeetings] = useState<MeetingItem[]>([]);
@@ -84,6 +99,7 @@ export default function App() {
     setActiveTab('home');
     setToast(null);
     setIsAccountLoading(false);
+    setAccountError('');
   }, []);
 
   useEffect(() => subscribeToSessionRemoval(clearAccountUI), [clearAccountUI]);
@@ -93,11 +109,12 @@ export default function App() {
 
     let cancelled = false;
     const generation = sessionGeneration.current;
-    const token = getAuthToken();
-    const isCurrent = () => !cancelled && generation === sessionGeneration.current && token === getAuthToken();
+    const identity = getSessionIdentity();
+    const isCurrent = () => !cancelled && generation === sessionGeneration.current && identity === getSessionIdentity();
 
     async function loadAccount() {
       setIsAccountLoading(true);
+      setAccountError('');
       try {
         const [account, meetingList] = await Promise.all([
           trpc.auth.me.query(),
@@ -128,12 +145,13 @@ export default function App() {
       } catch (error) {
         if (!isCurrent()) return;
         console.error(error);
-        clearStoredSession();
-        setUser(null);
-        setMeetings([]);
-        setCurrentMeeting(null);
         setIsAccountLoading(false);
-        showToast('Your session expired. Please sign in again.', 'info');
+        if (error instanceof TRPCClientError && error.data?.code === 'UNAUTHORIZED') {
+          clearStoredSession();
+          showToast('Your session expired. Please sign in again.', 'info');
+        } else {
+          setAccountError('Unable to load your dashboard. You are still signed in.');
+        }
       }
     }
 
@@ -142,7 +160,7 @@ export default function App() {
     return () => {
       cancelled = true;
     };
-  }, [user?.email]);
+  }, [user?.email, accountAttempt]);
 
   const requestCreateMeeting = () => {
     if (!user) {
@@ -240,8 +258,9 @@ export default function App() {
         onOpenCreate={requestCreateMeeting}
         onOpenAuth={(mode) => setAuthModalState({ isOpen: true, mode })}
         onLogout={() => {
-          clearStoredSession();
-          setUser(null);
+          void logoutSession().catch(() => {
+            showToast('Signed out on this browser. Unable to confirm sign-out with the server.', 'info');
+          });
           showToast('Signed out successfully.');
         }}
       />
@@ -255,6 +274,11 @@ export default function App() {
           <div data-testid="dashboard-scroll" className="flex-1 min-h-0 flex flex-col justify-start overflow-y-auto overflow-x-hidden py-2 sm:py-4">
             {user && isAccountLoading ? (
               <div role="status" className="m-auto text-sm font-semibold text-slate-500">Loading your dashboard...</div>
+            ) : user && accountError ? (
+              <div role="alert" className="m-auto text-center text-sm text-slate-600">
+                <p>{accountError}</p>
+                <button className="mt-3 font-semibold text-blue-600" onClick={() => setAccountAttempt(value => value + 1)}>Try again</button>
+              </div>
             ) : <>
             {/* Tab 1 & Tab 2: Home View */}
             {(activeTab === 'home' || activeTab === 'create') && (
@@ -369,6 +393,10 @@ export default function App() {
             isLoggedIn: true,
           });
           showToast(`Signed in successfully as ${authenticatedUser.email}`);
+          if (invitedMeeting) {
+            navigate(`/meet/${encodeURIComponent(invitedMeeting)}`, { replace: true });
+            return;
+          }
           if (openJoinAfterAuth) {
             setOpenJoinAfterAuth(false);
             setIsJoinOpen(true);

@@ -13,11 +13,16 @@ const { verifyJwt } = await import('../src/utils/jwt.js');
 
 async function fixture(run: (f: any) => Promise<void>, options: { verified?: boolean; expired?: boolean; updateFails?: boolean; expiresDuringConsume?: boolean } = {}) {
   const code = String(randomInt(100000, 1000000));
-  const account = { id: randomUUID(), email: `${randomUUID()}@example.invalid`, fullName: 'Verification test', emailVerifiedAt: options.verified ? new Date() : null };
+  const account = { id: randomUUID(), email: `${randomUUID()}@example.invalid`, fullName: 'Verification test', passwordHash: 'test-password-hash', emailVerifiedAt: options.verified ? new Date() : null };
   let record: any = { id: randomUUID(), userId: account.id, purpose: 'verify_email', codeHash: createHash('sha256').update(code).digest('hex'),
     expiresAt: new Date(Date.now() + (options.expired ? -60000 : 60000)), createdAt: new Date() };
   let updates = 0, consumed = 0;
-  const originals = { find: db.query.users.findFirst, transaction: db.transaction, fetch: globalThis.fetch };
+  const originals = { find: db.query.users.findFirst, insert: db.insert, transaction: db.transaction, fetch: globalThis.fetch };
+  let issuedSessions = 0;
+  db.insert = (() => ({ values: () => ({ returning: async () => {
+    issuedSessions++;
+    return [{ id: randomUUID() }];
+  } }) })) as any;
   const dialect = new PgDialect();
   db.query.users.findFirst = (async () => ({ ...account })) as any;
   globalThis.fetch = async () => { throw new Error('Network is forbidden in verification tests'); };
@@ -57,10 +62,11 @@ async function fixture(run: (f: any) => Promise<void>, options: { verified?: boo
   try {
     await run({ service: new AuthService(), caller: authRouter.createCaller({ user: null } as never), account, code,
       wrongCode: String(Number(code) === 999999 ? 100000 : Number(code) + 1),
-      state: () => ({ record, updates, consumed }) });
+      state: () => ({ record, updates, consumed, issuedSessions }) });
   } finally {
     db.query.users.findFirst = originals.find;
     db.transaction = originals.transaction;
+    db.insert = originals.insert;
     globalThis.fetch = originals.fetch;
   }
 }
@@ -68,6 +74,9 @@ async function fixture(run: (f: any) => Promise<void>, options: { verified?: boo
 test('valid verification code activates the account and returns its signed session', () => fixture(async f => {
   const result = await f.caller.verifyEmail({ email: f.account.email, code: f.code });
   assert.equal(verifyJwt(result.token).sub, f.account.id);
+  assert.ok(verifyJwt(result.token).sid);
+  assert.match(result.refreshToken, /^[a-f0-9]{64}$/);
+  assert.equal(f.state().issuedSessions, 1);
   assert.ok(f.account.emailVerifiedAt);
   assert.equal(f.state().record, null);
   assert.equal(f.state().updates, 1);
@@ -105,6 +114,7 @@ test('a consumed verification code cannot be replayed', () => fixture(async f =>
   await f.service.verifyEmail(f.account.email, f.code);
   await assert.rejects(f.service.verifyEmail(f.account.email, f.code), { code: 'BAD_REQUEST' });
   assert.equal(f.state().consumed, 1);
+  assert.equal(f.state().issuedSessions, 1);
 }));
 
 test('two simultaneous verifications issue only one session', () => fixture(async f => {
@@ -112,6 +122,7 @@ test('two simultaneous verifications issue only one session', () => fixture(asyn
   assert.equal(results.filter(result => result.status === 'fulfilled').length, 1);
   assert.equal(results.filter(result => result.status === 'rejected').length, 1);
   assert.equal(f.state().consumed, 1);
+  assert.equal(f.state().issuedSessions, 1);
 }));
 
 test('a code expiring between lookup and consumption is rejected', () => fixture(async f => {
@@ -122,4 +133,5 @@ test('a code expiring between lookup and consumption is rejected', () => fixture
 test('failed account activation rolls back code consumption and issues no session', () => fixture(async f => {
   await assert.rejects(f.service.verifyEmail(f.account.email, f.code), /Simulated update failure/);
   assert.ok(f.state().record);
+  assert.equal(f.state().issuedSessions, 0);
 }, { updateFails: true }));

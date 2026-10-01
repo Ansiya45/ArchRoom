@@ -17,7 +17,7 @@ const user = {
 };
 
 function serviceFor(account: typeof user | undefined = user) {
-  const service = new AuthService();
+  const service = new AuthService(async () => ({ sessionId: 'test-session', refreshToken: 'test-refresh' }));
   const sent: Array<{ email: string; purpose: string }> = [];
   Object.assign(service, {
     findUser: async (email: string) => email === account?.email ? account : undefined,
@@ -101,7 +101,7 @@ test('resend replaces the code on success and preserves it when the email provid
     try { return await callback(tx); } catch (error) { codes = previous; throw error; }
   }) as typeof originalTransaction;
   env.RESEND_API_KEY = 'fake-test-key';
-  const service = new AuthService();
+  const service = new AuthService(async () => ({ sessionId: 'test-session', refreshToken: 'test-refresh' }));
   Object.assign(service, { findUser: async () => ({ ...user, emailVerifiedAt: null }) });
   try {
     globalThis.fetch = async () => new Response('Test provider failure', { status: 500 });

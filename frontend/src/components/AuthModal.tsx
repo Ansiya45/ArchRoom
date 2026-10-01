@@ -43,7 +43,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, mode, onClose, onS
         setPassword(''); setConfirmPassword(''); setView('verify'); setMessage('We sent a 6-digit verification code to your email.');
       } else if (view === 'verify') {
         const result = await trpc.auth.verifyEmail.mutate({ email, code });
-        storeSession(result.token, result.user); onSuccess(result.user); onClose();
+        storeSession(result.token, result.user, result.refreshToken); onSuccess(result.user); onClose();
       } else if (view === 'forgot') {
         const result = await trpc.auth.requestPasswordReset.mutate({ email });
         setCode(''); setPassword(''); setConfirmPassword(''); setView('reset'); setMessage(result.message);
@@ -52,7 +52,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, mode, onClose, onS
         setView('login'); setCode(''); setPassword(''); setConfirmPassword(''); setMessage('Password updated. You can now sign in.');
       } else {
         const result = await trpc.auth.login.mutate({ email, password });
-        storeSession(result.token, result.user); onSuccess(result.user); onClose();
+        storeSession(result.token, result.user, result.refreshToken); onSuccess(result.user); onClose();
       }
     } catch (caught) {
       const detail = caught instanceof Error ? caught.message : 'Something went wrong.';

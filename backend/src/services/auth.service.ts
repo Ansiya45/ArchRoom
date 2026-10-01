@@ -5,6 +5,7 @@ import { db } from '../db/index.js';
 import { authCodes, users } from '../db/schema.js';
 import { hashPassword, verifyPassword } from '../utils/password.js';
 import { signJwt } from '../utils/jwt.js';
+import { createPersistentSession } from './auth-session.service.js';
 import { passwordResetEmail, sendEmail, verificationEmail } from './email.service.js';
 
 type Purpose = 'verify_email' | 'reset_password';
@@ -12,6 +13,7 @@ export type SignupInput = { fullName: string; email: string; password: string };
 export type LoginInput = { email: string; password: string };
 
 export class AuthService {
+  constructor(private readonly issueSession = createPersistentSession) {}
   async signup(input: SignupInput) {
     const fullName = input.fullName.trim();
     const email = normalizeEmail(input.email);
@@ -133,9 +135,10 @@ export class AuthService {
     if (!user) throw new TRPCError({ code: 'NOT_FOUND', message: 'Email ID is not registered.' });
     return user;
   }
-  private session(user: typeof users.$inferSelect) {
-    const token = signJwt({ sub: user.id, email: user.email, name: user.fullName });
-    return { ok: true, token, user: { id: user.id, email: user.email, fullName: user.fullName } };
+  private async session(user: typeof users.$inferSelect) {
+    const { sessionId, refreshToken } = await this.issueSession(user);
+    const token = signJwt({ sub: user.id, email: user.email, name: user.fullName, sid: sessionId });
+    return { ok: true, token, refreshToken, user: { id: user.id, email: user.email, fullName: user.fullName } };
   }
 }
 

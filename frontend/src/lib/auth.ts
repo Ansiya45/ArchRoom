@@ -6,10 +6,19 @@ export interface SessionUser {
 
 const TOKEN_KEY = 'ylaam_meet_token';
 const USER_KEY = 'ylaam_meet_user';
+const REFRESH_KEY = 'ylaam_meet_refresh_token';
 const SESSION_REMOVED = 'ylaam-session-removed';
 
 export function getAuthToken() {
   return window.localStorage.getItem(TOKEN_KEY);
+}
+
+export function getRefreshToken() {
+  return window.localStorage.getItem(REFRESH_KEY);
+}
+
+export function getSessionIdentity() {
+  return getRefreshToken() || getAuthToken();
 }
 
 export function getStoredUser(): SessionUser | null {
@@ -25,12 +34,15 @@ export function getStoredUser(): SessionUser | null {
   }
 }
 
-export function storeSession(token: string, user: SessionUser) {
+export function storeSession(token: string, user: SessionUser, refreshToken?: string) {
+  if (refreshToken) window.localStorage.setItem(REFRESH_KEY, refreshToken);
+  else window.localStorage.removeItem(REFRESH_KEY);
   window.localStorage.setItem(TOKEN_KEY, token);
   window.localStorage.setItem(USER_KEY, JSON.stringify(user));
 }
 
 export function clearStoredSession() {
+  window.localStorage.removeItem(REFRESH_KEY);
   window.localStorage.removeItem(TOKEN_KEY);
   window.localStorage.removeItem(USER_KEY);
   window.dispatchEvent(new Event(SESSION_REMOVED));

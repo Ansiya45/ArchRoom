@@ -1,7 +1,7 @@
 import type { CreateHTTPContextOptions } from '@trpc/server/adapters/standalone';
-import { TRPCError } from '@trpc/server';
 import { verifyJwt, getBearerToken } from '../utils/jwt.js';
 import { env } from '../env.js';
+import { isSessionActive } from '../services/auth-session.service.js';
 
 export interface AuthUser {
   id: string;
@@ -24,17 +24,18 @@ export async function createContext(opts: CreateHTTPContextOptions): Promise<Con
   let isAuthenticated = false;
 
   if (bearer) {
+    let payload;
     try {
-      const payload = verifyJwt(bearer);
+      payload = verifyJwt(bearer);
+    } catch { /* Missing or expired access token. */ }
+    // Database outages must propagate as server errors, not invalid sessions.
+    if (payload && await isSessionActive(payload)) {
       user = {
         id: payload.sub,
         email: payload.email,
         name: payload.name,
       };
       isAuthenticated = true;
-    } catch {
-      isAuthenticated = false;
-      user = null;
     }
   }
 

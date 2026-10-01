@@ -71,6 +71,13 @@
       "when": 1789966364266,
       "tag": "0009_recurring_edits",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1790812800000,
+      "tag": "0010_persistent_auth_sessions",
+      "breakpoints": true
     }
   ]
 }

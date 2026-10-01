@@ -41,6 +41,14 @@ export const users = pgTable(
   ]
 );
 
+export const authSessions = pgTable('auth_sessions', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  userId: uuid('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  tokenHash: varchar('token_hash', { length: 64 }).notNull().unique(),
+  passwordVersion: varchar('password_version', { length: 64 }).notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+}, table => [index('auth_sessions_user_idx').on(table.userId)]);
+
 export const authCodes = pgTable(
   'auth_codes',
   {

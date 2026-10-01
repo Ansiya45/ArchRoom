@@ -5,6 +5,7 @@ import { db } from '../db/index.js';
 import { meetingParticipants, meetings, users } from '../db/schema.js';
 import { assertCurrentOccurrence, participantScope } from '../services/meeting-occurrence.service.js';
 import { verifyJwt } from '../utils/jwt.js';
+import { isSessionActive } from '../services/auth-session.service.js';
 
 type Client = {
   socket: WebSocket;
@@ -60,6 +61,7 @@ async function identify(input: any) {
   if (input.token) {
     try {
       const identity = verifyJwt(String(input.token));
+      if (!await isSessionActive(identity)) return null;
       const participant = await db.query.meetingParticipants.findFirst({
         where: and(
           eq(meetingParticipants.meetingId, meeting.id), participantScope(meeting),

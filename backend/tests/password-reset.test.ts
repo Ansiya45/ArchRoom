@@ -47,7 +47,7 @@ async function fixture(run: (f: any) => Promise<void>, options: { expired?: bool
     });
     tail = result.then(() => {}, () => {}); return result;
   }) as any;
-  try { await run({ service: new AuthService(), caller: authRouter.createCaller({ user: null } as never), user, code, oldPassword, newPassword,
+  try { await run({ service: new AuthService(async () => ({ sessionId: 'test-session', refreshToken: 'test-refresh' })), caller: authRouter.createCaller({ user: null } as never), user, code, oldPassword, newPassword,
     state: () => ({ record, updates }), allowUpdate: () => { fail = false; } }); }
   finally { db.query.users.findFirst = original.find; db.transaction = original.transaction; globalThis.fetch = original.fetch; }
 }
@@ -85,7 +85,7 @@ test('concurrent reset requests allow only one password update', () => fixture(a
   const results = await Promise.allSettled([f.service.resetPassword(f.user.email, f.code, f.newPassword), f.service.resetPassword(f.user.email, f.code, f.oldPassword)]);
   assert.equal(results.filter(r => r.status === 'fulfilled').length, 1); assert.equal(f.state().updates, 1);
 }));
-test('existing JWT remains valid after reset under current stateless session design', () => fixture(async f => {
+test('legacy JWT without a device session retains its original validity after reset', () => fixture(async f => {
   const token = signJwt({ sub: f.user.id, email: f.user.email });
   await f.service.resetPassword(f.user.email, f.code, f.newPassword);
   assert.equal(verifyJwt(token).sub, f.user.id);

@@ -118,7 +118,10 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
     }).catch((error) => {
       if (cancelled) return;
       setUser(null);
-      if (error?.data?.code === 'UNAUTHORIZED') clearStoredSession();
+      if (error?.data?.code === 'UNAUTHORIZED') {
+        clearStoredSession();
+        navigate(`/?join=${encodeURIComponent(meetingCode)}`, { replace: true });
+      }
       else setSessionError('Unable to check your session. Please try again.');
     }).finally(() => {
       if (!cancelled) setCheckingSession(false);

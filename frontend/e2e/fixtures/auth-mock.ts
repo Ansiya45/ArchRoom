@@ -8,7 +8,7 @@ export const test = base.extend<{ authMock: AuthMock }>({
     const id = randomUUID();
     const auth = {
       user: { id, email: `${id}@example.invalid`, fullName: `E2E ${id.slice(0, 8)}` },
-      password: `Aa1-${randomUUID()}`, token: randomUUID(),
+      password: `Aa1-${randomUUID()}`, token: randomUUID() as string, refreshToken: undefined as string | undefined,
       calls: [] as string[], expired: false, allowSignup: false, unverified: false,
       privateTitle: `Private account item ${id}`,
       notificationsEnabled: false, reminderEnabled: false,
@@ -36,7 +36,16 @@ export const test = base.extend<{ authMock: AuthMock }>({
             if (value?.email?.trim().toLowerCase() !== auth.user.email) return error('Email ID is not registered.', 'NOT_FOUND', 404, path);
             if (value?.password !== auth.password) return error('Wrong password. Please try again.', 'UNAUTHORIZED', 401, path);
             if (auth.unverified) return error('Your registration is incomplete. Complete the email verification from sign up before logging in.', 'FORBIDDEN', 403, path);
-            return ok({ ok: true, token: auth.token, user: auth.user });
+            return ok({ ok: true, token: auth.token, refreshToken: auth.refreshToken, user: auth.user });
+          }
+          if (path === 'auth.refresh' && value?.refreshToken === auth.refreshToken && auth.refreshToken) {
+            if (auth.expired) return error('Please sign in again.', 'UNAUTHORIZED', 401, path);
+            auth.token = `e30.${Buffer.from(JSON.stringify({ exp: Math.floor(Date.now() / 1000) + 7 * 86400 })).toString('base64url')}.mock`;
+            return ok({ token: auth.token, user: auth.user });
+          }
+          if (path === 'auth.logout' && auth.refreshToken && value?.refreshToken === auth.refreshToken) {
+            auth.refreshToken = undefined;
+            return ok({ ok: true });
           }
           if (path === 'auth.signup' && request.method() === 'POST' && auth.allowSignup) {
             return ok({ ok: true, verificationRequired: true, email: value.email });
@@ -109,7 +118,7 @@ export const test = base.extend<{ authMock: AuthMock }>({
 
 export type AuthMock = {
   user: { id: string; email: string; fullName: string };
-  password: string; token: string; calls: string[]; expired: boolean;
+  password: string; token: string; refreshToken?: string; calls: string[]; expired: boolean;
   allowSignup: boolean; privateTitle: string; unverified: boolean;
   notificationsEnabled: boolean; reminderEnabled: boolean; invitedEmails: string[];
   notificationCalls: Array<{ path: string; input: any }>;
@@ -135,6 +144,6 @@ export async function logout(page: Page, auth: AuthMock) {
   await expect(page.getByRole('button', { name: 'Login', exact: true })).toBeVisible();
 }
 export async function expectNoSession(page: Page) {
-  await expect.poll(() => page.evaluate(() => [localStorage.getItem('ylaam_meet_token'), localStorage.getItem('ylaam_meet_user')])).toEqual([null, null]);
+  await expect.poll(() => page.evaluate(() => [localStorage.getItem('ylaam_meet_token'), localStorage.getItem('ylaam_meet_user'), localStorage.getItem('ylaam_meet_refresh_token')])).toEqual([null, null, null]);
 }
 export { expect };

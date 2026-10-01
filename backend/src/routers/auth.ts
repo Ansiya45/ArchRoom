@@ -2,11 +2,18 @@ import { z } from 'zod';
 import { t } from '../trpc/init.js';
 import { AuthService } from '../services/auth.service.js';
 import { protectedProcedure } from '../trpc/protected.js';
+import { refreshSession, revokeSession } from '../services/auth-session.service.js';
 
 const authService = new AuthService();
 const newPassword = z.string().regex(/^(?=.*[a-z])(?=.*[A-Z])(?=.*\d).{8,}$/, 'Use 8+ characters with uppercase, lowercase, and a number.');
 
 export const authRouter = t.router({
+  refresh: t.procedure
+    .input(z.object({ refreshToken: z.string().regex(/^[a-f0-9]{64}$/) }))
+    .mutation(({ input }) => refreshSession(input.refreshToken)),
+  logout: t.procedure
+    .input(z.object({ refreshToken: z.string().regex(/^[a-f0-9]{64}$/) }))
+    .mutation(({ input }) => revokeSession(input.refreshToken)),
   signup: t.procedure
     .input(
       z.object({
