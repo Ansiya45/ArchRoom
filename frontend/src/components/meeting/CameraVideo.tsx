@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useEffect, useRef, useState } from 'react';
-import { VideoOff, AlertCircle, Sparkles } from 'lucide-react';
+import { VideoOff, AlertCircle } from 'lucide-react';
 import { BackgroundChoice } from '@/types/meeting';
 
 interface CameraVideoProps {
@@ -77,7 +77,6 @@ export const CameraVideo: React.FC<CameraVideoProps> = ({
   const previewVideoRef = useRef<HTMLVideoElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const bgImageRef = useRef<HTMLImageElement | null>(null);
-  const avatarImgRef = useRef<HTMLImageElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const ownsStreamRef = useRef(false);
   const cameraRequestedRef = useRef(false);
@@ -85,6 +84,7 @@ export const CameraVideo: React.FC<CameraVideoProps> = ({
   const cameraDeviceRef = useRef(cameraDeviceId);
   const mountedRef = useRef(true);
   const selfieSegmentationRef = useRef<any>(null);
+  const processingRef = useRef(false);
   cameraEnabledRef.current = isCameraOn;
 
   const [stream, setStream] = useState<MediaStream | null>(null);
@@ -121,29 +121,20 @@ export const CameraVideo: React.FC<CameraVideoProps> = ({
 
   // Preload background image object for canvas rendering
   useEffect(() => {
+    let cancelled = false;
+    bgImageRef.current = null;
     if (currentBgUrl) {
       const img = new Image();
       img.crossOrigin = 'anonymous';
       img.src = currentBgUrl;
       img.onload = () => {
-        bgImageRef.current = img;
+        if (!cancelled) bgImageRef.current = img;
       };
     } else {
       bgImageRef.current = null;
     }
+    return () => { cancelled = true; };
   }, [currentBgUrl]);
-
-  // Preload fallback avatar image for canvas rendering
-  useEffect(() => {
-    if (fallbackAvatar) {
-      const img = new Image();
-      img.crossOrigin = 'anonymous';
-      img.src = fallbackAvatar;
-      img.onload = () => {
-        avatarImgRef.current = img;
-      };
-    }
-  }, [fallbackAvatar]);
 
   // Stop locally owned preview tracks when the camera is off so the browser
   // releases the physical camera, then acquire a fresh track when it is on.
@@ -266,16 +257,17 @@ export const CameraVideo: React.FC<CameraVideoProps> = ({
         void videoElement.play().catch(() => undefined);
       }
     });
-  }, [stream]);
+  }, [stream, activeBg, isCameraOn]);
 
   // 2. Load MediaPipe SelfieSegmentation for real-time AI background removal
   useEffect(() => {
-    if (activeBg === 'none') return;
+    if (!isSelf || !isCameraOn) return;
 
+    let cancelled = false;
     let selfieSeg: any = null;
 
     const loadMediaPipe = () => {
-      if (window.SelfieSegmentation) {
+      if (!cancelled && window.SelfieSegmentation) {
         try {
           selfieSeg = new window.SelfieSegmentation({
             locateFile: (file: string) =>
@@ -285,7 +277,9 @@ export const CameraVideo: React.FC<CameraVideoProps> = ({
             modelSelection: 1, // 1 for landscape selfie mode
           });
           selfieSegmentationRef.current = selfieSeg;
-          setIsAiSegmentationReady(true);
+          void Promise.resolve(selfieSeg.initialize?.()).then(() => {
+            if (!cancelled) setIsAiSegmentationReady(true);
+          }).catch(() => undefined);
         } catch (e) {
           console.warn('MediaPipe initialization fallback:', e);
         }
@@ -296,19 +290,25 @@ export const CameraVideo: React.FC<CameraVideoProps> = ({
       console.warn('MediaPipe loading fallback:', error);
     });
     return () => {
+      cancelled = true;
       selfieSegmentationRef.current = null;
+      setIsAiSegmentationReady(false);
       void selfieSeg?.close?.();
     };
-  }, [activeBg === 'none']);
+  }, [isSelf, isCameraOn]);
 
   // 3. Canvas Segmentation Render Loop
   useEffect(() => {
     if (activeBg === 'none' || !isCameraOn) return;
 
     let animFrameId: number;
-    let isProcessing = false;
+    let cancelled = false;
+    let hasResult = false;
+    const maskCanvas = document.createElement('canvas');
+    const maskCtx = maskCanvas.getContext('2d');
 
     const renderFrame = async () => {
+      if (cancelled) return;
       const canvas = canvasRef.current;
       if (!canvas) return;
       const ctx = canvas.getContext('2d');
@@ -330,9 +330,11 @@ export const CameraVideo: React.FC<CameraVideoProps> = ({
 
       if (isVideoActive && selfieSeg && isAiSegmentationReady) {
         // AI Segmentation Path with MediaPipe
-        if (!isProcessing) {
-          isProcessing = true;
+        if (!processingRef.current) {
+          processingRef.current = true;
           selfieSeg.onResults((results: any) => {
+            if (cancelled) return;
+            hasResult = true;
             ctx.save();
             ctx.clearRect(0, 0, width, height);
 
@@ -355,12 +357,12 @@ export const CameraVideo: React.FC<CameraVideoProps> = ({
 
             // Step B: Draw Person Subject using AI Segmentation Mask
             // Mask canvas holds the person outline
-            const maskCanvas = document.createElement('canvas');
-            maskCanvas.width = width;
-            maskCanvas.height = height;
-            const maskCtx = maskCanvas.getContext('2d');
+            if (maskCanvas.width !== width) maskCanvas.width = width;
+            if (maskCanvas.height !== height) maskCanvas.height = height;
 
             if (maskCtx) {
+              maskCtx.globalCompositeOperation = 'source-over';
+              maskCtx.clearRect(0, 0, width, height);
               maskCtx.drawImage(results.segmentationMask, 0, 0, width, height);
 
               // Composite: keep ONLY video pixels inside the person segmentation mask
@@ -372,96 +374,24 @@ export const CameraVideo: React.FC<CameraVideoProps> = ({
             }
 
             ctx.restore();
-            isProcessing = false;
           });
 
-          selfieSeg.send({ image: video }).catch(() => {
-            isProcessing = false;
+          selfieSeg.send({ image: video }).catch(() => { hasResult = false; }).finally(() => {
+            processingRef.current = false;
           });
         }
-      } else {
-        // Canvas Silhouette Cutout (for Fallback Avatar or loading AI model)
-        // Completely strips away original background and isolates head & torso
-        ctx.save();
-        ctx.clearRect(0, 0, width, height);
-
-        // A. Draw Background
-        if (activeBg === 'blur') {
-          if (avatarImgRef.current && avatarImgRef.current.complete) {
-            ctx.filter = 'blur(20px)';
-            ctx.drawImage(avatarImgRef.current, -20, -20, width + 40, height + 40);
-            ctx.filter = 'none';
-          } else {
-            ctx.fillStyle = '#1e293b';
-            ctx.fillRect(0, 0, width, height);
-          }
-        } else if (bgImageRef.current && bgImageRef.current.complete) {
-          ctx.drawImage(bgImageRef.current, 0, 0, width, height);
-        } else {
-          ctx.fillStyle = '#0f172a';
-          ctx.fillRect(0, 0, width, height);
+      }
+      if (!hasResult) {
+        // Keep a live, fully blurred preview while the first real mask loads.
+        // Never invent a person-shaped cutout or expose an unblurred room.
+        if (isVideoActive && video) {
+          ctx.save();
+          ctx.clearRect(0, 0, width, height);
+          if (isSelf) { ctx.translate(width, 0); ctx.scale(-1, 1); }
+          ctx.filter = 'blur(16px)';
+          ctx.drawImage(video, -20, -20, width + 40, height + 40);
+          ctx.restore();
         }
-
-        // B. Create Anatomical Person Silhouette Mask (Head + Neck + Shoulders + Torso)
-        const maskCanvas = document.createElement('canvas');
-        maskCanvas.width = width;
-        maskCanvas.height = height;
-        const maskCtx = maskCanvas.getContext('2d');
-
-        if (maskCtx) {
-          const centerX = width * 0.5;
-          const headY = height * 0.38;
-          const headRadius = height * 0.22;
-
-          // Draw head circle + shoulder body path mask
-          maskCtx.fillStyle = '#ffffff';
-          maskCtx.beginPath();
-          // Head
-          maskCtx.arc(centerX, headY, headRadius, 0, Math.PI * 2);
-          maskCtx.fill();
-
-          // Neck & Shoulders & Torso curve
-          maskCtx.beginPath();
-          maskCtx.moveTo(centerX - headRadius * 0.6, headY + headRadius * 0.5);
-          maskCtx.bezierCurveTo(
-            centerX - headRadius * 1.8,
-            headY + headRadius * 1.5,
-            centerX - width * 0.42,
-            height,
-            centerX - width * 0.45,
-            height
-          );
-          maskCtx.lineTo(centerX + width * 0.45, height);
-          maskCtx.bezierCurveTo(
-            centerX + width * 0.42,
-            height,
-            centerX + headRadius * 1.8,
-            headY + headRadius * 1.5,
-            centerX + headRadius * 0.6,
-            headY + headRadius * 0.5
-          );
-          maskCtx.closePath();
-          maskCtx.fill();
-
-          // Soften edges for natural silhouette blending
-          maskCtx.filter = 'blur(4px)';
-
-          // Composite image inside person silhouette
-          maskCtx.globalCompositeOperation = 'source-in';
-          if (isVideoActive && video) {
-            // Mirror live camera feed
-            maskCtx.translate(width, 0);
-            maskCtx.scale(-1, 1);
-            maskCtx.drawImage(video, 0, 0, width, height);
-          } else if (avatarImgRef.current && avatarImgRef.current.complete) {
-            maskCtx.drawImage(avatarImgRef.current, 0, 0, width, height);
-          }
-
-          // Draw isolated person subject onto Virtual Background
-          ctx.drawImage(maskCanvas, 0, 0);
-        }
-
-        ctx.restore();
       }
 
       animFrameId = requestAnimationFrame(renderFrame);
@@ -470,6 +400,7 @@ export const CameraVideo: React.FC<CameraVideoProps> = ({
     renderFrame();
 
     return () => {
+      cancelled = true;
       if (animFrameId) cancelAnimationFrame(animFrameId);
     };
   }, [activeBg, isCameraOn, stream, isSelf, hasError, isAiSegmentationReady]);
