@@ -17,7 +17,7 @@ import SettingsView from './components/SettingsView';
 import SettingsModal from './components/SettingsModal';
 import AuthModal from './components/AuthModal';
 import { CheckCircle2 } from 'lucide-react';
-import { clearStoredSession, getAuthToken, getSessionIdentity, getStoredUser, subscribeToSessionRemoval } from './lib/auth';
+import { clearStoredSession, getSessionIdentity, getStoredUser, subscribeToSessionRemoval } from './lib/auth';
 import { trpc } from './lib/trpc';
 import { formatMeetingTime, startMeetingOnce, type MeetingRecord } from './lib/meetingSchedule';
 import { storeMeetingSession } from './lib/meetingSession';
@@ -54,11 +54,7 @@ export default function App() {
 
   useEffect(() => {
     if (!invitedMeeting) return;
-    if (getAuthToken()) {
-      navigate(`/meet/${encodeURIComponent(invitedMeeting)}`, { replace: true });
-    } else {
-      setAuthModalState({ isOpen: true, mode: 'signup' });
-    }
+    navigate(`/meet/${encodeURIComponent(invitedMeeting)}`, { replace: true });
   }, [invitedMeeting, navigate]);
 
   // Scheduled & Favorite Meetings list

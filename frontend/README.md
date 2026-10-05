@@ -33,6 +33,8 @@ For the frontend Render Static Site, add this rule under Redirects/Rewrites:
 
 Keep any specific API proxy rules before this catch-all rule. The rewrite serves the React app for direct links such as `/meet/YLM-1234-ABC`, retaining the URL so React Router can resolve the meeting. Without it, Render can return Not Found before authentication runs.
 
-Signed-out meeting visitors are sent to `/?join=<meetingCode>` with signup open. After signup and email verification, or login, they return to that meeting's waiting room. Signed-in visitors continue directly to the meeting. Deploy the frontend changes and configure the Render rule; changing application code alone does not configure the hosting service.
+Signed-out visitors stay on `/meet/<meetingCode>` and see the existing Join Meeting screen. Join Meeting opens the existing login/signup UI; successful login or completed email verification resumes the admission request for the same code. Authentication does not grant host admission. Closing authentication or refreshing retains the destination. Legacy `/?join=<meetingCode>` links now redirect to this landing page. Changing application code alone does not configure the hosting service.
+
+See [shared-link behavior, tests, and production diagnosis](../docs/SHARED_MEETING_LINKS.md). Run the built-SPA checks with `npx playwright test --config playwright.meeting-link.config.ts`.
 
 Reference: https://render.com/docs/redirects-rewrites

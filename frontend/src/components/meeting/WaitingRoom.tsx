@@ -249,7 +249,7 @@ export const WaitingRoom: React.FC<WaitingRoomProps> = ({
               Ready to connect
             </span>
             <h2 className="text-lg sm:text-xl font-bold text-slate-900 leading-tight">
-              {meetingTitle}
+              {accountEmail ? meetingTitle : 'Join Meeting'}
             </h2>
             <p className="text-xs text-slate-500">
               {accountEmail ? 'Confirm your display name before entering the call.' : 'Sign up or log in to YLAAM-MEET before joining this meeting.'}
@@ -279,7 +279,7 @@ export const WaitingRoom: React.FC<WaitingRoomProps> = ({
             disabled={checkingSession || !!sessionError || (!!accountEmail && !displayName.trim()) || isJoining}
             className="w-full py-3 rounded-2xl bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed text-white font-bold text-sm flex items-center justify-center space-x-2 shadow-lg shadow-blue-200 transition-all active:scale-95"
           >
-            <span>{checkingSession ? 'Checking session...' : isJoining ? 'Joining...' : accountEmail ? 'Join Meeting Now' : 'Log in to join'}</span>
+            <span>{checkingSession ? 'Checking session...' : isJoining ? 'Joining...' : accountEmail ? 'Join Meeting Now' : 'Join Meeting'}</span>
             <ArrowRight className="w-5 h-5" />
           </button>
         </div>

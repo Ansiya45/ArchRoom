@@ -96,7 +96,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, mode, onClose, onS
       </form>
       <div className="mt-5 text-center text-xs text-slate-500">
         {view === 'verify' && <button type="button" disabled={submitting} onClick={async () => { if (submitting) return; setSubmitting(true); setError(''); setMessage(''); try { const result = await trpc.auth.resendVerification.mutate({ email }); setCode(''); setMessage(result.message); } catch (e) { setError(e instanceof Error ? e.message : 'Unable to resend code.'); } finally { setSubmitting(false); } }} className="font-semibold text-blue-600 hover:underline disabled:opacity-50">{submitting ? 'Please wait...' : 'Resend code'}</button>}
-        {(view === 'forgot' || view === 'reset') && <button onClick={() => setView('login')} className="font-semibold text-blue-600 hover:underline">Back to sign in</button>}
+        {(view === 'forgot' || view === 'reset' || view === 'verify') && <button type="button" disabled={submitting} onClick={() => { setView('login'); setCode(''); setError(''); setMessage(''); }} className="ml-3 font-semibold text-blue-600 hover:underline">Back to sign in</button>}
         {(view === 'login' || view === 'signup') && <button onClick={() => { setView(view === 'login' ? 'signup' : 'login'); setError(''); setMessage(''); }} className="font-semibold text-blue-600 hover:underline">{view === 'login' ? 'Create a free account' : 'Already have an account? Sign in'}</button>}
       </div>
     </div>

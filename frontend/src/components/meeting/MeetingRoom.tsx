@@ -50,6 +50,10 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
   const [sessionError, setSessionError] = useState('');
   const [sessionAttempt, setSessionAttempt] = useState(0);
   const [authMode, setAuthMode] = useState<'login' | 'signup' | null>(null);
+  const joinRequested = useRef(false);
+  const [joinAfterAuth, setJoinAfterAuth] = useState(false);
+  const [meetingError, setMeetingError] = useState('');
+  const [checkingMeeting, setCheckingMeeting] = useState(false);
   const sessionRef = useRef<MeetingSession | null>(getMeetingSession(meetingCode));
   const rememberSession = (code: string, session: MeetingSession) => {
     sessionRef.current = session;
@@ -120,7 +124,6 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
       setUser(null);
       if (error?.data?.code === 'UNAUTHORIZED') {
         clearStoredSession();
-        navigate(`/?join=${encodeURIComponent(meetingCode)}`, { replace: true });
       }
       else setSessionError('Unable to check your session. Please try again.');
     }).finally(() => {
@@ -175,11 +178,22 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
 
   useEffect(() => {
     if (!user) return;
+    let cancelled = false;
+    setCheckingMeeting(true);
+    setMeetingError('');
     void trpc.meetings.getByCode.query({ meetingCode, occurrenceId: sessionRef.current?.occurrenceId }).then(({ meeting: room }) => {
+      if (cancelled) return;
       meeting.setMeetingTitle(room.title);
       setIsHost(getStoredUser()?.id === room.hostUserId);
-    }).catch(() => undefined);
-  }, [meetingCode, user?.id]);
+      if (room.recurrenceCancelledAt) setMeetingError('This meeting series has been cancelled.');
+      else if (room.status === 'ended' && room.scheduleType !== 'reusable' && room.scheduleType !== 'recurring') setMeetingError('This meeting has ended.');
+    }).catch(error => {
+      if (!cancelled) setMeetingError(error?.data?.code === 'NOT_FOUND'
+        ? 'Meeting not found. Check the meeting code with the host.'
+        : 'Unable to load this meeting. Please try again.');
+    }).finally(() => { if (!cancelled) setCheckingMeeting(false); });
+    return () => { cancelled = true; };
+  }, [meetingCode, user?.id, sessionAttempt]);
 
   useEffect(() => {
     if (!user || meeting.inMeeting || admission !== 'idle') return;
@@ -499,6 +513,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
   const handleJoin = async () => {
     if (checkingSession || sessionError) return;
     if (!user) {
+      joinRequested.current = true;
       setAuthMode('login');
       return;
     }
@@ -509,6 +524,8 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
 
     try {
       let { meeting: room } = await trpc.meetings.getByCode.query({ meetingCode });
+      if (room.recurrenceCancelledAt) throw new Error('This meeting series has been cancelled.');
+      if (room.status === 'ended' && room.scheduleType !== 'reusable' && room.scheduleType !== 'recurring') throw new Error('This meeting has ended.');
       if ((room.scheduleType === 'reusable' || room.scheduleType === 'recurring')) {
         if (!room.activeOccurrenceId && room.hostUserId === user.id) {
           ({ meeting: room } = await startHostedMeeting(room));
@@ -574,14 +591,20 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
           joinRequestId,
         });
         if (joined.participant.admission === 'admitted') meeting.joinMeeting();
-        else setAdmission('pending');
+        else setAdmission(joined.participant.admission === 'denied' ? 'denied' : 'pending');
       }
     } catch (error) {
       joiningRef.current = false;
       setIsJoining(false);
-      alert(error instanceof Error ? error.message : 'Unable to join the meeting.');
+      setMeetingError(error instanceof Error ? error.message : 'Unable to join the meeting.');
     }
   };
+
+  useEffect(() => {
+    if (!joinAfterAuth || !user || checkingSession || checkingMeeting) return;
+    setJoinAfterAuth(false);
+    if (!meetingError && !sessionError) void handleJoin();
+  }, [joinAfterAuth, user, checkingSession, checkingMeeting, meetingError, sessionError]);
 
   const decideAdmission = async (participantId: string, admit: boolean) => {
     if (admissionActionsRef.current.has(participantId)) return;
@@ -635,8 +658,8 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
       <>
       <WaitingRoom
         accountEmail={user?.email}
-        checkingSession={checkingSession}
-        sessionError={sessionError}
+        checkingSession={checkingSession || checkingMeeting}
+        sessionError={sessionError || meetingError}
         onRetrySession={() => setSessionAttempt((attempt) => attempt + 1)}
         onOpenAuth={setAuthMode}
         meetingCode={meeting.meetingCode}
@@ -655,12 +678,13 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
       <AuthModal
         isOpen={authMode !== null}
         mode={authMode || 'login'}
-        onClose={() => setAuthMode(null)}
+        onClose={() => { joinRequested.current = false; setAuthMode(null); }}
         onSuccess={(account) => {
           meeting.setDisplayName(account.fullName);
           setUser(account);
           setSessionError('');
           setAuthMode(null);
+          setJoinAfterAuth(joinRequested.current);
         }}
       />
       </>

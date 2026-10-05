@@ -195,5 +195,11 @@ test.describe('authentication UI — mocked API', () => {
     await expect(page.getByRole('button', { name: 'Verify email', exact: true })).toBeVisible();
     await expectNoSession(page);
     expect(authMock.calls).toEqual(['auth.signup']);
+    await page.getByRole('button', { name: 'Back to sign in', exact: true }).click();
+    await expect(page.getByRole('heading', { name: 'Welcome back' })).toBeVisible();
+    await expect(page.getByPlaceholder('name@company.com')).toHaveValue(authMock.user.email);
+    await page.locator('input[autocomplete="current-password"]').fill(authMock.password);
+    await page.getByRole('button', { name: 'Sign in', exact: true }).click();
+    await expect(page.getByRole('heading', { name: 'Welcome back' })).toBeHidden();
   });
 });
