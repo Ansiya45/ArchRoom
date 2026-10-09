@@ -84,13 +84,27 @@ export function driveFolderId(link: string) {
   } catch { /* Give the same clear error for all invalid links. */ }
   throw new Error('Paste a Google Drive folder link, not a recording/file link.');
 }
+export class DriveFolderAccessError extends Error {}
 export async function checkDriveFolder(connection: DriveConnection, id: string) {
   const result = await fetch(`${api}/files/${encodeURIComponent(id)}?fields=id,name,mimeType,capabilities(canAddChildren),trashed&supportsAllDrives=true`, { headers: headers(connection), signal: AbortSignal.timeout(20000) });
+  if (result.status === 403 || result.status === 404) throw new DriveFolderAccessError('Select the linked folder in Google Drive to grant access.');
   await check(result); const folder = await result.json();
   if (folder.trashed || folder.mimeType !== 'application/vnd.google-apps.folder' || !folder.capabilities?.canAddChildren) {
     throw new Error('Choose a folder where your connected Google account can upload files.');
   }
   return { id: folder.id as string, name: folder.name as string };
+}
+export async function resolveDriveFolder(connection: DriveConnection, link: string,
+  select: () => Promise<{ id: string; name: string } | null>) {
+  const id = driveFolderId(link);
+  try { return await checkDriveFolder(connection, id); }
+  catch (error) {
+    if (!(error instanceof DriveFolderAccessError)) throw error;
+    const selected = await select();
+    if (!selected) throw new Error('Folder access was cancelled. Click Upload to Google Drive to retry.');
+    if (selected.id !== id) throw new Error('The selected folder does not match your link. Select the linked folder or change the link before uploading.');
+    return checkDriveFolder(connection, id);
+  }
 }
 export async function newDriveUpload(connection: DriveConnection): Promise<DriveUpload> {
   const result = await fetch(`${api}/files/generateIds?count=1&space=drive&type=files`, { headers: headers(connection), signal: AbortSignal.timeout(20000) });

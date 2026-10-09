@@ -762,6 +762,8 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
         durationSeconds={meeting.durationSeconds}
         isRecording={recorder.isRecording}
         recordingMs={recorder.recordingMs}
+        isRecordingPaused={recorder.isPaused}
+        onToggleRecordingPause={recorder.isPaused ? recorder.resume : recorder.pause}
         onOpenInfo={() => meeting.setIsInfoOpen(true)}
         onOpenLeave={() => meeting.setIsLeaveModalOpen(true)}
         layoutMode={meeting.layoutMode}
@@ -786,7 +788,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
       </div>
 
       {/* MAIN CONTENT AREA: Left Panel + Video Stage + Right Sidebar */}
-      <div className="flex-1 min-h-0 w-full flex items-stretch overflow-hidden relative p-3 sm:p-4 gap-3 sm:gap-4">
+      <div className="flex-1 min-h-0 w-full flex items-stretch overflow-hidden relative px-3 sm:px-4 py-1 gap-3 sm:gap-4">
         {/* Keep the toolbar mounted so hiding it only changes presentation. */}
         <div
           id="meeting-left-toolbar"

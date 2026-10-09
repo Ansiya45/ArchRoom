@@ -7,6 +7,8 @@ import {
   Grid,
   Maximize2,
   PhoneOff,
+  Pause,
+  Play,
 } from 'lucide-react';
 import { LayoutMode } from '@/types/meeting';
 
@@ -16,6 +18,8 @@ interface TopBarProps {
   durationSeconds?: number;
   isRecording?: boolean;
   recordingMs?: number;
+  isRecordingPaused?: boolean;
+  onToggleRecordingPause?: () => void;
   onOpenInfo: () => void;
   onOpenLeave?: () => void;
   layoutMode: LayoutMode;
@@ -38,6 +42,8 @@ const formatRecordingTime = (ms: number = 0) => {
 export const TopBar: React.FC<TopBarProps> = ({
   isRecording = false,
   recordingMs = 0,
+  isRecordingPaused = false,
+  onToggleRecordingPause,
   onOpenInfo,
   layoutMode,
   onChangeLayout,
@@ -61,15 +67,27 @@ export const TopBar: React.FC<TopBarProps> = ({
       {isRecording && (
         <div className="flex items-center space-x-2 px-3.5 py-1.5 rounded-2xl bg-rose-50 border border-rose-200 text-rose-600 shadow-sm animate-fadeIn">
           <div className="relative flex items-center justify-center w-3 h-3">
-            <span className="absolute inline-flex h-full w-full rounded-full bg-rose-500 opacity-75 animate-ping" />
+            {!isRecordingPaused && <span className="absolute inline-flex h-full w-full rounded-full bg-rose-500 opacity-75 animate-ping" />}
             <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-rose-600" />
           </div>
           <span className="text-[11px] font-bold uppercase tracking-wider text-rose-600 hidden sm:inline">
-            REC
+            {isRecordingPaused ? 'Paused' : 'REC'}
           </span>
           <span className="font-mono text-xs sm:text-sm font-extrabold text-rose-600 tracking-wider">
             {formatRecordingTime(recordingMs)}
           </span>
+          {onToggleRecordingPause && (
+            <button
+              type="button"
+              onClick={onToggleRecordingPause}
+              aria-label={isRecordingPaused ? 'Resume recording' : 'Pause recording'}
+              title={isRecordingPaused ? 'Resume recording' : 'Pause recording'}
+              className="flex items-center gap-1.5 rounded-lg p-2 text-rose-600 hover:bg-rose-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-500"
+            >
+              {isRecordingPaused ? <Play className="h-4 w-4" /> : <Pause className="h-4 w-4" />}
+              <span className="hidden sm:inline text-xs font-semibold">{isRecordingPaused ? 'Resume' : 'Pause'}</span>
+            </button>
+          )}
         </div>
       )}
 

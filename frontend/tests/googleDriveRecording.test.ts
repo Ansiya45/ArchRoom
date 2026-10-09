@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test, afterEach } from 'node:test';
-import { driveFolderId, uploadRecordingToDrive, type DriveUpload } from '../src/lib/googleDriveRecording.ts';
+import { driveFolderId, resolveDriveFolder, uploadRecordingToDrive, type DriveUpload } from '../src/lib/googleDriveRecording.ts';
 const originalFetch = globalThis.fetch;
 afterEach(() => { globalThis.fetch = originalFetch; });
 const connection = { token: 'test', expiresAt: Date.now() + 60000, accountId: 'test', email: 'test@example.com' };
@@ -10,6 +10,34 @@ test('folder links reject file links and foreign origins', () => {
   assert.equal(driveFolderId('https://drive.google.com/drive/folders/abcdefghijk'), 'abcdefghijk');
   assert.throws(() => driveFolderId('https://example.com/drive/folders/abcdefghijk'));
   assert.throws(() => driveFolderId('https://drive.google.com/file/d/abcdefghijk/view'));
+});
+
+const folderLink = 'https://drive.google.com/drive/folders/abcdefghijk';
+const folderResponse = () => Response.json({ id: 'abcdefghijk', name: 'Recordings', mimeType: 'application/vnd.google-apps.folder', capabilities: { canAddChildren: true } });
+test('previously authorized folder links do not prompt for selection', async () => {
+  globalThis.fetch = async () => folderResponse();
+  const folder = await resolveDriveFolder(connection, folderLink, async () => { throw new Error('Picker should not open'); });
+  assert.equal(folder.id, 'abcdefghijk');
+});
+test('first-time folder access continues after matching picker selection', async () => {
+  let requests = 0, selections = 0;
+  globalThis.fetch = async () => ++requests === 1 ? new Response(null, { status: 404 }) : folderResponse();
+  const folder = await resolveDriveFolder(connection, folderLink, async () => { selections++; return { id: 'abcdefghijk', name: 'Recordings' }; });
+  assert.equal(folder.name, 'Recordings');
+  assert.equal(requests, 2);
+  assert.equal(selections, 1);
+});
+test('cancelled or mismatched folder selection cannot redirect an upload', async () => {
+  globalThis.fetch = async () => new Response(null, { status: 404 });
+  await assert.rejects(resolveDriveFolder(connection, folderLink, async () => null), /cancelled/);
+  await assert.rejects(resolveDriveFolder(connection, folderLink, async () => ({ id: 'different', name: 'Other' })), /does not match/);
+});
+test('read-only folders and server errors do not trigger the permission picker', async () => {
+  const select = async () => { throw new Error('Picker should not open'); };
+  globalThis.fetch = async () => Response.json({ mimeType: 'application/vnd.google-apps.folder', capabilities: { canAddChildren: false } });
+  await assert.rejects(resolveDriveFolder(connection, folderLink, select), /can upload files/);
+  globalThis.fetch = async () => new Response(null, { status: 500 });
+  await assert.rejects(resolveDriveFolder(connection, folderLink, select), /500/);
 });
 test('interrupted upload resumes at the acknowledged byte', async () => {
   const attempt: DriveUpload = { fileId: 'file', sessionUrl };

@@ -51,7 +51,7 @@ export const VideoGrid: React.FC<VideoGridProps> = ({
   const stripParticipants = participants.filter((p) => p.id !== mainParticipant?.id);
 
   return (
-    <div className="w-full flex-1 min-h-0 flex flex-col justify-between p-1 sm:p-2 md:p-3 overflow-hidden relative">
+    <div className="w-full flex-1 min-h-0 flex flex-col justify-between px-1 sm:px-2 md:px-3 overflow-hidden relative">
       {layoutMode === 'speaker' ? (
         /* SPEAKER VIEW: Main Speaker on Left + Secondary Callers on Right (matching reference image) */
         <div className="w-full h-full flex flex-col md:flex-row gap-3 sm:gap-4 min-h-0 overflow-hidden">

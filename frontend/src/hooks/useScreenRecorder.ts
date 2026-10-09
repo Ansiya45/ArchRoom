@@ -17,6 +17,7 @@ function preferredMimeType() {
 
 export function useScreenRecorder() {
   const [isRecording, setIsRecording] = useState(false);
+  const [isPaused, setIsPaused] = useState(false);
   const [recordingMs, setRecordingMs] = useState(0);
   const [preview, setPreview] = useState<RecordingPreview | null>(null);
   const previewRef = useRef<RecordingPreview | null>(null);
@@ -24,10 +25,37 @@ export function useScreenRecorder() {
   const recorderRef = useRef<MediaRecorder | null>(null);
   const streamsRef = useRef<MediaStream[]>([]);
   const chunksRef = useRef<Blob[]>([]);
-  const startedAtRef = useRef(0);
+  const startedAtRef = useRef<number | null>(null);
+  const elapsedRef = useRef(0);
   const startingRef = useRef(false);
   const generationRef = useRef(0);
   const audioContextRef = useRef<AudioContext | null>(null);
+
+  const elapsedMs = useCallback(() => elapsedRef.current + (
+    startedAtRef.current === null ? 0 : performance.now() - startedAtRef.current
+  ), []);
+
+  const freezeTimer = useCallback(() => {
+    elapsedRef.current = elapsedMs();
+    startedAtRef.current = null;
+    setRecordingMs(elapsedRef.current);
+  }, [elapsedMs]);
+
+  const pause = useCallback(() => {
+    const recorder = recorderRef.current;
+    if (recorder?.state !== 'recording') return;
+    recorder.pause();
+    freezeTimer();
+    setIsPaused(true);
+  }, [freezeTimer]);
+
+  const resume = useCallback(() => {
+    const recorder = recorderRef.current;
+    if (recorder?.state !== 'paused') return;
+    recorder.resume();
+    startedAtRef.current = performance.now();
+    setIsPaused(false);
+  }, []);
 
   const stopTracks = useCallback(() => {
     streamsRef.current.forEach((stream) => stream.getTracks().forEach((track) => track.stop()));
@@ -42,9 +70,12 @@ export function useScreenRecorder() {
     if (!recorder) { stopTracks(); return Promise.resolve(previewRef.current); }
     return new Promise(resolve => {
       stopWaiters.current.push(resolve);
-      if (recorder.state !== 'inactive') recorder.stop();
+      if (recorder.state !== 'inactive') {
+        freezeTimer();
+        recorder.stop();
+      }
     });
-  }, [stopTracks]);
+  }, [stopTracks, freezeTimer]);
 
   const start = useCallback(async (occurrenceId?: string) => {
     if (startingRef.current || recorderRef.current) return;
@@ -100,15 +131,18 @@ export function useScreenRecorder() {
         ...(videoBitsPerSecond ? { videoBitsPerSecond } : {}),
       });
       recorderRef.current = recorder;
-      startedAtRef.current = Date.now();
+      startedAtRef.current = performance.now();
+      elapsedRef.current = 0;
       setRecordingMs(0);
+      setIsPaused(false);
       setIsRecording(true);
 
       recorder.ondataavailable = (event) => {
         if (event.data.size) chunksRef.current.push(event.data);
       };
       recorder.onstop = () => {
-        const durationSeconds = Math.max(1, Math.round((Date.now() - startedAtRef.current) / 1000));
+        freezeTimer();
+        const durationSeconds = Math.max(1, Math.round(elapsedRef.current / 1000));
         const blob = new Blob(chunksRef.current, { type: (recorder.mimeType || 'video/webm').split(';')[0] });
         const stamp = new Date().toISOString().replace(/[:.]/g, '-');
         const finished = { occurrenceId, blob, url: URL.createObjectURL(blob), fileName: `meeting-recording-${stamp}.webm`, mimeType: blob.type, durationSeconds };
@@ -118,6 +152,7 @@ export function useScreenRecorder() {
         recorderRef.current = null;
         chunksRef.current = [];
         setIsRecording(false);
+        setIsPaused(false);
         stopTracks();
       };
       display.getVideoTracks()[0].addEventListener('ended', () => void stop(), { once: true });
@@ -125,18 +160,19 @@ export function useScreenRecorder() {
     } catch (error) {
       recorderRef.current = null;
       setIsRecording(false);
+      setIsPaused(false);
       stopTracks();
       throw error;
     } finally {
       startingRef.current = false;
     }
-  }, [stop, stopTracks]);
+  }, [stop, stopTracks, freezeTimer]);
 
   useEffect(() => {
-    if (!isRecording) return;
-    const timer = window.setInterval(() => setRecordingMs(Date.now() - startedAtRef.current), 250);
+    if (!isRecording || isPaused) return;
+    const timer = window.setInterval(() => setRecordingMs(elapsedMs()), 250);
     return () => window.clearInterval(timer);
-  }, [isRecording]);
+  }, [isRecording, isPaused, elapsedMs]);
 
   useEffect(() => () => {
     generationRef.current += 1;
@@ -167,5 +203,5 @@ export function useScreenRecorder() {
     });
   }, []);
 
-  return { isRecording, recordingMs, preview, start, stop, clearPreview };
+  return { isRecording, isPaused, recordingMs, preview, start, pause, resume, stop, clearPreview };
 }

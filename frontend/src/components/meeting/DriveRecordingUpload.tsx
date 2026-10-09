@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { CloudUpload, Loader2 } from 'lucide-react';
 import type { RecordingPreview } from '@/hooks/useScreenRecorder';
 import { trpc } from '@/lib/trpc';
-import { checkDriveFolder, connectDrive, driveFolderId, loadDrive, newDriveUpload, pickDriveFolder, uploadRecordingToDrive,
+import { checkDriveFolder, connectDrive, driveFolderId, loadDrive, newDriveUpload, pickDriveFolder, resolveDriveFolder, uploadRecordingToDrive,
   type DriveConnection, type DriveUpload } from '@/lib/googleDriveRecording';
 const config = { clientId: import.meta.env.VITE_GOOGLE_DRIVE_CLIENT_ID || '', apiKey: import.meta.env.VITE_GOOGLE_DRIVE_API_KEY || '', appId: import.meta.env.VITE_GOOGLE_DRIVE_APP_ID || '' };
 const configured = Boolean(config.clientId && config.apiKey && config.appId);
@@ -38,11 +38,24 @@ export function DriveRecordingUpload({ preview, meetingCode, disabled, onBusyCha
     }
   });
   const upload = () => run(async () => {
+    driveFolderId(folderLink);
+    let active = connection;
+    if (!active || Date.now() >= active.expiresAt) {
+      const next = await connectDrive(config);
+      if (active && next.accountId !== active.accountId) {
+        attempt.current = null; setProgress(null); setFolderName('');
+      }
+      active = next; setConnection(next);
+    }
     await trpc.recordings.authorizeExport.mutate({ meetingCode, occurrenceId: preview.occurrenceId });
-    const folder = await checkDriveFolder(connection!, driveFolderId(folderLink)); setFolderName(folder.name);
-    attempt.current ??= await newDriveUpload(connection!);
+    const folder = await resolveDriveFolder(active, folderLink, () => {
+      setMessage('Select the folder from your link to allow this upload.');
+      return pickDriveFolder(config, active!);
+    });
+    setFolderName(folder.name); setMessage('Uploading recording to Google Drive...');
+    attempt.current ??= await newDriveUpload(active);
     setProgress(0);
-    const result = await uploadRecordingToDrive(connection!, folder.id, preview, attempt.current, setProgress);
+    const result = await uploadRecordingToDrive(active, folder.id, preview, attempt.current, setProgress);
     setUrl(result); setMessage('Recording uploaded to Google Drive. Your local preview is still available.');
   });
   return <>
@@ -57,18 +70,18 @@ export function DriveRecordingUpload({ preview, meetingCode, disabled, onBusyCha
         {ready && <button disabled={busy || disabled || Boolean(url)} className="rounded-lg border px-3 py-2 disabled:opacity-50" onClick={() => void connect()}>
           {connection ? `Reconnect Google Drive (${connection.email})` : 'Connect Google Drive'}
         </button>}
-        {connection && !url && <>
+        {!url && <>
           <div className="flex flex-wrap gap-2">
-            <button disabled={busy || disabled || Boolean(attempt.current)} onClick={() => void selectFolder()} className="rounded-lg border px-3 py-2">Choose folder</button>
-            <label className="flex min-w-0 flex-1 flex-col gap-1">Or paste a Drive folder link
+            {connection && <button disabled={!ready || busy || disabled || Boolean(attempt.current)} onClick={() => void selectFolder()} className="rounded-lg border px-3 py-2">Choose folder</button>}
+            <label className="flex min-w-0 flex-1 flex-col gap-1">Google Drive folder link
               <input type="url" value={folderLink} disabled={busy || disabled || Boolean(attempt.current)} placeholder="https://drive.google.com/drive/folders/..."
                 onChange={event => { setFolderLink(event.target.value); setFolderName(''); }} className="w-full rounded-lg border px-3 py-2" />
             </label>
           </div>
-          <p className="text-xs text-slate-500">Use Choose folder the first time to grant YLAAM Meet access. Your Google account needs upload permission. Existing folder sharing determines who can view the recording.</p>
+          <p className="text-xs text-slate-500">Paste your folder link and click upload. Google may ask you to sign in and select that folder to grant access the first time. Uploading continues automatically afterward. Your Google account must have permission to add files to the folder.</p>
           {folderName && <p>Folder: <strong>{folderName}</strong></p>}
-          <button disabled={busy || disabled || !folderLink.trim()} onClick={() => void upload()} className="rounded-lg bg-emerald-700 px-4 py-2 font-semibold text-white disabled:opacity-50">
-            {busy ? 'Working...' : attempt.current ? 'Retry / resume upload' : 'Upload recording to this folder'}
+          <button disabled={!ready || busy || disabled || !folderLink.trim()} onClick={() => void upload()} className="rounded-lg bg-emerald-700 px-4 py-2 font-semibold text-white disabled:opacity-50">
+            {busy ? 'Working...' : attempt.current ? 'Retry / resume upload' : 'Upload to Google Drive'}
           </button>
         </>}
         {busy && <Loader2 aria-label="Google Drive operation in progress" className="inline h-4 w-4 animate-spin" />}

@@ -10,7 +10,18 @@ Set these public browser configuration values in `frontend/.env`, then restart t
 - `VITE_GOOGLE_DRIVE_API_KEY`: browser API key restricted to your frontend origins and the Google Picker API.
 - `VITE_GOOGLE_DRIVE_APP_ID`: Google Cloud project number (not its project ID).
 
-Enable Google Drive API and Google Picker API in the same Cloud project. Configure the OAuth consent screen and authorized JavaScript origins for local development and production; add test users if the app is in testing. The connection requests `drive.file` access. Choose a folder through the picker first to grant access; pasted links alone cannot grant access. Files inherit the destination folder's sharing. Google access tokens stay in browser memory.
+Enable Google Drive API and Google Picker API in the same Cloud project. Configure the OAuth consent screen and authorized JavaScript origins for local development and production; add test users if the app is in testing. The connection requests `drive.file` access. Paste a folder link and click Upload to Google Drive. The button opens Google sign-in when needed, then uploads automatically. If the app does not yet have access to that folder, it opens the folder picker; select the same folder to grant access and continue. Cancelling or selecting a different folder stops the upload. Previously authorized folders upload directly. Files inherit the destination folder's sharing. Google access tokens stay in browser memory.
+
+### Obtain the configuration
+
+1. Open Google Cloud Console and select or create one project. Enable **Google Drive API** and **Google Picker API** in APIs & Services → Library.
+2. Configure the app in **Google Auth Platform**. Add your Google account as a test user while the external app is in testing. Configure the `https://www.googleapis.com/auth/drive.file` scope.
+3. Create an OAuth client with application type **Web application**. Add the frontend's exact origin under Authorized JavaScript origins (for example, `http://localhost:5173`, plus your production origin). Copy its client ID into `VITE_GOOGLE_DRIVE_CLIENT_ID`. No client secret belongs in the frontend.
+4. Create a browser API key for Picker and set `VITE_GOOGLE_DRIVE_API_KEY`. Restrict the key to Google Picker API and configure website referrers for your frontend and `https://docs.google.com/*`, as required by Google's Picker iframe guidance.
+5. Copy the project's numeric **Project number** from project settings into `VITE_GOOGLE_DRIVE_APP_ID`. This must be the same project as the OAuth client and API key.
+6. Restart Vite after updating `frontend/.env`. For deployment, set the values in the frontend build environment and rebuild.
+
+References: https://developers.google.com/workspace/drive/picker/guides/web-picker and https://developers.google.com/workspace/drive/api/guides/api-specific-auth
 
 Drive uploads use resumable chunks. Keep the page open; retry after a connection failure, or reconnect the same Google account if access expires. Drive exports appear through the returned Drive link; the saved recordings list contains Supabase recordings.
 
