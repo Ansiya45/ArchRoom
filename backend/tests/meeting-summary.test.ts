@@ -71,14 +71,20 @@ test('empty speech never invents a summary or calls OpenAI; incomplete responses
   globalThis.fetch = async () => Response.json({ status: 'incomplete', output: [] });
   await assert.rejects(() => service.generate({ ...scope, speech: 'Speech' }, host), { code: 'BAD_GATEWAY' });
 }));
-test('transcription auto-detects language, rejects ended sessions and absent admission', async () => fixture(async ({ service, meeting }) => {
-  let form: FormData;
-  globalThis.fetch = async (_url, options) => { form = options!.body as FormData; return Response.json({ text: 'Bonjour' }); };
-  assert.equal((await service.transcribe({ ...scope, audio: 'YQ==', mimeType: 'audio/webm' }, host)).text, 'Bonjour');
-  assert.equal(form!.get('language'), null); assert.equal(form!.get('response_format'), 'json');
-  meeting.status = 'ended'; await assert.rejects(() => service.transcribe({ ...scope, audio: 'YQ==', mimeType: 'audio/webm' }, host), { code: 'FORBIDDEN' });
-  meeting.status = 'live'; db.query.meetingParticipants.findFirst = (async () => undefined) as any;
-  await assert.rejects(() => service.transcribe({ ...scope, audio: 'YQ==', mimeType: 'audio/webm' }, host), { code: 'FORBIDDEN' });
+test('Stage 1 rejects all transcription before database or provider access, including configured hosts', async () => fixture(async ({ service, requests }) => {
+  db.query.meetings.findFirst = (async () => { throw new Error('Transcription must not query the database'); }) as any;
+  const input = { ...scope, audio: 'YQ==', mimeType: 'audio/webm' as const };
+  for (const key of ['', 'test-configured-key']) {
+    env.OPENAI_API_KEY = key;
+    for (const id of [host, guest, outsider]) {
+      await assert.rejects(() => service.transcribe(input, id), { code: 'FORBIDDEN' });
+      const caller = meetingsRouter.createCaller({ isAuthenticated: true, user: { id } } as any);
+      await assert.rejects(() => caller.transcribeSpeech(input), { code: 'FORBIDDEN' });
+    }
+  }
+  const anonymous = meetingsRouter.createCaller({ user: null } as any);
+  await assert.rejects(() => anonymous.transcribeSpeech(input), { code: 'UNAUTHORIZED' });
+  assert.equal(requests.length, 0);
 }));
 test('send validates every selected recipient before delivery and emails only the selected summary', async () => fixture(async ({ service, requests }) => {
   await assert.rejects(() => service.send({ ...scope, summary: 'Summary', recipientIds: [guest, outsider] }, host), { code: 'BAD_REQUEST' });

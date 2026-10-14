@@ -209,7 +209,7 @@ export const ScheduleModal: React.FC<ScheduleModalProps> = ({
             <div>
               <label htmlFor="meeting-timezone" className="block text-xs font-semibold mb-1.5">Timezone</label>
               <select id="meeting-timezone" value={timeZone} onChange={(event) => setTimeZone(event.target.value)}
-                className="w-full px-3 py-3 rounded-xl border border-slate-200 text-sm">
+                className="schedule-dark-options w-full px-3 py-3 rounded-xl border border-slate-200 text-sm">
                 {timeZones.map((zone) => <option key={zone} value={zone}>{zone}</option>)}
               </select>
               {!editingMeeting?.timeZone && editingMeeting && <p className="mt-1 text-xs text-slate-500">The original timezone was not recorded. Confirm the date, time and timezone before saving.</p>}

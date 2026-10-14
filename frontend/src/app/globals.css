@@ -230,6 +230,13 @@ textarea {
   color-scheme: dark;
 }
 
+/* Native option menus need explicit colors on Windows browsers. */
+.schedule-dark-options,
+.schedule-dark-options option {
+  background-color: #11162a;
+  color: #ffffff;
+}
+
 ::selection {
   background: #7c3aed;
   color: #ffffff;

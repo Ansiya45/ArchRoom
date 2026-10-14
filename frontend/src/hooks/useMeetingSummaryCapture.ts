@@ -2,6 +2,9 @@ import { useEffect, useRef, useState } from 'react';
 import { trpc } from '@/lib/trpc';
 import { createSummaryCapture } from '@/lib/meetingSummaryCapture';
 
+// Stage 1: fail closed until participant permission enforcement is implemented.
+const AI_CAPTURE_ENABLED = false;
+
 export function useMeetingSummaryCapture(active: boolean, meetingCode: string, occurrenceId: string | undefined,
   local: MediaStream | null, micOn: boolean, remote: Record<string, MediaStream>, muted: Record<string, boolean>) {
   const [error, setError] = useState('');
@@ -10,7 +13,7 @@ export function useMeetingSummaryCapture(active: boolean, meetingCode: string, o
   const inputs = useRef({ local, micOn, remote, muted });
   inputs.current = { local, micOn, remote, muted };
   useEffect(() => {
-    if (!active) return;
+    if (!AI_CAPTURE_ENABLED || !active) return;
     warning.current = ''; setError('');
     const warn = (message: string) => { warning.current = message; setError(message); };
     try {

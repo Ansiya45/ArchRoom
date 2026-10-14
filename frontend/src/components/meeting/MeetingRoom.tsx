@@ -102,7 +102,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
   const admissionActionsRef = useRef(new Set<string>());
   const recorder = useScreenRecorder();
   const transcript = useMeetingSummaryCapture(
-    meeting.inMeeting && isHost, meetingCode, sessionRef.current?.occurrenceId,
+    false, meetingCode, sessionRef.current?.occurrenceId,
     call.localStream, meeting.isMicOn, call.remoteStreams, call.remoteMicMuted,
   );
 
@@ -835,8 +835,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
 
       {closingForSummary && <div role="status" className="fixed inset-0 z-[110] bg-black/80 text-white flex items-center justify-center">Finishing speech capture and closing the call...</div>}
       <div className="fixed bottom-24 left-4 z-30 max-w-sm rounded-lg bg-zinc-900/90 p-2 text-xs text-zinc-300">
-        {isHost ? transcript.error || 'Meeting speech is processed by OpenAI for an English summary.' : 'The host can process meeting speech with OpenAI for an English summary.'}
-        {isHost && transcript.error && <button className="block underline" onClick={() => void transcript.resume()}>Enable summary capture</button>}
+        AI transcription is off. Participant permission controls are not yet available.
       </div>
 
 

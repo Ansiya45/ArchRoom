@@ -4,6 +4,7 @@ import { BrowserRouter, Navigate, Route, Routes, useParams } from 'react-router-
 import { subscribeToSessionRemoval } from './lib/auth';
 import { MeetingNotificationPreferences } from './components/MeetingNotificationPreferences';
 import App from './App';
+import PrivacyPolicy from './components/PrivacyPolicy';
 import { MeetingRoom } from './components/meeting/MeetingRoom';
 import './app/globals.css';
 
@@ -30,6 +31,7 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
     <BrowserRouter>
       <Routes>
+        <Route path="/privacy-policy" element={<PrivacyPolicy />} />
         <Route path="/meeting-notifications" element={<MeetingNotificationPreferences />} />
         <Route path="/" element={<App />} />
         <Route path="/meet/:meetingCode" element={<MeetingPage />} />
