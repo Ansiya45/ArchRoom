@@ -47,7 +47,13 @@ jobs:
         with:
           node-version: 22
           cache: npm
-          cache-dependency-path: frontend/package-lock.json
+          cache-dependency-path: |
+            frontend/package-lock.json
+            backend/package-lock.json
+      # Frontend router types import backend source, so its dependencies are
+      # needed for the frontend TypeScript build on a clean runner.
+      - run: npm ci
+        working-directory: backend
       - run: npm ci
       - run: npm run build
       - run: npx playwright install --with-deps chromium
