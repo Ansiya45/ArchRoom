@@ -58,7 +58,7 @@ test.describe('application dashboard — isolated API', () => {
     await expect(page.getByRole('heading', { name: /Meet Without/ })).toBeVisible();
   });
 
-  test('slow account load shows a boundary and never exposes cached account content', async ({ page, authMock }) => {
+  test('slow account refresh keeps the dashboard interactive without exposing cached account content', async ({ page, authMock }) => {
     await page.addInitScript(({ token, user }) => {
       localStorage.setItem('ylaam_meet_token', token);
       localStorage.setItem('ylaam_meet_user', JSON.stringify(user));
@@ -74,6 +74,10 @@ test.describe('application dashboard — isolated API', () => {
     await page.goto('/');
     try {
       await expect(page.getByRole('status')).toHaveText('Loading your dashboard...');
+      await expect(page.getByRole('heading', { name: /Meet Without/ })).toBeVisible();
+      await page.getByTestId('dashboard-scroll').getByRole('button', { name: 'Create Meeting', exact: true }).click();
+      await expect(page.getByRole('heading', { name: 'Create or Schedule Meeting' })).toBeVisible();
+      await page.getByRole('button', { name: 'Close meeting form' }).click();
       await expect(page.getByText(authMock.privateTitle)).toBeHidden();
     } finally { release(); }
     await expect(page.getByRole('status')).toBeHidden();

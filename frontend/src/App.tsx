@@ -101,6 +101,25 @@ export default function App() {
   useEffect(() => subscribeToSessionRemoval(clearAccountUI), [clearAccountUI]);
 
   useEffect(() => {
+    const connection = (navigator as Navigator & {
+      connection?: { saveData?: boolean; effectiveType?: string };
+    }).connection;
+    if (connection?.saveData || connection?.effectiveType === 'slow-2g' || connection?.effectiveType === '2g') return;
+
+    const preloadMeeting = () => { void import('./components/meeting/MeetingRoom'); };
+    const idleWindow = window as unknown as {
+      requestIdleCallback?: (callback: IdleRequestCallback, options?: IdleRequestOptions) => number;
+      cancelIdleCallback?: (id: number) => void;
+    };
+    if (idleWindow.requestIdleCallback) {
+      const idleId = idleWindow.requestIdleCallback(preloadMeeting, { timeout: 4_000 });
+      return () => idleWindow.cancelIdleCallback?.(idleId);
+    }
+    const timer = globalThis.setTimeout(preloadMeeting, 1_500);
+    return () => globalThis.clearTimeout(timer);
+  }, []);
+
+  useEffect(() => {
     if (!user) return;
 
     let cancelled = false;
@@ -268,14 +287,16 @@ export default function App() {
         {/* Main Content Area */}
         <main className="flex-1 min-h-0 pb-16 sm:pb-0 sm:pl-[72px] flex flex-col justify-between h-[calc(100vh-56px)] overflow-hidden">
           <div data-testid="dashboard-scroll" className="flex-1 min-h-0 flex flex-col justify-start overflow-y-auto overflow-x-hidden py-2 sm:py-4">
-            {user && isAccountLoading ? (
-              <div role="status" className="m-auto text-sm font-semibold text-slate-500">Loading your dashboard...</div>
-            ) : user && accountError ? (
-              <div role="alert" className="m-auto text-center text-sm text-slate-600">
+            {user && isAccountLoading && (
+              <div role="status" className="mx-auto mb-2 rounded-full bg-white/90 px-4 py-2 text-xs font-semibold text-slate-500 shadow-sm">Loading your dashboard...</div>
+            )}
+            {user && accountError && (
+              <div role="alert" className="mx-auto mb-3 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-center text-sm text-slate-600">
                 <p>{accountError}</p>
                 <button className="mt-3 font-semibold text-blue-600" onClick={() => setAccountAttempt(value => value + 1)}>Try again</button>
               </div>
-            ) : <>
+            )}
+            <>
             {/* Tab 1 & Tab 2: Home View */}
             {(activeTab === 'home' || activeTab === 'create') && (
               <Hero
@@ -320,7 +341,7 @@ export default function App() {
             {activeTab === 'settings' && (
               <SettingsView onShowToast={(msg) => showToast(msg)} />
             )}
-            </>}
+            </>
           </div>
 
           {/* Footer */}

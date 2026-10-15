@@ -1,12 +1,24 @@
-import React, { useEffect, useState } from 'react';
+import React, { lazy, Suspense, useEffect, useState } from 'react';
 import ReactDOM from 'react-dom/client';
 import { BrowserRouter, Navigate, Route, Routes, useParams } from 'react-router-dom';
 import { subscribeToSessionRemoval } from './lib/auth';
-import { MeetingNotificationPreferences } from './components/MeetingNotificationPreferences';
 import App from './App';
-import PrivacyPolicy from './components/PrivacyPolicy';
-import { MeetingRoom } from './components/meeting/MeetingRoom';
 import './app/globals.css';
+
+const PrivacyPolicy = lazy(() => import('./components/PrivacyPolicy'));
+const MeetingNotificationPreferences = lazy(() => import('./components/MeetingNotificationPreferences')
+  .then(module => ({ default: module.MeetingNotificationPreferences })));
+const MeetingRoom = lazy(() => import('./components/meeting/MeetingRoom')
+  .then(module => ({ default: module.MeetingRoom })));
+
+function PageFallback() {
+  return <main role="status" className="min-h-screen bg-slate-950 text-white flex items-center justify-center p-6">
+    <div className="flex items-center gap-3 font-semibold">
+      <span className="h-5 w-5 animate-spin rounded-full border-2 border-violet-300 border-t-transparent" aria-hidden="true" />
+      Loading YLAAM Meet…
+    </div>
+  </main>;
+}
 
 function MeetingPage() {
   const { meetingCode = '' } = useParams<{ meetingCode: string }>();
@@ -30,14 +42,16 @@ function RouteMessage({ title, message }: { title: string; message: string }) {
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
     <BrowserRouter>
-      <Routes>
-        <Route path="/privacy-policy" element={<PrivacyPolicy />} />
-        <Route path="/meeting-notifications" element={<MeetingNotificationPreferences />} />
-        <Route path="/" element={<App />} />
-        <Route path="/meet/:meetingCode" element={<MeetingPage />} />
-        <Route path="/meet" element={<MeetingPage />} />
-        <Route path="*" element={<RouteMessage title="Page not found" message="This page does not exist." />} />
-      </Routes>
+      <Suspense fallback={<PageFallback />}>
+        <Routes>
+          <Route path="/privacy-policy" element={<PrivacyPolicy />} />
+          <Route path="/meeting-notifications" element={<MeetingNotificationPreferences />} />
+          <Route path="/" element={<App />} />
+          <Route path="/meet/:meetingCode" element={<MeetingPage />} />
+          <Route path="/meet" element={<MeetingPage />} />
+          <Route path="*" element={<RouteMessage title="Page not found" message="This page does not exist." />} />
+        </Routes>
+      </Suspense>
     </BrowserRouter>
   </React.StrictMode>
 );

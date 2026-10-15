@@ -66,6 +66,7 @@ for (const width of [320, 768, 1440]) {
 
 test('keyboard users can skip navigation and follow a section link', async ({ page }) => {
   await page.goto('/privacy-policy');
+  await expect(page.getByRole('heading', { level: 1, name: 'Privacy Policy' })).toBeVisible();
   await page.keyboard.press('Tab');
   await expect(page.getByRole('link', { name: 'Skip to policy' })).toBeFocused();
   await page.keyboard.press('Enter');
