@@ -30,7 +30,6 @@ import { trpc } from '@/lib/trpc';
 import { clearMeetingSession, getMeetingSession, storeMeetingSession, type MeetingSession } from '@/lib/meetingSession';
 import { useSharedWhiteboard } from '@/hooks/useSharedWhiteboard';
 import { clearStoredSession, getAuthToken, getStoredUser, type SessionUser } from '@/lib/auth';
-import AuthModal from '../AuthModal';
 import { useWebRtcMeeting } from '@/hooks/useWebRtcMeeting';
 import { useScreenRecorder } from '@/hooks/useScreenRecorder';
 import { RecordingsModal } from './RecordingsModal';
@@ -41,6 +40,8 @@ interface MeetingRoomProps {
   meetingCode?: string;
 }
 
+type AiStatus = Awaited<ReturnType<typeof trpc.meetings.aiStatus.query>>;
+
 export const MeetingRoom: React.FC<MeetingRoomProps> = ({
   meetingCode = 'YLM-9284-XKP',
 }) => {
@@ -49,9 +50,6 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
   const [checkingSession, setCheckingSession] = useState(true);
   const [sessionError, setSessionError] = useState('');
   const [sessionAttempt, setSessionAttempt] = useState(0);
-  const [authMode, setAuthMode] = useState<'login' | 'signup' | null>(null);
-  const joinRequested = useRef(false);
-  const [joinAfterAuth, setJoinAfterAuth] = useState(false);
   const [meetingError, setMeetingError] = useState('');
   const [checkingMeeting, setCheckingMeeting] = useState(false);
   const sessionRef = useRef<MeetingSession | null>(getMeetingSession(meetingCode));
@@ -77,7 +75,8 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
     meeting.setCameraEnabled,
     sessionRef.current
   );
-  const sharedWhiteboard = useSharedWhiteboard(meetingCode, meeting.inMeeting, sessionRef.current);
+  const [isHost, setIsHost] = useState(false);
+  const sharedWhiteboard = useSharedWhiteboard(meetingCode, meeting.inMeeting, sessionRef.current, isHost);
   const [isLeftPanelOpen, setIsLeftPanelOpen] = useState(false);
   const [isBgPickerOpen, setIsBgPickerOpen] = useState<boolean>(false);
   const [admission, setAdmission] = useState<'idle' | 'pending' | 'denied'>('idle');
@@ -87,7 +86,10 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
   const [isMutingAll, setIsMutingAll] = useState(false);
   const [participantToRemove, setParticipantToRemove] = useState<{ id: string; name: string } | null>(null);
   const [isRemovingParticipant, setIsRemovingParticipant] = useState(false);
-  const [isHost, setIsHost] = useState(false);
+  const [isOwner, setIsOwner] = useState(false);
+  const [aiStatus, setAiStatus] = useState<AiStatus>({ state: 'off' });
+  const [aiBusy, setAiBusy] = useState(false);
+  const [aiCaptureFault, setAiCaptureFault] = useState(false);
   const [joinRequests, setJoinRequests] = useState<Array<{ id: string; name: string }>>([]);
   const [isRecordingsOpen, setIsRecordingsOpen] = useState(false);
   const [summaryReview, setSummaryReview] = useState<{ speech: string; occurrenceId?: string; warning: string } | null>(null);
@@ -101,10 +103,46 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
   const loadingRequestsRef = useRef(false);
   const admissionActionsRef = useRef(new Set<string>());
   const recorder = useScreenRecorder();
+  const aiAgreedIds = aiStatus.state === 'off' ? [] : aiStatus.agreedParticipantIds;
+  const aiCaptureActive = meeting.inMeeting && isHost && call.isConnected && !aiCaptureFault && aiStatus.state === 'active' &&
+    aiStatus.requestedByUserId === user?.id && Object.keys(call.remoteStreams).every(id => aiAgreedIds.includes(id));
   const transcript = useMeetingSummaryCapture(
-    false, meetingCode, sessionRef.current?.occurrenceId,
+    aiCaptureActive, meetingCode, sessionRef.current?.occurrenceId,
+    aiStatus.state === 'off' ? undefined : aiStatus.requestId, aiAgreedIds,
     call.localStream, meeting.isMicOn, call.remoteStreams, call.remoteMicMuted,
+    text => call.publishTranscript(text),
   );
+
+  useEffect(() => {
+    if (!transcript.capturing || aiStatus.state !== 'active' || aiStatus.requestedByUserId !== user?.id) return;
+    let cancelled = false;
+    const heartbeat = async () => {
+      try {
+        await trpc.meetings.aiCaptureHeartbeat.mutate({ meetingCode, occurrenceId: sessionRef.current?.occurrenceId, requestId: aiStatus.requestId });
+      } catch {
+        if (!cancelled) { setAiCaptureFault(true); setAiStatus({ state: 'off' }); }
+      }
+    };
+    void heartbeat();
+    const timer = window.setInterval(() => void heartbeat(), 2000);
+    return () => { cancelled = true; window.clearInterval(timer); };
+  }, [transcript.capturing, aiStatus.state, aiStatus.state === 'off' ? '' : aiStatus.requestId, user?.id, meetingCode]);
+
+  useEffect(() => {
+    if (!meeting.inMeeting || !sessionRef.current?.participantId) { setAiStatus({ state: 'off' }); return; }
+    let cancelled = false;
+    const refresh = async () => {
+      try {
+        const status = await trpc.meetings.aiStatus.query({ meetingCode, occurrenceId: sessionRef.current?.occurrenceId, participantId: sessionRef.current?.participantId });
+        if (!cancelled) setAiStatus(status);
+      } catch {
+        if (!cancelled) setAiStatus({ state: 'off' });
+      }
+    };
+    void refresh();
+    const timer = window.setInterval(() => void refresh(), 1000);
+    return () => { cancelled = true; window.clearInterval(timer); };
+  }, [meeting.inMeeting, meetingCode, user?.id]);
 
   useEffect(() => {
     let cancelled = false;
@@ -177,13 +215,13 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
   }, [call.chatMessages, meeting.activeSidebarTab]);
 
   useEffect(() => {
-    if (!user) return;
     let cancelled = false;
     setCheckingMeeting(true);
     setMeetingError('');
     void trpc.meetings.getByCode.query({ meetingCode, occurrenceId: sessionRef.current?.occurrenceId }).then(({ meeting: room }) => {
       if (cancelled) return;
       meeting.setMeetingTitle(room.title);
+      setIsOwner(getStoredUser()?.id === room.hostUserId);
       setIsHost(getStoredUser()?.id === room.hostUserId);
       if (room.recurrenceCancelledAt) setMeetingError('This meeting series has been cancelled.');
       else if (room.status === 'ended' && room.scheduleType !== 'reusable' && room.scheduleType !== 'recurring') setMeetingError('This meeting has ended.');
@@ -196,7 +234,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
   }, [meetingCode, user?.id, sessionAttempt]);
 
   useEffect(() => {
-    if (!user || meeting.inMeeting || admission !== 'idle') return;
+    if (meeting.inMeeting || admission !== 'idle') return;
     const session = sessionRef.current;
     if (!session?.participantId) return;
     let cancelled = false;
@@ -281,6 +319,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
           participantId: session?.participantId,
         });
         meeting.syncParticipants(result.participants);
+        setIsHost(result.participants.some(participant => participant.isSelf && participant.role === 'host'));
       } catch {
         // Keep the most recent roster while a refresh is temporarily unavailable.
       }
@@ -446,6 +485,47 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
     }
   };
 
+  const promoteCohost = async (participantId: string) => {
+    if (!isOwner || !window.confirm('Give this participant host controls for this meeting session?')) return;
+    try {
+      await trpc.meetings.promoteCohost.mutate({ meetingCode, occurrenceId: sessionRef.current?.occurrenceId, participantId });
+    } catch (error) {
+      alert(error instanceof Error ? error.message : 'Unable to appoint co-host.');
+    }
+  };
+
+  const requestAiTranscription = async () => {
+    if (!isHost || aiBusy) return;
+    setAiBusy(true);
+    try {
+      setAiCaptureFault(false);
+      await trpc.meetings.requestAiTranscription.mutate({ meetingCode, occurrenceId: sessionRef.current?.occurrenceId });
+      setAiStatus(await trpc.meetings.aiStatus.query({ meetingCode, occurrenceId: sessionRef.current?.occurrenceId, participantId: sessionRef.current?.participantId }));
+    } catch (error) { alert(error instanceof Error ? error.message : 'Unable to request transcription.'); }
+    finally { setAiBusy(false); }
+  };
+
+  const respondAiTranscription = async (agree: boolean) => {
+    if (aiStatus.state === 'off' || aiBusy) return;
+    const requestId = aiStatus.requestId;
+    setAiBusy(true);
+    try {
+      await trpc.meetings.respondAiTranscription.mutate({ meetingCode, occurrenceId: sessionRef.current?.occurrenceId, participantId: sessionRef.current?.participantId, requestId, agree });
+      setAiStatus(await trpc.meetings.aiStatus.query({ meetingCode, occurrenceId: sessionRef.current?.occurrenceId, participantId: sessionRef.current?.participantId }));
+    } catch (error) { alert(error instanceof Error ? error.message : 'Unable to update transcription permission.'); }
+    finally { setAiBusy(false); }
+  };
+
+  const stopAiTranscription = async () => {
+    if (aiStatus.state === 'off' || aiBusy || !isHost) return;
+    const requestId = aiStatus.requestId;
+    setAiStatus({ state: 'off' });
+    setAiBusy(true);
+    try { await trpc.meetings.stopAiTranscription.mutate({ meetingCode, occurrenceId: sessionRef.current?.occurrenceId, requestId }); }
+    catch (error) { alert(error instanceof Error ? error.message : 'Unable to stop transcription.'); }
+    finally { setAiBusy(false); }
+  };
+
   const toggleRecording = async () => {
     if (!isHost) return;
     if (recorder.isRecording) {
@@ -512,11 +592,6 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
 
   const handleJoin = async () => {
     if (checkingSession || sessionError) return;
-    if (!user) {
-      joinRequested.current = true;
-      setAuthMode('login');
-      return;
-    }
     const displayName = meeting.displayName.trim();
     if (!displayName || joiningRef.current || admission === 'pending') return;
     joiningRef.current = true;
@@ -527,7 +602,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
       if (room.recurrenceCancelledAt) throw new Error('This meeting series has been cancelled.');
       if (room.status === 'ended' && room.scheduleType !== 'reusable' && room.scheduleType !== 'recurring') throw new Error('This meeting has ended.');
       if ((room.scheduleType === 'reusable' || room.scheduleType === 'recurring')) {
-        if (!room.activeOccurrenceId && room.hostUserId === user.id) {
+        if (!room.activeOccurrenceId && room.hostUserId === user?.id) {
           ({ meeting: room } = await startHostedMeeting(room));
         }
         if (!room.activeOccurrenceId) throw new Error('The host has not opened this room yet. Please try again when the host starts it.');
@@ -548,13 +623,14 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
             participantId: existingSession.participantId,
           });
         } catch (error) {
-          if (!(error instanceof Error) || !error.message.includes('A new admission is required')) throw error;
+          if (user && (!(error instanceof Error) || !error.message.includes('A new admission is required'))) throw error;
           joinRequestId = crypto.randomUUID();
           rememberSession(meeting.meetingCode, { displayName, occurrenceId: sessionRef.current?.occurrenceId, joinRequestId });
           const joined = await trpc.meetings.join.mutate({
             meetingCode: meeting.meetingCode,
             occurrenceId: sessionRef.current?.occurrenceId,
             joinRequestId,
+            ...(!user ? { guestName: displayName } : {}),
           });
           rememberSession(meeting.meetingCode, {
             displayName,
@@ -583,6 +659,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
           meetingCode: meeting.meetingCode,
           occurrenceId: sessionRef.current?.occurrenceId,
           joinRequestId,
+          ...(!user ? { guestName: displayName } : {}),
         });
         rememberSession(meeting.meetingCode, {
           displayName,
@@ -599,12 +676,6 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
       setMeetingError(error instanceof Error ? error.message : 'Unable to join the meeting.');
     }
   };
-
-  useEffect(() => {
-    if (!joinAfterAuth || !user || checkingSession || checkingMeeting) return;
-    setJoinAfterAuth(false);
-    if (!meetingError && !sessionError) void handleJoin();
-  }, [joinAfterAuth, user, checkingSession, checkingMeeting, meetingError, sessionError]);
 
   const decideAdmission = async (participantId: string, admit: boolean) => {
     if (admissionActionsRef.current.has(participantId)) return;
@@ -661,7 +732,6 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
         checkingSession={checkingSession || checkingMeeting}
         sessionError={sessionError || meetingError}
         onRetrySession={() => setSessionAttempt((attempt) => attempt + 1)}
-        onOpenAuth={setAuthMode}
         meetingCode={meeting.meetingCode}
         meetingTitle={meeting.meetingTitle}
         isMicOn={meeting.isMicOn}
@@ -674,18 +744,6 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
         deviceSettings={meeting.deviceSettings}
         setDeviceSettings={meeting.setDeviceSettings}
         isJoining={isJoining}
-      />
-      <AuthModal
-        isOpen={authMode !== null}
-        mode={authMode || 'login'}
-        onClose={() => { joinRequested.current = false; setAuthMode(null); }}
-        onSuccess={(account) => {
-          meeting.setDisplayName(account.fullName);
-          setUser(account);
-          setSessionError('');
-          setAuthMode(null);
-          setJoinAfterAuth(joinRequested.current);
-        }}
       />
       </>
     );
@@ -834,8 +892,30 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
       />
 
       {closingForSummary && <div role="status" className="fixed inset-0 z-[110] bg-black/80 text-white flex items-center justify-center">Finishing speech capture and closing the call...</div>}
-      <div className="fixed bottom-24 left-4 z-30 max-w-sm rounded-lg bg-zinc-900/90 p-2 text-xs text-zinc-300">
-        AI transcription is off. Participant permission controls are not yet available.
+      {aiStatus.state !== 'off' && aiStatus.needsResponse && (
+        <div className="fixed inset-0 z-[115] flex items-center justify-center bg-slate-950/80 p-4">
+          <div role="dialog" aria-modal="true" aria-label="AI transcription permission" className="w-full max-w-md rounded-2xl bg-white p-6 text-slate-900 shadow-2xl">
+            <h2 className="text-xl font-bold">AI transcription requested</h2>
+            <p className="mt-3 text-sm leading-relaxed">A host wants to transcribe meeting audio using YLAAM Meet and OpenAI to prepare a transcript and summary. Capture will begin only if everyone in this meeting agrees. A host can review and email the transcript and summary to selected participants. You can withdraw permission at any time.</p>
+            <div className="mt-5 flex gap-3">
+              <button type="button" disabled={aiBusy} onClick={() => void respondAiTranscription(false)} className="rounded-lg border border-slate-300 px-4 py-2">Decline</button>
+              <button type="button" disabled={aiBusy} onClick={() => void respondAiTranscription(true)} className="rounded-lg bg-blue-600 px-4 py-2 text-white">I agree to AI transcription</button>
+            </div>
+          </div>
+        </div>
+      )}
+      <div className="fixed bottom-24 left-4 z-30 max-w-sm rounded-lg bg-zinc-900/95 p-3 text-xs text-white shadow-lg" role="status">
+        {aiStatus.state === 'off' ? <>
+          <p>AI transcription is off.</p>
+          {isHost && <button type="button" disabled={aiBusy} onClick={() => void requestAiTranscription()} className="mt-2 rounded bg-blue-600 px-2 py-1 font-semibold disabled:opacity-50">Request transcription and agree for my audio</button>}
+        </> : <>
+          <p className="font-semibold">{aiStatus.state === 'active' ? (aiStatus.capturing ? 'AI transcription active' : 'AI transcription permitted; capture is starting or paused') : `AI transcription waiting: ${aiStatus.pending} pending, ${aiStatus.declined} declined`}</p>
+          {aiStatus.ownDecision === true && <button type="button" disabled={aiBusy} onClick={() => void respondAiTranscription(false)} className="mt-2 underline">Withdraw my permission</button>}
+          {aiStatus.ownDecision === false && <button type="button" disabled={aiBusy} onClick={() => void respondAiTranscription(true)} className="mt-2 underline">Change my choice to agree</button>}
+          {isHost && <button type="button" disabled={aiBusy} onClick={() => void stopAiTranscription()} className="ml-3 mt-2 underline">Stop transcription</button>}
+        </>}
+        {aiCaptureFault && <p role="alert" className="mt-1 text-amber-200">Capture stopped after a permission check failed. Stop and request transcription again.</p>}
+        {transcript.error && <p role="alert" className="mt-1 text-amber-200">{transcript.error}</p>}
       </div>
 
 
@@ -928,6 +1008,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
                 }}
                 onMuteParticipant={(participantId) => void muteParticipant(participantId)}
                 onMuteAll={() => void muteAllParticipants()}
+                onPromoteCohost={isOwner ? (participantId) => void promoteCohost(participantId) : undefined}
                 mutingParticipantIds={mutingParticipantIds}
                 isMutingAll={isMutingAll}
               />
@@ -946,6 +1027,15 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
                 </div>
 
                 <div className="space-y-4 overflow-y-auto pr-1">
+                  <section className="rounded-2xl border border-blue-100 bg-white/80 p-4" aria-label="AI transcript">
+                    <h3 className="font-bold text-sm text-slate-900">AI transcript</h3>
+                    <p className="mt-1 text-xs text-slate-600">Automatic text may contain errors. Mixed audio does not identify individual speakers.</p>
+                    <div className="mt-3 max-h-52 space-y-2 overflow-y-auto" aria-live="polite">
+                      {call.transcriptSegments.length ? call.transcriptSegments.map(segment =>
+                        <p key={segment.id} className="break-words text-sm text-slate-800"><span className="text-xs text-slate-500">{segment.timestamp}</span> {segment.text}</p>
+                      ) : <p className="text-sm text-slate-500">No transcript text yet.</p>}
+                    </div>
+                  </section>
                   {/* Collaborative Whiteboard launcher */}
                   <div
                     onClick={() => {

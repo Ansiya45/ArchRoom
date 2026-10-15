@@ -1,5 +1,6 @@
-import { recordingVideoBitrate } from '@/lib/recordingEncoding';
+import { preferredRecordingMimeType, recordingVideoBitrate, repairWebmBlob, RECORDING_AUDIO_BITRATE, RECORDING_FRAME_RATE } from '@/lib/recordingEncoding';
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { fixWebmDuration } from '@fix-webm-duration/fix';
 
 export type RecordingPreview = {
   blob: Blob;
@@ -9,11 +10,6 @@ export type RecordingPreview = {
   durationSeconds: number;
   occurrenceId?: string;
 };
-
-function preferredMimeType() {
-  const choices = ['video/webm;codecs=vp9,opus', 'video/webm;codecs=vp8,opus', 'video/webm'];
-  return choices.find((type) => MediaRecorder.isTypeSupported(type)) || '';
-}
 
 export function useScreenRecorder() {
   const [isRecording, setIsRecording] = useState(false);
@@ -87,7 +83,7 @@ export function useScreenRecorder() {
     startingRef.current = true;
     const generation = generationRef.current;
     try {
-      const display = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: true });
+      const display = await navigator.mediaDevices.getDisplayMedia({ video: { frameRate: { ideal: RECORDING_FRAME_RATE, max: 20 } }, audio: true });
       if (generation !== generationRef.current) {
         display.getTracks().forEach(track => track.stop());
         return;
@@ -124,11 +120,12 @@ export function useScreenRecorder() {
 
       streamsRef.current = [display, ...(microphone ? [microphone] : []), combined];
       chunksRef.current = [];
-      const mimeType = preferredMimeType();
+      const mimeType = preferredRecordingMimeType(type => MediaRecorder.isTypeSupported(type));
       const videoBitsPerSecond = recordingVideoBitrate(mimeType, combined.getVideoTracks()[0].getSettings());
       const recorder = new MediaRecorder(combined, {
         ...(mimeType ? { mimeType } : {}),
         ...(videoBitsPerSecond ? { videoBitsPerSecond } : {}),
+        ...(combined.getAudioTracks().length ? { audioBitsPerSecond: RECORDING_AUDIO_BITRATE } : {}),
       });
       recorderRef.current = recorder;
       startedAtRef.current = performance.now();
@@ -140,12 +137,18 @@ export function useScreenRecorder() {
       recorder.ondataavailable = (event) => {
         if (event.data.size) chunksRef.current.push(event.data);
       };
-      recorder.onstop = () => {
+      recorder.onstop = async () => {
         freezeTimer();
         const durationSeconds = Math.max(1, Math.round(elapsedRef.current / 1000));
-        const blob = new Blob(chunksRef.current, { type: (recorder.mimeType || 'video/webm').split(';')[0] });
+        const originalBlob = new Blob(chunksRef.current, { type: (recorder.mimeType || 'video/webm').split(';')[0] });
+        // Fix Chromium WebM duration metadata only for the fallback format.
+        const blob = originalBlob.type === 'video/webm'
+          ? await repairWebmBlob(originalBlob, elapsedRef.current,
+              (value, duration) => fixWebmDuration(value, duration, { logger: false }))
+          : originalBlob;
         const stamp = new Date().toISOString().replace(/[:.]/g, '-');
-        const finished = { occurrenceId, blob, url: URL.createObjectURL(blob), fileName: `meeting-recording-${stamp}.webm`, mimeType: blob.type, durationSeconds };
+        const extension = blob.type === 'video/mp4' ? 'mp4' : 'webm';
+        const finished = { occurrenceId, blob, url: URL.createObjectURL(blob), fileName: `meeting-recording-${stamp}.${extension}`, mimeType: blob.type, durationSeconds };
         previewRef.current = finished;
         setPreview(finished);
         stopWaiters.current.splice(0).forEach(resolve => resolve(finished));

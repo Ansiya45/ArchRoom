@@ -32,6 +32,13 @@ export const test = base.extend<{ authMock: AuthMock }>({
         const results = paths.map((path, index) => {
           auth.calls.push(path);
           const value = url.searchParams.get('batch') === '1' ? input?.[index] : input;
+          // auth.me and public room metadata can be emitted in one tRPC batch.
+          // Keep the public item allowed while the meeting fixture owns the
+          // standalone room requests used for state-specific tests.
+          if (path === 'meetings.getByCode') return ok({ ok: true, meeting: {
+            id, meetingCode: 'YLM-W8Z3SE', title: 'Private shared meeting', hostUserId: 'another-user',
+            status: 'live', scheduleType: null, recurrenceCancelledAt: null,
+          } });
           if (path === 'auth.login' && request.method() === 'POST') {
             if (value?.email?.trim().toLowerCase() !== auth.user.email) return error('Email ID is not registered.', 'NOT_FOUND', 404, path);
             if (value?.password !== auth.password) return error('Wrong password. Please try again.', 'UNAUTHORIZED', 401, path);

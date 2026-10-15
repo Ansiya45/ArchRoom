@@ -29,6 +29,7 @@ interface ParticipantsPanelProps {
   onRemoveParticipant?: (id: string) => void;
   onMuteParticipant?: (id: string) => void;
   onMuteAll?: () => void;
+  onPromoteCohost?: (id: string) => void;
   mutingParticipantIds?: Set<string>;
   isMutingAll?: boolean;
 }
@@ -43,6 +44,7 @@ export const ParticipantsPanel: React.FC<ParticipantsPanelProps> = ({
   onRemoveParticipant,
   onMuteParticipant,
   onMuteAll,
+  onPromoteCohost,
   mutingParticipantIds = new Set(),
   isMutingAll = false,
 }) => {
@@ -183,6 +185,13 @@ export const ParticipantsPanel: React.FC<ParticipantsPanelProps> = ({
                     title="Remove participant"
                   >
                     <UserMinus className="w-4 h-4" />
+                  </button>
+                )}
+                {isHost && !isSelf && p.role !== 'host' && onPromoteCohost && (
+                  <button type="button" onClick={() => onPromoteCohost(p.id)}
+                    className="rounded-lg p-1.5 text-blue-600 hover:bg-blue-50"
+                    title="Make co-host" aria-label={`Make ${p.name} a co-host`}>
+                    <ShieldCheck className="h-4 w-4" />
                   </button>
                 )}
               </div>

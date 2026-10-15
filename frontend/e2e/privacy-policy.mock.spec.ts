@@ -10,7 +10,8 @@ test('public policy renders all sections and contact without authentication, inc
   await expect(page.getByRole('heading', { level: 2 })).toHaveCount(19);
   for (const title of titles) await expect(page.getByRole('heading', { level: 2 }).filter({ hasText: title })).toHaveCount(1);
   await expect(page.getByRole('link', { name: 'noreply@archonsolution.in', exact: true })).toHaveAttribute('href', 'mailto:noreply@archonsolution.in');
-  await expect(page.locator('main')).toContainText('AI speech capture and transcription are currently unavailable.');
+  await expect(page.locator('main')).toContainText('AI transcription is off when you enter a meeting.');
+  await expect(page.locator('main')).toContainText('Each current participant is asked to agree or decline');
   await expect(page.locator('main')).not.toContainText('[Company review');
   await expect(page.locator('main')).toContainText('Effective date: 14 October 2026');
   await page.reload();

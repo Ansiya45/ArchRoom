@@ -17,7 +17,7 @@ function getWhiteboardUrl() {
   return `${protocol}//${window.location.host}/api/whiteboard`;
 }
 
-export function useSharedWhiteboard(meetingCode: string, enabled: boolean, sessionIdentity?: MeetingSession | null) {
+export function useSharedWhiteboard(meetingCode: string, enabled: boolean, sessionIdentity?: MeetingSession | null, hostRole = false) {
   const socketRef = useRef<WebSocket | null>(null);
   const [connected, setConnected] = useState(false);
   const [shared, setShared] = useState(false);
@@ -84,7 +84,7 @@ export function useSharedWhiteboard(meetingCode: string, enabled: boolean, sessi
       setCanEdit(false);
       setParticipants([]);
     };
-  }, [enabled, meetingCode]);
+  }, [enabled, meetingCode, hostRole]);
 
   const send = useCallback((message: object) => {
     if (socketRef.current?.readyState === WebSocket.OPEN) {

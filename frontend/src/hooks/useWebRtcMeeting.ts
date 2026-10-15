@@ -46,6 +46,7 @@ export function useWebRtcMeeting(
   const [localStream, setLocalStream] = useState<MediaStream | null>(null);
   const [displayStream, setDisplayStream] = useState<MediaStream | null>(null);
   const [remoteStreams, setRemoteStreams] = useState<Record<string, MediaStream>>({});
+  const [isConnected, setIsConnected] = useState(false);
   const [remoteBackgrounds, setRemoteBackgrounds] = useState<Record<string, BackgroundChoice>>({});
   const [remoteScreenShares, setRemoteScreenShares] = useState<Record<string, boolean>>({});
   const [remoteRaisedHands, setRemoteRaisedHands] = useState<Record<string, boolean>>({});
@@ -270,6 +271,9 @@ export function useWebRtcMeeting(
       RoomEvent.ParticipantAttributesChanged,
     ];
     mediaEvents.forEach((event) => room.on(event, refresh));
+    room.on(RoomEvent.Reconnecting, () => setIsConnected(false));
+    room.on(RoomEvent.Reconnected, () => setIsConnected(true));
+    room.on(RoomEvent.Disconnected, () => setIsConnected(false));
 
     room.on(RoomEvent.DataReceived, (payload, participant, _kind, topic) => {
       if (!participant) return;
@@ -318,6 +322,7 @@ export function useWebRtcMeeting(
         if (cancelled) return;
         await room.connect(credentials.url, credentials.token);
         if (cancelled) return;
+        setIsConnected(true);
         await room.localParticipant.setAttributes({ background, handRaised: String(handRaised) });
         const [microphoneResult, cameraResult] = await Promise.allSettled([
           room.localParticipant.setMicrophoneEnabled(micOn, microphoneDeviceId !== 'default' ? { deviceId: microphoneDeviceId } : undefined),
@@ -348,6 +353,7 @@ export function useWebRtcMeeting(
       streamsRef.current.clear();
       displayStreamRef.current = null;
       setLocalStream(null);
+      setIsConnected(false);
       setDisplayStream(null);
       setRemoteStreams({});
       setRemoteBackgrounds({});
@@ -426,6 +432,7 @@ export function useWebRtcMeeting(
   };
 
   return {
+    isConnected,
     localStream,
     remoteStreams,
     remoteBackgrounds,

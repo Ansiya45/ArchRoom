@@ -1,4 +1,5 @@
 import { MeetingSummaryService } from '../services/meeting-summary.service.js';
+import { MeetingAiPermissionService } from '../services/meeting-ai-permission.service.js';
 import { z } from 'zod';
 import { t } from '../trpc/init.js';
 import { MeetingService } from '../services/meeting.service.js';
@@ -58,16 +59,18 @@ export const meetingsRouter = t.router({
       return meetingService.getByCode(input.meetingCode);
     }),
 
-  join: protectedProcedure
+  join: t.procedure
     .input(
       z.object({
         meetingCode: z.string().min(1), occurrenceId: z.string().uuid().optional(),
         joinRequestId: z.string().uuid(),
+        guestName: z.string().trim().min(1).max(120).optional(),
       })
     )
     .mutation(async ({ input, ctx }) => {
       return meetingService.joinMeeting(input.meetingCode, {
-        userId: ctx.user!.id,
+        userId: ctx.user?.id,
+        guestName: input.guestName,
         joinRequestId: input.joinRequestId,
         occurrenceId: input.occurrenceId,
       });
@@ -142,20 +145,20 @@ export const meetingsRouter = t.router({
       });
     }),
 
-  rejoin: protectedProcedure
+  rejoin: t.procedure
     .input(z.object({ meetingCode: z.string().min(1), occurrenceId: z.string().uuid().optional(), participantId: z.string().uuid() }))
     .mutation(({ input, ctx }) => {
-      return meetingService.rejoinMeeting(input.meetingCode, input.participantId, ctx.user!.id, input.occurrenceId);
+      return meetingService.rejoinMeeting(input.meetingCode, input.participantId, ctx.user?.id, input.occurrenceId);
     }),
 
   end: protectedProcedure
     .input(z.object({ meetingCode: z.string().min(1), occurrenceId: z.string().uuid().optional() }))
     .mutation(({ input, ctx }) => meetingService.endMeeting(input.meetingCode, ctx.user.id, input.occurrenceId)),
 
-  livekitToken: protectedProcedure
+  livekitToken: t.procedure
     .input(z.object({ meetingCode: z.string().min(1), occurrenceId: z.string().uuid().optional(), participantId: z.string().uuid().optional() }))
     .mutation(({ input, ctx }) => meetingService.createLiveKitToken(input.meetingCode, {
-      userId: ctx.user!.id,
+      userId: ctx.user?.id,
       participantId: input.participantId,
         occurrenceId: input.occurrenceId,
     })),
@@ -165,6 +168,10 @@ export const meetingsRouter = t.router({
     .mutation(async ({ input, ctx }) => {
       return meetingService.removeParticipant(input.meetingCode, input.participantId, ctx.user!.id, input.occurrenceId);
     }),
+
+  promoteCohost: protectedProcedure
+    .input(z.object({ meetingCode: z.string().min(1), occurrenceId: z.string().uuid().optional(), participantId: z.string().uuid() }))
+    .mutation(({ input, ctx }) => meetingService.promoteCohost(input.meetingCode, input.participantId, ctx.user!.id, input.occurrenceId)),
 
   muteParticipant: protectedProcedure
     .input(z.object({ meetingCode: z.string().min(1), occurrenceId: z.string().uuid().optional(), participantId: z.string().uuid() }))
@@ -177,13 +184,28 @@ export const meetingsRouter = t.router({
   summaryRecipients: protectedProcedure
     .input(z.object({ meetingCode: z.string().min(1), occurrenceId: z.string().uuid().optional() }))
     .query(({ input, ctx }) => new MeetingSummaryService().recipients(input, ctx.user!.id)),
+  aiStatus: t.procedure
+    .input(z.object({ meetingCode: z.string().min(1), occurrenceId: z.string().uuid().optional(), participantId: z.string().uuid().optional() }))
+    .query(({ input, ctx }) => new MeetingAiPermissionService().status(input, { userId: ctx.user?.id, participantId: input.participantId })),
+  requestAiTranscription: protectedProcedure
+    .input(z.object({ meetingCode: z.string().min(1), occurrenceId: z.string().uuid().optional() }))
+    .mutation(({ input, ctx }) => new MeetingAiPermissionService().request(input, ctx.user!.id)),
+  respondAiTranscription: t.procedure
+    .input(z.object({ meetingCode: z.string().min(1), occurrenceId: z.string().uuid().optional(), participantId: z.string().uuid().optional(), requestId: z.string().uuid(), agree: z.boolean() }))
+    .mutation(({ input, ctx }) => new MeetingAiPermissionService().respond(input, { userId: ctx.user?.id, participantId: input.participantId })),
+  stopAiTranscription: protectedProcedure
+    .input(z.object({ meetingCode: z.string().min(1), occurrenceId: z.string().uuid().optional(), requestId: z.string().uuid() }))
+    .mutation(({ input, ctx }) => new MeetingAiPermissionService().stop(input, ctx.user!.id)),
+  aiCaptureHeartbeat: protectedProcedure
+    .input(z.object({ meetingCode: z.string().min(1), occurrenceId: z.string().uuid().optional(), requestId: z.string().uuid() }))
+    .mutation(({ input, ctx }) => new MeetingAiPermissionService().heartbeat(input, ctx.user!.id)),
   transcribeSpeech: protectedProcedure
-    .input(z.object({ meetingCode: z.string().min(1), occurrenceId: z.string().uuid().optional(), audio: z.string().min(1).max(2800000).regex(/^[A-Za-z0-9+/]+={0,2}$/), mimeType: z.enum(['audio/webm', 'audio/webm;codecs=opus', 'audio/mp4']) }))
+    .input(z.object({ meetingCode: z.string().min(1), occurrenceId: z.string().uuid().optional(), requestId: z.string().uuid(), audio: z.string().min(1).max(2800000).regex(/^[A-Za-z0-9+/]+={0,2}$/), mimeType: z.enum(['audio/webm', 'audio/webm;codecs=opus', 'audio/mp4']) }))
     .mutation(({ input, ctx }) => new MeetingSummaryService().transcribe(input, ctx.user!.id)),
   generateSummary: protectedProcedure
     .input(z.object({ meetingCode: z.string().min(1), occurrenceId: z.string().uuid().optional(), speech: z.string().max(200000) }))
     .mutation(({ input, ctx }) => new MeetingSummaryService().generate(input, ctx.user!.id)),
   shareTranscript: protectedProcedure
-    .input(z.object({ meetingCode: z.string().min(1), occurrenceId: z.string().uuid().optional(), summary: z.string().min(1).max(12000), recipientIds: z.array(z.string().uuid()).min(1).max(100) }))
+    .input(z.object({ meetingCode: z.string().min(1), occurrenceId: z.string().uuid().optional(), summary: z.string().min(1).max(12000), transcript: z.string().max(200000).default(''), recipientIds: z.array(z.string().uuid()).min(1).max(100) }))
     .mutation(({ input, ctx }) => new MeetingSummaryService().send(input, ctx.user!.id)),
 });

@@ -2,8 +2,9 @@ import { TRPCError } from '@trpc/server';
 import { and, desc, eq } from 'drizzle-orm';
 import { createClient } from '@supabase/supabase-js';
 import { db } from '../db/index.js';
-import { meetings, recordings, meetingOccurrences } from '../db/schema.js';
+import { meetings, recordings, meetingOccurrences, meetingParticipants } from '../db/schema.js';
 import { env } from '../env.js';
+import { canManageMeetingSession } from './meeting-host-access.js';
 
 export type CreateRecordingInput = {
   meetingCode: string;
@@ -41,11 +42,11 @@ export class RecordingService {
         const result = existing.data
           ? await supabase.storage.updateBucket(env.SUPABASE_STORAGE_BUCKET, {
               public: false,
-              allowedMimeTypes: ['video/webm'],
+              allowedMimeTypes: ['video/webm', 'video/mp4'],
             })
           : await supabase.storage.createBucket(env.SUPABASE_STORAGE_BUCKET, {
               public: false,
-              allowedMimeTypes: ['video/webm'],
+              allowedMimeTypes: ['video/webm', 'video/mp4'],
             });
         if (result.error) throw result.error;
       })().catch((error) => {
@@ -59,31 +60,31 @@ export class RecordingService {
     await this.bucketReady;
   }
 
-  private async requireHostByCode(meetingCode: string, userId: string) {
+  private async requireHostByCode(meetingCode: string, userId: string, occurrenceId?: string) {
     const meeting = await db.query.meetings.findFirst({
       where: eq(meetings.meetingCode, meetingCode.trim().toUpperCase()),
     });
     if (!meeting) throw new TRPCError({ code: 'NOT_FOUND', message: 'Meeting not found' });
-    if (meeting.hostUserId !== userId) {
+    if (!await canManageMeetingSession(meeting, userId, occurrenceId, false)) {
       throw new TRPCError({ code: 'FORBIDDEN', message: 'Only the meeting host can access recordings' });
     }
     return meeting;
   }
 
   private async requireOwnedRecording(recordingId: string, userId: string) {
-    const [row] = await db.select({ recording: recordings, hostUserId: meetings.hostUserId })
+    const [row] = await db.select({ recording: recordings, meeting: meetings })
       .from(recordings)
       .innerJoin(meetings, eq(recordings.meetingId, meetings.id))
       .where(eq(recordings.id, recordingId));
     if (!row) throw new TRPCError({ code: 'NOT_FOUND', message: 'Recording not found' });
-    if (row.hostUserId !== userId) {
+    if (!await canManageMeetingSession(row.meeting, userId, row.recording.occurrenceId, false)) {
       throw new TRPCError({ code: 'FORBIDDEN', message: 'Only the meeting host can access recordings' });
     }
     return row.recording;
   }
 
   async authorizeExport(input: { meetingCode: string; occurrenceId?: string }, userId: string) {
-    const meeting = await this.requireHostByCode(input.meetingCode, userId);
+    const meeting = await this.requireHostByCode(input.meetingCode, userId, input.occurrenceId);
     if ((meeting.scheduleType === 'reusable' || meeting.scheduleType === 'recurring')) {
       const occurrence = input.occurrenceId && await db.query.meetingOccurrences.findFirst({
         where: and(eq(meetingOccurrences.id, input.occurrenceId), eq(meetingOccurrences.meetingId, meeting.id)),
@@ -145,12 +146,20 @@ export class RecordingService {
   }
 
   async getForMeeting(meetingCode: string, userId: string) {
-    const meeting = await this.requireHostByCode(meetingCode, userId);
+    const meeting = await db.query.meetings.findFirst({ where: eq(meetings.meetingCode, meetingCode.trim().toUpperCase()) });
+    if (!meeting) throw new TRPCError({ code: 'NOT_FOUND', message: 'Meeting not found' });
+    const cohostSessions = meeting.hostUserId === userId ? null : await db.select({ occurrenceId: meetingParticipants.occurrenceId })
+      .from(meetingParticipants).where(and(eq(meetingParticipants.meetingId, meeting.id),
+        eq(meetingParticipants.userId, userId), eq(meetingParticipants.role, 'host'),
+        eq(meetingParticipants.admission, 'admitted')));
+    if (cohostSessions && !cohostSessions.length) throw new TRPCError({ code: 'FORBIDDEN', message: 'Only a meeting host can access recordings.' });
     const found = await db.query.recordings.findMany({
       where: and(eq(recordings.meetingId, meeting.id), eq(recordings.status, 'completed')),
       orderBy: [desc(recordings.createdAt)],
     });
-    return { ok: true, recordings: found };
+    return { ok: true, recordings: cohostSessions
+      ? found.filter(recording => cohostSessions.some(session => session.occurrenceId === recording.occurrenceId))
+      : found };
   }
 
   async getDownloadUrl(recordingId: string, userId: string) {

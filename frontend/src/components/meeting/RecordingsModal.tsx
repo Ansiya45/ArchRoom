@@ -1,4 +1,5 @@
 import { DriveRecordingUpload } from './DriveRecordingUpload';
+import { RecordingPlayer } from './RecordingPlayer';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { CloudUpload, Download, Film, Loader2, X } from 'lucide-react';
 import { trpc } from '@/lib/trpc';
@@ -129,7 +130,7 @@ export const RecordingsModal: React.FC<RecordingsModalProps> = ({
             <section className="mb-6 rounded-2xl border border-blue-200 bg-blue-50/60 p-4">
               <h3 className="mb-3 text-sm font-bold text-slate-900">Recording preview</h3>
               <p className="mb-3 text-xs text-slate-600">Choose where to save. Nothing uploads automatically. You can use more than one option; keep this page open until finished.</p>
-              <video src={preview.url} controls className="aspect-video w-full rounded-xl bg-black" />
+              <RecordingPlayer src={preview.url} durationSeconds={preview.durationSeconds} />
               <div className="mt-4 flex flex-wrap gap-2">
                 <button onClick={() => downloadLocal(preview)} className="flex items-center gap-2 rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">
                   <Download className="h-4 w-4" /> Download to computer

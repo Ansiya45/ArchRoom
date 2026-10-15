@@ -2,6 +2,7 @@ import React from 'react';
 import { createRoot } from 'react-dom/client';
 import { useScreenRecorder } from '../../src/hooks/useScreenRecorder';
 import { TopBar } from '../../src/components/meeting/TopBar';
+import { RecordingPlayer } from '../../src/components/meeting/RecordingPlayer';
 
 // Exercise the real browser MediaRecorder without a screen-picker dialog.
 const canvas = document.createElement('canvas');
@@ -33,7 +34,10 @@ function Harness() {
     <output data-testid="elapsed">{Math.floor(recorder.recordingMs)}</output>
     {recorder.preview && <output data-testid="preview"
       data-duration={recorder.preview.durationSeconds}
-      data-size={recorder.preview.blob.size}>Ready</output>}
+      data-size={recorder.preview.blob.size}
+      data-mime={recorder.preview.mimeType}
+      data-file-name={recorder.preview.fileName}>Ready</output>}
+    {recorder.preview && <RecordingPlayer src={recorder.preview.url} durationSeconds={recorder.preview.durationSeconds} />}
   </>;
 }
 createRoot(document.getElementById('root')!).render(<Harness />);

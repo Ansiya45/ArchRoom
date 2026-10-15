@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { CloudUpload, Loader2 } from 'lucide-react';
 import type { RecordingPreview } from '@/hooks/useScreenRecorder';
 import { trpc } from '@/lib/trpc';
+import { isDriveReadyMp4 } from '@/lib/recordingEncoding';
 import { checkDriveFolder, connectDrive, driveFolderId, loadDrive, newDriveUpload, pickDriveFolder, resolveDriveFolder, uploadRecordingToDrive,
   type DriveConnection, type DriveUpload } from '@/lib/googleDriveRecording';
 const config = { clientId: import.meta.env.VITE_GOOGLE_DRIVE_CLIENT_ID || '', apiKey: import.meta.env.VITE_GOOGLE_DRIVE_API_KEY || '', appId: import.meta.env.VITE_GOOGLE_DRIVE_APP_ID || '' };
@@ -38,6 +39,9 @@ export function DriveRecordingUpload({ preview, meetingCode, disabled, onBusyCha
     }
   });
   const upload = () => run(async () => {
+    if (!isDriveReadyMp4(preview.mimeType)) {
+      throw new Error('This recording is WebM because this browser could not create H.264/AAC MP4. Use a current Chrome or Edge version and make a new recording before uploading to Drive.');
+    }
     driveFolderId(folderLink);
     let active = connection;
     if (!active || Date.now() >= active.expiresAt) {
@@ -52,11 +56,11 @@ export function DriveRecordingUpload({ preview, meetingCode, disabled, onBusyCha
       setMessage('Select the folder from your link to allow this upload.');
       return pickDriveFolder(config, active!);
     });
-    setFolderName(folder.name); setMessage('Uploading recording to Google Drive...');
+    setFolderName(folder.name); setMessage('Uploading MP4 recording to Google Drive...');
     attempt.current ??= await newDriveUpload(active);
     setProgress(0);
     const result = await uploadRecordingToDrive(active, folder.id, preview, attempt.current, setProgress);
-    setUrl(result); setMessage('Recording uploaded to Google Drive. Your local preview is still available.');
+    setUrl(result); setMessage('MP4 uploaded. Google Drive may briefly process it before online playback is ready. Your local preview remains available.');
   });
   return <>
     <button type="button" disabled={disabled || busy} onClick={() => setExpanded(value => !value)} aria-expanded={expanded}
@@ -78,7 +82,7 @@ export function DriveRecordingUpload({ preview, meetingCode, disabled, onBusyCha
                 onChange={event => { setFolderLink(event.target.value); setFolderName(''); }} className="w-full rounded-lg border px-3 py-2" />
             </label>
           </div>
-          <p className="text-xs text-slate-500">Paste your folder link and click upload. Google may ask you to sign in and select that folder to grant access the first time. Uploading continues automatically afterward. Your Google account must have permission to add files to the folder.</p>
+          <p className="text-xs text-slate-500">Drive receives a genuine MP4 recording when this browser supports H.264/AAC recording. Google may ask you to sign in and select the folder the first time, and may briefly process the uploaded MP4 before playback is ready.</p>
           {folderName && <p>Folder: <strong>{folderName}</strong></p>}
           <button disabled={!ready || busy || disabled || !folderLink.trim()} onClick={() => void upload()} className="rounded-lg bg-emerald-700 px-4 py-2 font-semibold text-white disabled:opacity-50">
             {busy ? 'Working...' : attempt.current ? 'Retry / resume upload' : 'Upload to Google Drive'}

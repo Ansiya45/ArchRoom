@@ -14,7 +14,7 @@ const scope = { meetingCode: 'YLM-ABC234', occurrenceId: occurrence };
 const dialect = new PgDialect();
 async function fixture(run: (f: any) => Promise<void>) {
   const originals = { meeting: db.query.meetings.findFirst, occurrence: db.query.meetingOccurrences.findFirst,
-    participant: db.query.meetingParticipants.findFirst, select: db.selectDistinct, fetch: globalThis.fetch,
+    participant: db.query.meetingParticipants.findFirst, aiRequest: db.query.meetingAiRequests.findFirst, select: db.selectDistinct, fetch: globalThis.fetch,
     ai: env.OPENAI_API_KEY, resend: env.RESEND_API_KEY };
   const meeting = { id: randomUUID(), meetingCode: scope.meetingCode, title: 'Planning', hostUserId: host, scheduleType: 'recurring', status: 'live', activeOccurrenceId: occurrence };
   const session = { id: occurrence, meetingId: meeting.id, status: 'ended', cancelledAt: null };
@@ -22,20 +22,21 @@ async function fixture(run: (f: any) => Promise<void>) {
   const conditions: any[] = [], requests: any[] = [];
   db.query.meetings.findFirst = (async () => meeting) as any;
   db.query.meetingOccurrences.findFirst = (async ({ where }: any) => { conditions.push(where); return session; }) as any;
-  db.query.meetingParticipants.findFirst = (async () => ({ id: randomUUID() })) as any;
+  db.query.meetingParticipants.findFirst = (async ({ where }: any) => dialect.sqlToQuery(where).params.includes(outsider) ? null : ({ id: randomUUID() })) as any;
+  db.query.meetingAiRequests.findFirst = (async () => null) as any;
   db.selectDistinct = (() => ({ from: () => ({ innerJoin: () => ({ where: async (where: any) => { conditions.push(where); return recipients; } }) }) })) as any;
   env.OPENAI_API_KEY = 'test-only'; env.RESEND_API_KEY = 'test-only';
   globalThis.fetch = async (url, options) => { requests.push({ url, ...options }); return Response.json({ status: 'completed', output: [{ type: 'message', content: [{ type: 'output_text', text: 'The team agreed to test on Friday.' }] }] }); };
   try { await run({ service: new MeetingSummaryService(), meeting, session, recipients, conditions, requests }); }
   finally {
     db.query.meetings.findFirst = originals.meeting; db.query.meetingOccurrences.findFirst = originals.occurrence;
-    db.query.meetingParticipants.findFirst = originals.participant; db.selectDistinct = originals.select;
+    db.query.meetingParticipants.findFirst = originals.participant; db.query.meetingAiRequests.findFirst = originals.aiRequest; db.selectDistinct = originals.select;
     globalThis.fetch = originals.fetch; env.OPENAI_API_KEY = originals.ai; env.RESEND_API_KEY = originals.resend;
   }
 }
 test('only the host can generate, list recipients, transcribe, or email a summary', async () => fixture(async ({ service, requests }) => {
   for (const action of [() => service.generate({ ...scope, speech: 'Meeting' }, outsider), () => service.recipients(scope, outsider),
-    () => service.transcribe({ ...scope, audio: 'YQ==', mimeType: 'audio/webm' }, outsider),
+    () => service.transcribe({ ...scope, requestId: randomUUID(), audio: 'YQ==', mimeType: 'audio/webm' }, outsider),
     () => service.send({ ...scope, summary: 'Summary', recipientIds: [guest] }, outsider)]) await assert.rejects(action, { code: 'FORBIDDEN' });
   assert.equal(requests.length, 0);
 }));
@@ -71,9 +72,8 @@ test('empty speech never invents a summary or calls OpenAI; incomplete responses
   globalThis.fetch = async () => Response.json({ status: 'incomplete', output: [] });
   await assert.rejects(() => service.generate({ ...scope, speech: 'Speech' }, host), { code: 'BAD_GATEWAY' });
 }));
-test('Stage 1 rejects all transcription before database or provider access, including configured hosts', async () => fixture(async ({ service, requests }) => {
-  db.query.meetings.findFirst = (async () => { throw new Error('Transcription must not query the database'); }) as any;
-  const input = { ...scope, audio: 'YQ==', mimeType: 'audio/webm' as const };
+test('direct transcription without an active unanimous request is rejected before provider access', async () => fixture(async ({ service, requests }) => {
+  const input = { ...scope, requestId: randomUUID(), audio: 'YQ==', mimeType: 'audio/webm' as const };
   for (const key of ['', 'test-configured-key']) {
     env.OPENAI_API_KEY = key;
     for (const id of [host, guest, outsider]) {
@@ -86,15 +86,15 @@ test('Stage 1 rejects all transcription before database or provider access, incl
   await assert.rejects(() => anonymous.transcribeSpeech(input), { code: 'UNAUTHORIZED' });
   assert.equal(requests.length, 0);
 }));
-test('send validates every selected recipient before delivery and emails only the selected summary', async () => fixture(async ({ service, requests }) => {
+test('send validates recipients and emails the reviewed summary and transcript', async () => fixture(async ({ service, requests }) => {
   await assert.rejects(() => service.send({ ...scope, summary: 'Summary', recipientIds: [guest, outsider] }, host), { code: 'BAD_REQUEST' });
   assert.equal(requests.length, 0);
-  const input = { ...scope, summary: 'The team agreed to test on Friday.', recipientIds: [guest, guest] };
+  const input = { ...scope, summary: 'The team agreed to test on Friday.', transcript: 'We will test on Friday.', recipientIds: [guest, guest] };
   assert.deepEqual(await service.send(input, host), { sentIds: [guest], failedIds: [] });
   await service.send(input, host);
   assert.equal(requests[0].headers['Idempotency-Key'], requests[1].headers['Idempotency-Key']);
   const email = JSON.parse(requests[0].body);
-  assert.deepEqual(email.to, ['guest@example.invalid']); assert.equal(email.text, input.summary);
+  assert.deepEqual(email.to, ['guest@example.invalid']); assert.match(email.text, /The team agreed/); assert.match(email.text, /We will test on Friday/);
   assert.equal(email.html, undefined); assert.equal(email.transcript, undefined);
 }));
 test('partial delivery reports successes separately so the UI retries only failed recipients', async () => fixture(async ({ service }) => {

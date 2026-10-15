@@ -143,6 +143,23 @@ export const meetingParticipants = pgTable(
   ]
 );
 
+export const meetingAiRequests = pgTable('meeting_ai_requests', {
+  meetingId: uuid('meeting_id').primaryKey().references(() => meetings.id, { onDelete: 'cascade' }),
+  occurrenceId: uuid('occurrence_id').references(() => meetingOccurrences.id),
+  requestId: uuid('request_id').notNull(),
+  requestedByUserId: uuid('requested_by_user_id').notNull().references(() => users.id),
+  requestedAt: timestamp('requested_at', { withTimezone: true }).notNull().defaultNow(),
+  lastHeartbeatAt: timestamp('last_heartbeat_at', { withTimezone: true }),
+  stoppedAt: timestamp('stopped_at', { withTimezone: true }),
+});
+
+export const meetingAiConsents = pgTable('meeting_ai_consents', {
+  requestId: uuid('request_id').notNull(),
+  participantId: uuid('participant_id').notNull().references(() => meetingParticipants.id, { onDelete: 'cascade' }),
+  agreed: boolean('agreed').notNull(),
+  decidedAt: timestamp('decided_at', { withTimezone: true }).notNull().defaultNow(),
+}, table => [primaryKey({ columns: [table.requestId, table.participantId] })]);
+
 export const recordings = pgTable(
   'recordings',
   {

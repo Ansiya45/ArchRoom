@@ -1,20 +1,28 @@
-import { useEffect, useRef, useState } from 'react';
+﻿import { useEffect, useRef, useState } from 'react';
 import { trpc } from '@/lib/trpc';
 import { createSummaryCapture } from '@/lib/meetingSummaryCapture';
 
-// Stage 1: fail closed until participant permission enforcement is implemented.
-const AI_CAPTURE_ENABLED = false;
-
 export function useMeetingSummaryCapture(active: boolean, meetingCode: string, occurrenceId: string | undefined,
-  local: MediaStream | null, micOn: boolean, remote: Record<string, MediaStream>, muted: Record<string, boolean>) {
+  requestId: string | undefined, allowedParticipantIds: string[], local: MediaStream | null, micOn: boolean,
+  remote: Record<string, MediaStream>, muted: Record<string, boolean>, onSegment?: (text: string) => void) {
   const [error, setError] = useState('');
+  const [capturing, setCapturing] = useState(false);
   const warning = useRef('');
+  const segmentHandler = useRef(onSegment);
+  segmentHandler.current = onSegment;
+  const captureActive = useRef(active);
+  captureActive.current = active;
   const runtime = useRef<ReturnType<typeof createSummaryCapture> | null>(null);
-  const inputs = useRef({ local, micOn, remote, muted });
-  inputs.current = { local, micOn, remote, muted };
+  const completed = useRef<string[]>([]);
+  const pendingFinishes = useRef(new Set<Promise<void>>());
+  const allowed = new Set(allowedParticipantIds);
+  const safeRemote = Object.fromEntries(Object.entries(remote).filter(([id]) => allowed.has(id)));
+  const inputs = useRef({ local, micOn, remote: safeRemote, muted });
+  inputs.current = { local, micOn, remote: safeRemote, muted };
+
   useEffect(() => {
-    if (!AI_CAPTURE_ENABLED || !active) return;
-    warning.current = ''; setError('');
+    if (!active || !requestId) return;
+    setError('');
     const warn = (message: string) => { warning.current = message; setError(message); };
     try {
       const capture = createSummaryCapture(async (blob, mimeType) => {
@@ -22,17 +30,40 @@ export function useMeetingSummaryCapture(active: boolean, meetingCode: string, o
           const reader = new FileReader(); reader.onerror = reject;
           reader.onload = () => resolve(String(reader.result).split(',')[1]); reader.readAsDataURL(blob);
         });
-        const result = await trpc.meetings.transcribeSpeech.mutate({ meetingCode, occurrenceId, mimeType, audio }, { signal: AbortSignal.timeout(75000) });
+        const result = await trpc.meetings.transcribeSpeech.mutate({ meetingCode, occurrenceId, requestId, mimeType, audio }, { signal: AbortSignal.timeout(75000) });
         return result.text;
-      }, warn);
+      }, warn, setCapturing, text => { if (captureActive.current) segmentHandler.current?.(text); });
       runtime.current = capture;
       capture.update(inputs.current);
-      // Existing streams can acquire tracks without changing object identity.
       const timer = setInterval(() => capture.update(inputs.current), 1000);
-      return () => { clearInterval(timer); capture.dispose(); if (runtime.current === capture) runtime.current = null; };
+      return () => {
+        clearInterval(timer);
+        if (runtime.current !== capture) return;
+        runtime.current = null;
+        const finishing = capture.finish().then(text => { if (text) completed.current.push(text); })
+          .finally(() => { capture.dispose(); pendingFinishes.current.delete(finishing); });
+        pendingFinishes.current.add(finishing);
+      };
     } catch (cause) { warn(cause instanceof Error ? cause.message : 'Speech capture could not start.'); }
-  }, [active, meetingCode, occurrenceId]);
-  useEffect(() => { runtime.current?.update(inputs.current); }, [active, local, micOn, remote, muted]);
-  return { error, getWarning: () => warning.current, finish: () => runtime.current?.finish() ?? Promise.resolve(''),
-    resume: () => runtime.current?.resume().catch(() => setError('Audio processing could not resume.')) };
+  }, [active, meetingCode, occurrenceId, requestId]);
+
+  useEffect(() => { runtime.current?.update(inputs.current); }, [active, local, micOn, remote, muted, allowedParticipantIds.join(',')]);
+
+  return {
+    error,
+    capturing,
+    getWarning: () => warning.current,
+    finish: async () => {
+      const capture = runtime.current;
+      if (capture) {
+        runtime.current = null;
+        const text = await capture.finish();
+        if (text) completed.current.push(text);
+        capture.dispose();
+      }
+      await Promise.all([...pendingFinishes.current]);
+      return completed.current.filter(Boolean).join('\n');
+    },
+    resume: () => runtime.current?.resume().catch(() => setError('Audio processing could not resume.')),
+  };
 }

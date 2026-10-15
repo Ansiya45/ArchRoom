@@ -34,7 +34,7 @@ export function TranscriptModal({ meetingCode, occurrenceId, speech, warning, on
     if (locked.current) return;
     locked.current = true; setBusy(true); setError(''); setNotice('');
     try {
-      const result = await trpc.meetings.shareTranscript.mutate({ meetingCode, occurrenceId, summary: warning ? `Capture warning: ${warning}\n\n${summary}` : summary, recipientIds: selected.filter(id => !sent.includes(id)) });
+      const result = await trpc.meetings.shareTranscript.mutate({ meetingCode, occurrenceId, summary: warning ? `Capture warning: ${warning}\n\n${summary}` : summary, transcript: speech, recipientIds: selected.filter(id => !sent.includes(id)) });
       setSent(current => [...new Set([...current, ...result.sentIds])]);
       setSelected(result.failedIds);
       setNotice(`${result.sentIds.length} email(s) accepted for delivery.`);
@@ -43,7 +43,7 @@ export function TranscriptModal({ meetingCode, occurrenceId, speech, warning, on
     finally { locked.current = false; setBusy(false); }
   };
   const download = () => {
-    const text = `English meeting summary\n\n${warning ? `Capture warning: ${warning}\n\n` : ''}${summary}`;
+    const text = `English meeting summary\n\n${warning ? `Capture warning: ${warning}\n\n` : ''}${summary}\n\nTranscript (automatically generated; review for errors)\n\n${speech || 'No transcript was captured.'}`;
     const url = URL.createObjectURL(new Blob([text], { type: 'text/plain;charset=utf-8' }));
     const link = document.createElement('a'); link.href = url; link.download = `meeting-${meetingCode}-summary.txt`; link.click();
     setTimeout(() => URL.revokeObjectURL(url), 1000);
@@ -55,6 +55,10 @@ export function TranscriptModal({ meetingCode, occurrenceId, speech, warning, on
       {warning && <p role="alert" className="text-amber-300 text-sm">{warning}</p>}
       {busy && <p role="status">{summary ? 'Processing...' : 'Translating and summarizing the discussion...'}</p>}
       {summary && <div className="whitespace-pre-wrap text-sm leading-relaxed bg-black/20 rounded-xl p-4">{summary}</div>}
+      <details className="rounded-xl bg-black/20 p-4 text-sm"><summary className="cursor-pointer font-semibold">Meeting transcript</summary>
+        <p className="mt-2 text-zinc-400">Automatically generated from mixed meeting audio. Speaker names are not identified; review for errors before sharing.</p>
+        <div className="mt-3 max-h-64 overflow-y-auto whitespace-pre-wrap">{speech || 'No transcript was captured.'}</div>
+      </details>
       {error && <p role="alert" className="text-red-300 text-sm">{error}</p>}
       {notice && <p role="status" className="text-green-300 text-sm">{notice}</p>}
       {!busy && (!summary || !attendees.length) && <button className="underline" onClick={() => void generate()}>Retry summary / attendee loading</button>}

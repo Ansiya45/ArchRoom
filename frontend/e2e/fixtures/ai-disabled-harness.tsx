@@ -5,7 +5,8 @@ import { useMeetingSummaryCapture } from '../../src/hooks/useMeetingSummaryCaptu
 function Harness() {
   const [active, setActive] = useState(false);
   const [finished, setFinished] = useState(false);
-  const capture = useMeetingSummaryCapture(active, 'YLM-ABC234', undefined, null, true, {}, {});
+  // Entering as host alone does not authorize AI capture.
+  const capture = useMeetingSummaryCapture(false, 'YLM-ABC234', undefined, undefined, [], null, true, {}, {});
   return <><button onClick={() => setActive(true)}>Enter as host</button>
     <button onClick={() => setActive(false)}>Enter as participant</button>
     <button onClick={() => void capture.resume()}>Exercise legacy resume</button>

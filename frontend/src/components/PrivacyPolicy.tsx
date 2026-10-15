@@ -28,8 +28,8 @@ const sections: Array<[string, string[]]> = [
   [
     "Meeting participation",
     [
-      "We process meeting and attendance information to schedule meetings, manage host admission, connect participants, and maintain meeting records.",
-      "Your display name, participation, and shared content may be visible to the host and other participants. Hosts manage admission and meeting controls. Supported summary distribution allows hosts to access registered attendee names and email addresses. An invitation does not itself grant admission."
+      "Creating and managing a meeting requires a registered account. A person with a shared meeting link may request to join as a guest without creating an account by providing a display name. We process meeting and attendance information to schedule meetings, manage host admission, connect participants, and maintain meeting records.",
+      "Your display name, participation, and shared content may be visible to hosts and other participants. The meeting creator can give an admitted participant co-host controls for the current meeting session; the creator remains a host. Hosts manage admission and meeting controls. Supported summary distribution allows hosts to access registered attendee names and email addresses. An invitation does not itself grant admission."
     ]
   ],
   [
@@ -45,7 +45,7 @@ const sections: Array<[string, string[]]> = [
     [
       "Hosts can initiate screen recordings through browser capture controls. Depending on the selected source and permissions, a recording can include screen content, shared audio, and microphone audio.",
       "A recording preview is initially held in the host's browser. The host can download it, upload it to private Supabase Storage, or export it to Google Drive. For Supabase uploads, we store metadata including the meeting association, filename, format, size, duration, storage location, and upload status.",
-      "Saved-recording access through the application is restricted to the host. Temporary download links permit access to their holders while valid. Authorized administrators and storage providers may also have access needed to operate the service.",
+      "Saved-recording access through the application is restricted to the meeting creator and authorized co-hosts for their meeting session. Temporary download links permit access to their holders while valid. Authorized administrators and storage providers may also have access needed to operate the service.",
       "The current application does not provide a shared recording indicator or explicit recording-permission controls for every participant. The host's browser capture permission is not permission from other participants. Discuss recording arrangements with the host before sharing information you do not want recorded.",
       "Discarding a browser preview does not delete copies already uploaded or downloaded. Exported copies follow the access settings of their destinations."
     ]
@@ -53,9 +53,8 @@ const sections: Array<[string, string[]]> = [
   [
     "AI transcription and meeting summaries",
     [
-      "AI speech capture and transcription are currently unavailable. Joining a meeting does not start AI speech capture, and the application does not offer a control to enable it.",
-      "Existing text-summary functionality can use OpenAI to generate an English summary from supplied text. Supported summary tools allow hosts to review, download, and email a summary to selected registered attendees; they do not capture new meeting speech while transcription is disabled.",
-      "If audio transcription is enabled in a future release, it may send audio through YLAAM Meet to OpenAI and use captured text for summaries. This policy will be updated to describe that processing and the controls available at that time. Participant AI permission controls are not currently implemented.",
+      "AI transcription is off when you enter a meeting. A host may request it during a meeting. Each current participant is asked to agree or decline, and speech capture starts only after everyone present has agreed. A participant who joins later must also agree before capture can continue. Declining or withdrawing permission pauses capture for everyone until all current participants agree again. A host can stop transcription.",
+      "When enabled, the requesting host's browser combines meeting audio and sends short audio clips through YLAAM Meet to OpenAI for transcription. Transcript text is displayed to participants during the meeting and may be used to generate an English summary through OpenAI. Mixed audio does not identify individual speakers, and a host can review, download, or email the transcript and summary to selected registered attendees after leaving the call.",
       "AI-generated text can be inaccurate or incomplete and should be reviewed before use or sharing. We do not promise that AI providers retain no data."
     ]
   ],
@@ -77,7 +76,7 @@ const sections: Array<[string, string[]]> = [
   [
     "Third-party services and integrations",
     [
-      "YLAAM Meet uses Supabase for its configured database and file storage, LiveKit for meeting communication, Resend for email delivery, and Render for frontend hosting. Google supports optional Drive authorization and recording exports. OpenAI supports text summaries. The application includes a speech transcription integration, but AI speech capture and transcription are currently unavailable.",
+      "YLAAM Meet uses Supabase for its configured database and file storage, LiveKit for meeting communication, Resend for email delivery, and Render for frontend hosting. Google supports optional Drive authorization and recording exports. When participants enable AI transcription, OpenAI processes speech clips for transcription and transcript text for summaries.",
       "The interface requests generated avatars from DiceBear, images from Unsplash, and software/model assets from jsDelivr. DiceBear avatar requests may include participant names or identifiers. These services receive connection information when your browser contacts them.",
       "If you choose calendar export or a calendar link, meeting details are supplied to the selected calendar destination. External services process information under their applicable terms and privacy policies."
     ]
@@ -112,7 +111,7 @@ const sections: Array<[string, string[]]> = [
   [
     "Data retention and deletion",
     [
-      "The application does not implement a general automatic deletion schedule for accounts, meeting records, invitations, saved recordings, or attachments. Ending a meeting does not automatically delete these records or files.",
+      "The application does not implement a general automatic deletion schedule for accounts, meeting records, invitations, saved recordings, or attachments. Ending a meeting does not automatically delete these records or files. AI permission decisions for a meeting session are stored with meeting records.",
       "Code expiry is different from deletion of a verification or reset-code record. Browser-held content, uploaded files, provider records, and exported copies can have different lifecycles. The current application does not provide a database transcript or summary archive; this does not guarantee absence of provider-held or recipient-held copies.",
       "Self-service account deletion is not currently available. Removing a meeting from the dashboard display does not delete its underlying records.",
       "You may request deletion by emailing noreply@archonsolution.in. Requests are reviewed according to applicable requirements, identity verification where appropriate, the affected information, other participants' interests, and technical limitations.",
@@ -124,7 +123,7 @@ const sections: Array<[string, string[]]> = [
     [
       "You can control browser media permissions, stop sharing media, sign out, manage available reminder preferences, and manage files in your own Google Drive.",
       "Depending on applicable law, you may have rights concerning access, correction, deletion, restriction, objection, or portability of your personal information.",
-      "Send privacy requests to noreply@archonsolution.in. Include your account email and a description of the request. We may need to verify your identity. Do not send passwords, verification codes, or access tokens."
+      "Send privacy requests to noreply@archonsolution.in. Include your account email if you have one, or your guest display name and relevant meeting details, together with a description of the request. We may need to verify your identity. Do not send passwords, verification codes, or access tokens."
     ]
   ],
   [

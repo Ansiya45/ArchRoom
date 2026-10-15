@@ -1,6 +1,6 @@
 import { test, expect } from '@playwright/test';
 
-test('AI hook never creates capture resources or uploads audio, even with the old host activation signal', async ({ page }) => {
+test('entering as host without a unanimous request never captures or uploads audio', async ({ page }) => {
   const audioRequests: string[] = [];
   page.on('request', request => { if (request.url().includes('transcribeSpeech')) audioRequests.push(request.url()); });
   await page.addInitScript(() => {

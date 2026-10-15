@@ -2,7 +2,8 @@ export type AudioInput = { local: MediaStream | null; micOn: boolean; remote: Re
 export type AudioMime = 'audio/webm;codecs=opus' | 'audio/webm' | 'audio/mp4';
 
 // Owns only the mixed recording stream. Never changes/stops the meeting's tracks.
-export function createSummaryCapture(transcribe: (blob: Blob, mime: AudioMime) => Promise<string>, warn: (message: string) => void) {
+export function createSummaryCapture(transcribe: (blob: Blob, mime: AudioMime) => Promise<string>, warn: (message: string) => void,
+  onActivity?: (active: boolean) => void, onTranscript?: (text: string) => void) {
   if (!globalThis.AudioContext || !globalThis.MediaRecorder) throw new Error('This browser cannot capture meeting speech. Use a current Chrome, Edge, or Safari browser.');
   const mime = (['audio/webm;codecs=opus', 'audio/webm', 'audio/mp4'] as AudioMime[]).find(type => MediaRecorder.isTypeSupported(type));
   if (!mime) throw new Error('This browser has no supported audio recording format.');
@@ -43,6 +44,7 @@ export function createSummaryCapture(transcribe: (blob: Blob, mime: AudioMime) =
             if (disposed) return;
             if (totalChars + text.length > 195000) { warn('The summary input limit was reached; some speech is missing.'); return; }
             speech[index] = text; totalChars += text.length;
+            if (text.trim()) onTranscript?.(text);
           }).catch(cause => {
             if (!disposed) warn(`${cause instanceof Error ? cause.message : 'Speech processing failed.'} The summary may be incomplete.`);
           }).finally(() => pending.delete(task));
@@ -54,7 +56,7 @@ export function createSummaryCapture(transcribe: (blob: Blob, mime: AudioMime) =
         try { record(); } catch { stopped = true; warn('Speech recording stopped unexpectedly. The summary may be incomplete.'); }
       }
     };
-    try { recorder.start(); } catch (cause) { clearInterval(meter); resolveClip(); recorder = null; throw cause; }
+    try { recorder.start(); onActivity?.(true); } catch (cause) { clearInterval(meter); resolveClip(); recorder = null; throw cause; }
     timer = setTimeout(() => { if (recorder?.state === 'recording') recorder.stop(); }, 25000);
   };
   const ready = context.resume().then(() => {
@@ -76,6 +78,7 @@ export function createSummaryCapture(transcribe: (blob: Blob, mime: AudioMime) =
     },
     async finish() {
       stopped = true; clearTimeout(timer);
+      onActivity?.(false);
       // Do not wait on resume(): browsers may leave it pending until another user gesture.
       if (context.state !== 'running') warn('Audio processing was paused. The summary may be incomplete.');
       if (recorder?.state === 'recording') recorder.stop();
@@ -85,6 +88,7 @@ export function createSummaryCapture(transcribe: (blob: Blob, mime: AudioMime) =
     async resume() { await context.resume(); await ready; if (stopped && !disposed) { stopped = false; record(); } },
     dispose() {
       disposed = true; stopped = true; clearTimeout(timer); clearInterval(meter);
+      onActivity?.(false);
       if (recorder?.state === 'recording') recorder.stop();
       sources.forEach(source => source.disconnect());
       destination.stream.getTracks().forEach(track => track.stop());

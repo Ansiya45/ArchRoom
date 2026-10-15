@@ -16,6 +16,7 @@
     "test:e2e:signup": "playwright test --config playwright.signup.config.ts"
   },
   "dependencies": {
+    "@fix-webm-duration/fix": "^1.0.1",
     "@google/genai": "^2.4.0",
     "@supabase/supabase-js": "^2.110.8",
     "@tailwindcss/postcss": "^4.3.3",

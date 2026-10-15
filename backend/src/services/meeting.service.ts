@@ -1,10 +1,11 @@
 import { TRPCError } from '@trpc/server';
 import { and, eq, inArray, isNull, isNotNull, ne, or } from 'drizzle-orm';
 import { db } from '../db/index.js';
-import { meetings, meetingParticipants, users } from '../db/schema.js';
+import { meetings, meetingAiRequests, meetingParticipants, users } from '../db/schema.js';
 import { AccessToken, RoomServiceClient, TrackSource } from 'livekit-server-sdk';
 import { env } from '../env.js';
 import { MeetingOccurrenceService, assertCurrentOccurrence, participantScope, mediaRoomName } from './meeting-occurrence.service.js';
+import { canManageMeetingSession } from './meeting-host-access.js';
 import { resolveMeetingSchedule, type MeetingSchedule } from './meeting-schedule.service.js';
 
 import { validateRecurrence, type RecurrenceRule } from './recurrence.service.js';
@@ -20,7 +21,8 @@ export type CreateMeetingInput = {
 };
 
 export type JoinMeetingIdentity = {
-  userId: string;
+  userId?: string;
+  guestName?: string;
   joinRequestId: string;
   occurrenceId?: string;
 };
@@ -141,7 +143,7 @@ export class MeetingService {
     if (!meeting) {
       throw new TRPCError({ code: 'NOT_FOUND', message: 'Meeting not found' });
     }
-    if ((meeting.scheduleType === 'reusable' || meeting.scheduleType === 'recurring')) return new MeetingOccurrenceService().join(meeting.id, identity.userId, identity.joinRequestId, identity.occurrenceId);
+    if ((meeting.scheduleType === 'reusable' || meeting.scheduleType === 'recurring')) return new MeetingOccurrenceService().join(meeting.id, identity.userId, identity.joinRequestId, identity.occurrenceId, undefined, identity.guestName);
     if (meeting.status === 'ended') {
       throw new TRPCError({ code: 'FORBIDDEN', message: 'This meeting has ended' });
     }
@@ -197,7 +199,24 @@ export class MeetingService {
       return { ok: true, meeting, participant: concurrent };
     }
 
-    throw new TRPCError({ code: 'UNAUTHORIZED', message: 'Sign in or create an account before joining a meeting' });
+    if (!identity.guestName?.trim()) throw new TRPCError({ code: 'BAD_REQUEST', message: 'Enter your name before joining.' });
+    const existingGuest = await db.query.meetingParticipants.findFirst({ where: and(
+      eq(meetingParticipants.meetingId, meeting.id), participantScope(meeting),
+      eq(meetingParticipants.joinRequestId, identity.joinRequestId), isNull(meetingParticipants.userId),
+    ) });
+    if (existingGuest) return { ok: true, meeting, participant: existingGuest };
+    const [guest] = await db.insert(meetingParticipants).values({
+      meetingId: meeting.id, userId: null, guestName: identity.guestName.trim(),
+      joinRequestId: identity.joinRequestId, role: 'participant', admission: 'pending',
+      joinedAt: new Date(), leftAt: null,
+    }).onConflictDoNothing().returning();
+    if (guest) return { ok: true, meeting, participant: guest };
+    const concurrentGuest = await db.query.meetingParticipants.findFirst({ where: and(
+      eq(meetingParticipants.meetingId, meeting.id), participantScope(meeting),
+      eq(meetingParticipants.joinRequestId, identity.joinRequestId), isNull(meetingParticipants.userId),
+    ) });
+    if (!concurrentGuest) throw new TRPCError({ code: 'CONFLICT', message: 'Unable to resolve the guest join request.' });
+    return { ok: true, meeting, participant: concurrentGuest };
   }
 
   async getAdmissionStatus(meetingCode: string, participantId: string) {
@@ -406,6 +425,10 @@ export class MeetingService {
     if (!participant) return { ok: true, meetingEnded: false };
 
     await db.update(meetingParticipants).set({ leftAt: new Date() }).where(eq(meetingParticipants.id, participant.id));
+    if (participant.userId) await db.update(meetingAiRequests).set({ stoppedAt: new Date(), lastHeartbeatAt: null }).where(and(
+      eq(meetingAiRequests.meetingId, meeting.id), eq(meetingAiRequests.requestedByUserId, participant.userId),
+      isNull(meetingAiRequests.stoppedAt),
+    ));
     if (env.LIVEKIT_URL && env.LIVEKIT_API_KEY && env.LIVEKIT_API_SECRET) {
       const livekit = new RoomServiceClient(env.LIVEKIT_URL.replace(/^ws/, 'http'), env.LIVEKIT_API_KEY, env.LIVEKIT_API_SECRET);
       await livekit.removeParticipant(mediaRoomName(meeting), participant.id, {
@@ -417,7 +440,7 @@ export class MeetingService {
 
   async rejoinMeeting(meetingCode: string, participantId: string, userId?: string, occurrenceId?: string) {
     const meeting = await this.requireMeeting(meetingCode);
-    if ((meeting.scheduleType === 'reusable' || meeting.scheduleType === 'recurring')) return new MeetingOccurrenceService().join(meeting.id, userId!, crypto.randomUUID(), occurrenceId, participantId);
+    if ((meeting.scheduleType === 'reusable' || meeting.scheduleType === 'recurring')) return new MeetingOccurrenceService().join(meeting.id, userId, crypto.randomUUID(), occurrenceId, participantId);
     if (meeting.status === 'ended') {
       throw new TRPCError({ code: 'FORBIDDEN', message: 'This meeting has ended' });
     }
@@ -590,10 +613,28 @@ export class MeetingService {
 
   private async requireHost(meetingCode: string, userId: string) {
     const meeting = await this.requireMeeting(meetingCode);
-    if (meeting.hostUserId !== userId) {
+    if (!await canManageMeetingSession(meeting, userId, meeting.activeOccurrenceId)) {
       throw new TRPCError({ code: 'FORBIDDEN', message: 'Only the meeting host can manage join requests' });
     }
     return meeting;
+  }
+
+  async promoteCohost(meetingCode: string, participantId: string, ownerUserId: string, occurrenceId?: string) {
+    const meeting = await this.requireMeeting(meetingCode);
+    if (meeting.hostUserId !== ownerUserId) throw new TRPCError({ code: 'FORBIDDEN', message: 'Only the meeting creator can appoint another host.' });
+    if (meeting.status !== 'live') throw new TRPCError({ code: 'CONFLICT', message: 'Promote a participant after the meeting starts.' });
+    assertCurrentOccurrence(meeting, occurrenceId);
+    const [participant] = await db.update(meetingParticipants).set({ role: 'host' }).where(and(
+      eq(meetingParticipants.id, participantId), eq(meetingParticipants.meetingId, meeting.id), participantScope(meeting),
+      eq(meetingParticipants.role, 'participant'), eq(meetingParticipants.admission, 'admitted'),
+      isNotNull(meetingParticipants.userId), isNull(meetingParticipants.leftAt),
+    )).returning();
+    if (!participant) throw new TRPCError({ code: 'BAD_REQUEST', message: 'Choose an admitted, signed-in participant.' });
+    if (env.LIVEKIT_URL && env.LIVEKIT_API_KEY && env.LIVEKIT_API_SECRET) {
+      const livekit = new RoomServiceClient(env.LIVEKIT_URL.replace(/^ws/, 'http'), env.LIVEKIT_API_KEY, env.LIVEKIT_API_SECRET);
+      await livekit.updateParticipant(mediaRoomName(meeting), participant.id, { attributes: { role: 'host' } }).catch(() => undefined);
+    }
+    return { ok: true, participantId: participant.id };
   }
 
   private async generateUniqueMeetingCode() {

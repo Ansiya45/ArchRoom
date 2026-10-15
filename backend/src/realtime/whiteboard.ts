@@ -4,6 +4,7 @@ import { and, eq, isNull } from 'drizzle-orm';
 import { db } from '../db/index.js';
 import { meetingParticipants, meetings, users } from '../db/schema.js';
 import { assertCurrentOccurrence, participantScope } from '../services/meeting-occurrence.service.js';
+import { canManageMeetingSession } from '../services/meeting-host-access.js';
 import { verifyJwt } from '../utils/jwt.js';
 import { isSessionActive } from '../services/auth-session.service.js';
 
@@ -77,7 +78,7 @@ async function identify(input: any) {
         meetingCode: roomKey,
         key: `user:${identity.sub}`,
         name: user?.fullName || identity.name || 'Participant',
-        isHost: meeting.hostUserId === identity.sub,
+        isHost: await canManageMeetingSession(meeting, identity.sub, meeting.activeOccurrenceId),
       };
     } catch {
       return null;

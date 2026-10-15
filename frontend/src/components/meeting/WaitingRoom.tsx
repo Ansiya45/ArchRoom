@@ -38,7 +38,6 @@ interface WaitingRoomProps {
   checkingSession: boolean;
   sessionError: string;
   onRetrySession: () => void;
-  onOpenAuth: (mode: 'login' | 'signup') => void;
 }
 
 interface BackgroundPreset {
@@ -96,7 +95,6 @@ export const WaitingRoom: React.FC<WaitingRoomProps> = ({
   checkingSession,
   sessionError,
   onRetrySession,
-  onOpenAuth,
 }) => {
   const activeBg = deviceSettings.backgroundBlur || 'blur';
   const handleCameraUnavailable = useCallback(() => {
@@ -128,16 +126,13 @@ export const WaitingRoom: React.FC<WaitingRoomProps> = ({
           </div>
         </div>
 
-        <nav aria-label="Account" className="flex flex-wrap items-center justify-end gap-2 text-sm">
+        <div className="flex flex-wrap items-center justify-end gap-2 text-sm">
           {checkingSession ? <span role="status">Checking your session...</span> : accountEmail ? (
             <span className="max-w-48 truncate text-xs font-semibold text-slate-700" title={accountEmail}>Signed in as {accountEmail}</span>
           ) : (
-            <>
-              <button onClick={() => onOpenAuth('login')} className="rounded-xl px-3 py-2 font-semibold text-blue-600 hover:bg-blue-50">Log in</button>
-              <button onClick={() => onOpenAuth('signup')} className="rounded-xl bg-blue-600 px-3 py-2 font-semibold text-white hover:bg-blue-700">Sign up</button>
-            </>
+            <span className="text-xs font-semibold text-slate-600">Joining as guest</span>
           )}
-        </nav>
+        </div>
       </header>
 
       {/* Main Content Area - Scaled for Desktop Viewports */}
@@ -249,10 +244,10 @@ export const WaitingRoom: React.FC<WaitingRoomProps> = ({
               Ready to connect
             </span>
             <h2 className="text-lg sm:text-xl font-bold text-slate-900 leading-tight">
-              {accountEmail ? meetingTitle : 'Join Meeting'}
+              {meetingTitle || 'Join Meeting'}
             </h2>
             <p className="text-xs text-slate-500">
-              {accountEmail ? 'Confirm your display name before entering the call.' : 'Sign up or log in to YLAAM-MEET before joining this meeting.'}
+              Confirm your display name before requesting entry. No account is required.
             </p>
           </div>
 
@@ -264,8 +259,7 @@ export const WaitingRoom: React.FC<WaitingRoomProps> = ({
             </label>
             <input
               type="text"
-              disabled={!accountEmail}
-              value={accountEmail ? displayName : ''}
+              value={displayName}
               onChange={(e) => onDisplayNameChange(e.target.value)}
               placeholder="Enter your name"
               className="w-full py-2.5 px-3.5 rounded-2xl bg-white border border-blue-100 text-slate-800 font-medium text-xs sm:text-sm focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100 transition-all shadow-sm"
@@ -276,10 +270,10 @@ export const WaitingRoom: React.FC<WaitingRoomProps> = ({
           {/* Join Call Action */}
           <button
             onClick={onJoin}
-            disabled={checkingSession || !!sessionError || (!!accountEmail && !displayName.trim()) || isJoining}
+            disabled={checkingSession || !!sessionError || !displayName.trim() || isJoining}
             className="w-full py-3 rounded-2xl bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed text-white font-bold text-sm flex items-center justify-center space-x-2 shadow-lg shadow-blue-200 transition-all active:scale-95"
           >
-            <span>{checkingSession ? 'Checking session...' : isJoining ? 'Joining...' : accountEmail ? 'Join Meeting Now' : 'Join Meeting'}</span>
+            <span>{checkingSession ? 'Checking session...' : isJoining ? 'Joining...' : 'Join Meeting Now'}</span>
             <ArrowRight className="w-5 h-5" />
           </button>
         </div>

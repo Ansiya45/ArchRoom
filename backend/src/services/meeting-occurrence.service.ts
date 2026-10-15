@@ -94,15 +94,19 @@ export class MeetingOccurrenceService {
     });
   }
 
-  async join(meetingId: string, userId: string, joinRequestId: string, occurrenceId?: string, participantId?: string) {
-    if (!userId) throw new TRPCError({ code: 'UNAUTHORIZED' });
+  async join(meetingId: string, userId: string | undefined, joinRequestId: string, occurrenceId?: string, participantId?: string, guestName?: string) {
+    if (!userId && !guestName?.trim() && !participantId) throw new TRPCError({ code: 'BAD_REQUEST', message: 'Enter your name before joining.' });
     return db.transaction(async (tx) => {
       const [meeting] = await tx.select().from(meetings).where(eq(meetings.id, meetingId)).for('update');
       assertCurrentOccurrence(meeting, occurrenceId);
       const existing = await tx.query.meetingParticipants.findFirst({ where: and(
         eq(meetingParticipants.meetingId, meetingId), eq(meetingParticipants.occurrenceId, occurrenceId!),
-        eq(meetingParticipants.userId, userId),
+        participantId ? eq(meetingParticipants.id, participantId)
+          : userId ? eq(meetingParticipants.userId, userId) : eq(meetingParticipants.joinRequestId, joinRequestId),
       ), orderBy: (table, { desc }) => [desc(table.joinedAt)] });
+      if (existing && ((existing.userId && existing.userId !== userId) || (!existing.userId && Boolean(userId)))) {
+        throw new TRPCError({ code: 'FORBIDDEN' });
+      }
       if (participantId && (!existing || existing.id !== participantId || existing.admission !== 'admitted')) {
         throw new TRPCError({ code: 'FORBIDDEN', message: 'A new admission is required' });
       }
@@ -114,9 +118,9 @@ export class MeetingOccurrenceService {
         return { ok: true, meeting, participant: existing };
       }
       const [participant] = await tx.insert(meetingParticipants).values({
-        meetingId, occurrenceId, userId, joinRequestId,
-        role: meeting.hostUserId === userId ? 'host' : 'participant',
-        admission: meeting.hostUserId === userId ? 'admitted' : 'pending',
+        meetingId, occurrenceId, userId: userId ?? null, guestName: userId ? null : guestName!.trim(), joinRequestId,
+        role: userId && meeting.hostUserId === userId ? 'host' : 'participant',
+        admission: userId && meeting.hostUserId === userId ? 'admitted' : 'pending',
       }).returning();
       return { ok: true, meeting, participant };
     });
@@ -126,7 +130,15 @@ export class MeetingOccurrenceService {
     if (!occurrenceId) throw new TRPCError({ code: 'BAD_REQUEST', message: 'A room session is required.' });
     return db.transaction(async (tx) => {
       const [meeting] = await tx.select().from(meetings).where(eq(meetings.id, meetingId)).for('update');
-      if (!meeting || meeting.hostUserId !== hostUserId) throw new TRPCError({ code: 'FORBIDDEN' });
+      if (!meeting) throw new TRPCError({ code: 'FORBIDDEN' });
+      if (meeting.hostUserId !== hostUserId) {
+        const cohost = await tx.query.meetingParticipants.findFirst({ where: and(
+          eq(meetingParticipants.meetingId, meeting.id), eq(meetingParticipants.occurrenceId, occurrenceId),
+          eq(meetingParticipants.userId, hostUserId), eq(meetingParticipants.role, 'host'),
+          eq(meetingParticipants.admission, 'admitted'), isNull(meetingParticipants.leftAt),
+        ) });
+        if (!cohost) throw new TRPCError({ code: 'FORBIDDEN' });
+      }
       const occurrence = await tx.query.meetingOccurrences.findFirst({ where: and(eq(meetingOccurrences.id, occurrenceId), eq(meetingOccurrences.meetingId, meetingId)) });
       if (occurrence?.status === 'ended') return { ok: true }; // Late retry cannot end a newer session.
       assertCurrentOccurrence(meeting, occurrenceId);
