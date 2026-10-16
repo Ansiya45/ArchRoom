@@ -113,7 +113,7 @@ export const WaitingRoom: React.FC<WaitingRoomProps> = ({
   };
 
   return (
-    <div className="w-full h-screen max-h-screen overflow-hidden bg-gradient-to-br from-blue-50 via-white to-sky-100 text-slate-800 flex flex-col justify-between p-3 sm:p-5 md:p-6 relative font-sans select-none">
+    <div className="w-full h-screen max-h-screen overflow-hidden bg-[#080b1f] text-white flex flex-col justify-between p-3 sm:p-5 md:p-6 relative font-sans select-none">
       {/* Ambient background lighting */}
       <div className="absolute top-1/4 left-1/4 w-96 h-96 bg-blue-200/50 rounded-full blur-3xl pointer-events-none" />
       <div className="absolute bottom-1/4 right-1/4 w-96 h-96 bg-sky-200/50 rounded-full blur-3xl pointer-events-none" />
@@ -126,18 +126,18 @@ export const WaitingRoom: React.FC<WaitingRoomProps> = ({
           </div>
 
           <div>
-            <h1 className="text-lg sm:text-xl font-bold text-slate-900 tracking-tight">
+            <h1 className="text-lg sm:text-xl font-bold text-white tracking-tight">
               YLAAM-MEET
             </h1>
-            <p className="text-[11px] text-slate-500 font-mono">Meeting ID: {meetingCode}</p>
+            <p className="text-[11px] text-slate-300 font-mono">Meeting ID: {meetingCode}</p>
           </div>
         </div>
 
         <div className="flex flex-wrap items-center justify-end gap-2 text-sm">
           {checkingSession ? <span role="status">Checking your session...</span> : accountEmail ? (
-            <span className="max-w-48 truncate text-xs font-semibold text-slate-700" title={accountEmail}>Signed in as {accountEmail}</span>
+            <span className="max-w-48 truncate text-xs font-semibold text-slate-200" title={accountEmail}>Signed in as {accountEmail}</span>
           ) : (
-            <span className="text-xs font-semibold text-slate-600">Joining as guest</span>
+            <span className="text-xs font-semibold text-slate-300">Joining as guest</span>
           )}
         </div>
       </header>
@@ -192,8 +192,8 @@ export const WaitingRoom: React.FC<WaitingRoomProps> = ({
           </div>
 
           {/* Virtual Background Symbols Selector (Collection of 5 options) */}
-          <div className="p-3 rounded-2xl bg-white/80 border border-white text-xs shadow-sm backdrop-blur-xl flex items-center justify-between gap-2">
-            <div className="flex items-center space-x-2 text-slate-800 font-bold shrink-0">
+          <div className="p-3 rounded-2xl bg-[#12162f] border border-white/10 text-xs shadow-sm backdrop-blur-xl flex items-center justify-between gap-2">
+            <div className="flex items-center space-x-2 text-white font-bold shrink-0">
               <div className="p-1.5 rounded-xl bg-blue-100 text-blue-600">
                 <Palette className="w-4 h-4" />
               </div>
@@ -245,22 +245,22 @@ export const WaitingRoom: React.FC<WaitingRoomProps> = ({
         </div>
 
         {/* Right Column: Meeting Join Settings */}
-        <div className="lg:col-span-5 self-center w-full bg-white/80 border border-white p-4 sm:p-5 rounded-3xl backdrop-blur-2xl shadow-xl text-slate-800 flex flex-col gap-5">
+        <div className="lg:col-span-5 self-center w-full bg-[#12162f] border border-white/10 p-4 sm:p-5 rounded-3xl backdrop-blur-2xl shadow-xl text-white flex flex-col gap-5">
           <div className="space-y-1.5">
             <span className="text-[11px] font-bold text-blue-600 uppercase tracking-wider">
               Ready to connect
             </span>
-            <h2 className="text-lg sm:text-xl font-bold text-slate-900 leading-tight">
+            <h2 className="text-lg sm:text-xl font-bold text-white leading-tight">
               {meetingTitle || 'Join Meeting'}
             </h2>
-            <p className="text-xs text-slate-500">
+            <p className="text-xs text-slate-300">
               Confirm your display name before requesting entry. No account is required.
             </p>
           </div>
 
           {/* Name Input */}
           <div className="space-y-1.5">
-            <label className="text-xs font-bold text-slate-700 flex items-center space-x-1.5">
+            <label className="text-xs font-bold text-white flex items-center space-x-1.5">
               <User className="w-4 h-4 text-blue-600" />
               <span>Your Display Name</span>
             </label>
@@ -269,11 +269,11 @@ export const WaitingRoom: React.FC<WaitingRoomProps> = ({
               value={displayName}
               onChange={(e) => onDisplayNameChange(e.target.value)}
               placeholder="Enter your name"
-              className="w-full py-2.5 px-3.5 rounded-2xl bg-white border border-blue-100 text-slate-800 font-medium text-xs sm:text-sm focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100 transition-all shadow-sm"
+              className="w-full py-2.5 px-3.5 rounded-2xl bg-[#080b1f] border border-white/10 text-white font-medium text-xs sm:text-sm focus:outline-none focus:border-violet-500 focus:ring-2 focus:ring-violet-500/30 transition-all shadow-sm"
             />
           </div>
 
-          {isHost && <div className="rounded-xl border border-violet-200 bg-violet-50 p-3 text-xs text-slate-700">
+          {isHost && <div className="rounded-xl border border-violet-400/30 bg-[#1a1e3b] p-3 text-xs text-white">
             <label className="flex items-start gap-2 font-semibold"><input type="checkbox" checked={enableAiTranscription} onChange={event => onEnableAiTranscriptionChange(event.target.checked)} className="mt-0.5 accent-violet-600" />Enable AI transcription for this meeting</label>
             <p className="mt-2 leading-relaxed">Off by default. If enabled, meeting audio is processed by YLAAM Meet and OpenAI. Participants will see when transcription is active. Transcript text and summaries are saved to your Meeting History.</p>
           </div>}
