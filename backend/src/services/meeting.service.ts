@@ -100,15 +100,15 @@ export class MeetingService {
   }
 
   async listMeetings(userId: string) {
-    const rows = await db
-      .select()
-      .from(meetings)
-      .where(eq(meetings.hostUserId, userId));
-
-    const participants = await db
-      .select({ meetingId: meetingParticipants.meetingId })
-      .from(meetingParticipants)
-      .where(and(eq(meetingParticipants.userId, userId), isNull(meetingParticipants.leftAt)));
+    // These queries are independent. Run them together so dashboard latency is
+    // bounded by the slowest database query instead of their sum.
+    const [rows, participants, preferences] = await Promise.all([
+      db.select().from(meetings).where(eq(meetings.hostUserId, userId)),
+      db.select({ meetingId: meetingParticipants.meetingId })
+        .from(meetingParticipants)
+        .where(and(eq(meetingParticipants.userId, userId), isNull(meetingParticipants.leftAt))),
+      db.select().from(meetingPreferences).where(eq(meetingPreferences.userId, userId)),
+    ]);
 
     const participantMeetingIds = participants.map((row) => row.meetingId);
 
@@ -116,7 +116,6 @@ export class MeetingService {
       ? await db.select().from(meetings).where(inArray(meetings.id, participantMeetingIds))
       : [];
 
-    const preferences = await db.select().from(meetingPreferences).where(eq(meetingPreferences.userId, userId));
     const preferenceMap = new Map(preferences.map(preference => [preference.meetingId, preference]));
     const uniqueMeetings = new Map([...rows, ...joined].map((meeting) => [meeting.id, meeting]));
 
