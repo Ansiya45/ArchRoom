@@ -1,4 +1,5 @@
 import { MeetingSummaryService } from '../services/meeting-summary.service.js';
+import { MeetingHistoryService } from '../services/meeting-history.service.js';
 import { MeetingAiPermissionService } from '../services/meeting-ai-permission.service.js';
 import { z } from 'zod';
 import { t } from '../trpc/init.js';
@@ -17,6 +18,10 @@ const scheduleInput = z.object({
 });
 
 export const meetingsRouter = t.router({
+  history: protectedProcedure.input(z.object({ offset: z.number().int().min(0).max(100000).default(0) }))
+    .query(({ input, ctx }) => new MeetingHistoryService().list(ctx.user!.id, input.offset)),
+  historyDetail: protectedProcedure.input(z.object({ meetingId: z.string().uuid() }))
+    .query(({ input, ctx }) => new MeetingHistoryService().detail(input.meetingId, ctx.user!.id)),
   create: protectedProcedure
     .input(
       z.object({
@@ -52,6 +57,9 @@ export const meetingsRouter = t.router({
   list: protectedProcedure.query(async ({ ctx }) => {
     return meetingService.listMeetings(ctx.user!.id);
   }),
+  setPreference: protectedProcedure.input(z.object({ meetingId: z.string().uuid(), favorite: z.boolean().optional(), hidden: z.boolean().optional() })
+    .refine(value => value.favorite !== undefined || value.hidden !== undefined, 'Choose a preference to update.'))
+    .mutation(({ input, ctx }) => meetingService.setPreference(input.meetingId, ctx.user!.id, { favorite: input.favorite, hidden: input.hidden })),
 
   getByCode: t.procedure
     .input(z.object({ meetingCode: z.string().min(1), occurrenceId: z.string().uuid().optional() }))
@@ -200,12 +208,12 @@ export const meetingsRouter = t.router({
     .input(z.object({ meetingCode: z.string().min(1), occurrenceId: z.string().uuid().optional(), requestId: z.string().uuid() }))
     .mutation(({ input, ctx }) => new MeetingAiPermissionService().heartbeat(input, ctx.user!.id)),
   transcribeSpeech: protectedProcedure
-    .input(z.object({ meetingCode: z.string().min(1), occurrenceId: z.string().uuid().optional(), requestId: z.string().uuid(), audio: z.string().min(1).max(2800000).regex(/^[A-Za-z0-9+/]+={0,2}$/), mimeType: z.enum(['audio/webm', 'audio/webm;codecs=opus', 'audio/mp4']) }))
+    .input(z.object({ meetingCode: z.string().min(1), occurrenceId: z.string().uuid().optional(), requestId: z.string().uuid(), sequence: z.number().int().min(0).max(20000), audio: z.string().min(1).max(2800000).regex(/^[A-Za-z0-9+/]+={0,2}$/), mimeType: z.enum(['audio/webm', 'audio/webm;codecs=opus', 'audio/mp4']) }))
     .mutation(({ input, ctx }) => new MeetingSummaryService().transcribe(input, ctx.user!.id)),
   generateSummary: protectedProcedure
     .input(z.object({ meetingCode: z.string().min(1), occurrenceId: z.string().uuid().optional(), speech: z.string().max(200000) }))
     .mutation(({ input, ctx }) => new MeetingSummaryService().generate(input, ctx.user!.id)),
   shareTranscript: protectedProcedure
-    .input(z.object({ meetingCode: z.string().min(1), occurrenceId: z.string().uuid().optional(), summary: z.string().min(1).max(12000), transcript: z.string().max(200000).default(''), recipientIds: z.array(z.string().uuid()).min(1).max(100) }))
+    .input(z.object({ meetingCode: z.string().min(1), occurrenceId: z.string().uuid().optional(), summary: z.string().max(12000).optional(), transcript: z.string().max(200000).default(''), recipientIds: z.array(z.string().uuid()).min(1).max(100) }))
     .mutation(({ input, ctx }) => new MeetingSummaryService().send(input, ctx.user!.id)),
 });

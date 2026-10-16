@@ -93,6 +93,15 @@ export const meetings = pgTable(
   ]
 );
 
+// Per-user dashboard state. Hiding a card does not delete the meeting or its history.
+export const meetingPreferences = pgTable('meeting_preferences', {
+  userId: uuid('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  meetingId: uuid('meeting_id').notNull().references(() => meetings.id, { onDelete: 'cascade' }),
+  favorite: boolean('favorite').notNull().default(false),
+  hidden: boolean('hidden').notNull().default(false),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+}, table => [primaryKey({ columns: [table.userId, table.meetingId] }), index('meeting_preferences_user_idx').on(table.userId)]);
+
 export const meetingOccurrences = pgTable('meeting_occurrences', {
   id: uuid('id').primaryKey().defaultRandom(),
   meetingId: uuid('meeting_id').notNull().references((): AnyPgColumn => meetings.id, { onDelete: 'cascade' }),
@@ -152,6 +161,18 @@ export const meetingAiRequests = pgTable('meeting_ai_requests', {
   lastHeartbeatAt: timestamp('last_heartbeat_at', { withTimezone: true }),
   stoppedAt: timestamp('stopped_at', { withTimezone: true }),
 });
+
+// Text and external references only; never audio blobs or Google credentials.
+export const meetingHistoryItems = pgTable('meeting_history_items', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  meetingId: uuid('meeting_id').notNull().references(() => meetings.id, { onDelete: 'cascade' }),
+  occurrenceId: uuid('occurrence_id').references(() => meetingOccurrences.id, { onDelete: 'cascade' }),
+  kind: varchar('kind', { length: 20 }).$type<'transcript' | 'summary' | 'drive'>().notNull(),
+  dedupeKey: varchar('dedupe_key', { length: 200 }).notNull(),
+  content: text('content').notNull(),
+  label: varchar('label', { length: 255 }),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+}, table => [uniqueIndex('meeting_history_dedupe_uidx').on(table.meetingId, table.dedupeKey), index('meeting_history_meeting_idx').on(table.meetingId)]);
 
 export const meetingAiConsents = pgTable('meeting_ai_consents', {
   requestId: uuid('request_id').notNull(),

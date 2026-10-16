@@ -90,6 +90,8 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
   const [aiStatus, setAiStatus] = useState<AiStatus>({ state: 'off' });
   const [aiBusy, setAiBusy] = useState(false);
   const [aiCaptureFault, setAiCaptureFault] = useState(false);
+  const [enableAiOnJoin, setEnableAiOnJoin] = useState(false);
+  const aiStartedForSession = useRef('');
   const [joinRequests, setJoinRequests] = useState<Array<{ id: string; name: string }>>([]);
   const [isRecordingsOpen, setIsRecordingsOpen] = useState(false);
   const [summaryReview, setSummaryReview] = useState<{ speech: string; occurrenceId?: string; warning: string } | null>(null);
@@ -103,9 +105,8 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
   const loadingRequestsRef = useRef(false);
   const admissionActionsRef = useRef(new Set<string>());
   const recorder = useScreenRecorder();
-  const aiAgreedIds = aiStatus.state === 'off' ? [] : aiStatus.agreedParticipantIds;
-  const aiCaptureActive = meeting.inMeeting && isHost && call.isConnected && !aiCaptureFault && aiStatus.state === 'active' &&
-    aiStatus.requestedByUserId === user?.id && Object.keys(call.remoteStreams).every(id => aiAgreedIds.includes(id));
+  const aiAgreedIds = aiStatus.state === 'off' ? [] : Object.keys(call.remoteStreams);
+  const aiCaptureActive = meeting.inMeeting && isHost && call.isConnected && !aiCaptureFault && aiStatus.state === 'active' && aiStatus.requestedByUserId === user?.id;
   const transcript = useMeetingSummaryCapture(
     aiCaptureActive, meetingCode, sessionRef.current?.occurrenceId,
     aiStatus.state === 'off' ? undefined : aiStatus.requestId, aiAgreedIds,
@@ -114,7 +115,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
   );
 
   useEffect(() => {
-    if (!transcript.capturing || aiStatus.state !== 'active' || aiStatus.requestedByUserId !== user?.id) return;
+    if (aiStatus.state !== 'active' || aiStatus.requestedByUserId !== user?.id) return;
     let cancelled = false;
     const heartbeat = async () => {
       try {
@@ -126,7 +127,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
     void heartbeat();
     const timer = window.setInterval(() => void heartbeat(), 2000);
     return () => { cancelled = true; window.clearInterval(timer); };
-  }, [transcript.capturing, aiStatus.state, aiStatus.state === 'off' ? '' : aiStatus.requestId, user?.id, meetingCode]);
+  }, [aiStatus.state, aiStatus.state === 'off' ? '' : aiStatus.requestId, user?.id, meetingCode]);
 
   useEffect(() => {
     if (!meeting.inMeeting || !sessionRef.current?.participantId) { setAiStatus({ state: 'off' }); return; }
@@ -143,6 +144,23 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
     const timer = window.setInterval(() => void refresh(), 1000);
     return () => { cancelled = true; window.clearInterval(timer); };
   }, [meeting.inMeeting, meetingCode, user?.id]);
+
+  useEffect(() => {
+    if (!meeting.inMeeting || !isOwner || !user?.id || !enableAiOnJoin || !sessionRef.current?.participantId) return;
+    const key = `${meetingCode}:${sessionRef.current.occurrenceId || ''}:${sessionRef.current.participantId}`;
+    if (aiStartedForSession.current === key) return;
+    aiStartedForSession.current = key;
+    void (async () => {
+      setAiBusy(true); setAiCaptureFault(false);
+      try {
+        await trpc.meetings.requestAiTranscription.mutate({ meetingCode, occurrenceId: sessionRef.current?.occurrenceId });
+        setAiStatus(await trpc.meetings.aiStatus.query({ meetingCode, occurrenceId: sessionRef.current?.occurrenceId, participantId: sessionRef.current?.participantId }));
+      } catch (error) {
+        setEnableAiOnJoin(false); aiStartedForSession.current = ''; setAiStatus({ state: 'off' });
+        alert(error instanceof Error ? error.message : 'Could not enable AI transcription.');
+      } finally { setAiBusy(false); }
+    })();
+  }, [meeting.inMeeting, isOwner, user?.id, enableAiOnJoin, meetingCode]);
 
   useEffect(() => {
     let cancelled = false;
@@ -408,14 +426,20 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
     const occurrenceId = session?.occurrenceId;
     try {
       await recorder.stop();
+      const hadTranscription = aiStatus.state !== 'off';
       const speech = await transcript.finish();
+      if (hadTranscription && isOwner) {
+        await trpc.meetings.stopAiTranscription.mutate({ meetingCode, occurrenceId, requestId: aiStatus.requestId });
+        setAiStatus({ state: 'off' });
+      }
       if (end) {
         await trpc.meetings.end.mutate({ meetingCode, occurrenceId });
         forgetSession(meetingCode);
       } else {
         await trpc.meetings.leave.mutate({ meetingCode, occurrenceId, participantId: session?.participantId });
       }
-      setSummaryReview({ speech, occurrenceId, warning: transcript.getWarning() });
+      if (hadTranscription || speech.trim()) setSummaryReview({ speech, occurrenceId, warning: transcript.getWarning() });
+      else navigate('/');
       stopAllCameraStreams();
       meeting.leaveMeeting();
     } catch (error) {
@@ -492,28 +516,6 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
     } catch (error) {
       alert(error instanceof Error ? error.message : 'Unable to appoint co-host.');
     }
-  };
-
-  const requestAiTranscription = async () => {
-    if (!isHost || aiBusy) return;
-    setAiBusy(true);
-    try {
-      setAiCaptureFault(false);
-      await trpc.meetings.requestAiTranscription.mutate({ meetingCode, occurrenceId: sessionRef.current?.occurrenceId });
-      setAiStatus(await trpc.meetings.aiStatus.query({ meetingCode, occurrenceId: sessionRef.current?.occurrenceId, participantId: sessionRef.current?.participantId }));
-    } catch (error) { alert(error instanceof Error ? error.message : 'Unable to request transcription.'); }
-    finally { setAiBusy(false); }
-  };
-
-  const respondAiTranscription = async (agree: boolean) => {
-    if (aiStatus.state === 'off' || aiBusy) return;
-    const requestId = aiStatus.requestId;
-    setAiBusy(true);
-    try {
-      await trpc.meetings.respondAiTranscription.mutate({ meetingCode, occurrenceId: sessionRef.current?.occurrenceId, participantId: sessionRef.current?.participantId, requestId, agree });
-      setAiStatus(await trpc.meetings.aiStatus.query({ meetingCode, occurrenceId: sessionRef.current?.occurrenceId, participantId: sessionRef.current?.participantId }));
-    } catch (error) { alert(error instanceof Error ? error.message : 'Unable to update transcription permission.'); }
-    finally { setAiBusy(false); }
   };
 
   const stopAiTranscription = async () => {
@@ -744,6 +746,9 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
         deviceSettings={meeting.deviceSettings}
         setDeviceSettings={meeting.setDeviceSettings}
         isJoining={isJoining}
+        isHost={isOwner}
+        enableAiTranscription={enableAiOnJoin}
+        onEnableAiTranscriptionChange={setEnableAiOnJoin}
       />
       </>
     );
@@ -892,26 +897,11 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
       />
 
       {closingForSummary && <div role="status" className="fixed inset-0 z-[110] bg-black/80 text-white flex items-center justify-center">Finishing speech capture and closing the call...</div>}
-      {aiStatus.state !== 'off' && aiStatus.needsResponse && (
-        <div className="fixed inset-0 z-[115] flex items-center justify-center bg-slate-950/80 p-4">
-          <div role="dialog" aria-modal="true" aria-label="AI transcription permission" className="w-full max-w-md rounded-2xl bg-white p-6 text-slate-900 shadow-2xl">
-            <h2 className="text-xl font-bold">AI transcription requested</h2>
-            <p className="mt-3 text-sm leading-relaxed">A host wants to transcribe meeting audio using YLAAM Meet and OpenAI to prepare a transcript and summary. Capture will begin only if everyone in this meeting agrees. A host can review and email the transcript and summary to selected participants. You can withdraw permission at any time.</p>
-            <div className="mt-5 flex gap-3">
-              <button type="button" disabled={aiBusy} onClick={() => void respondAiTranscription(false)} className="rounded-lg border border-slate-300 px-4 py-2">Decline</button>
-              <button type="button" disabled={aiBusy} onClick={() => void respondAiTranscription(true)} className="rounded-lg bg-blue-600 px-4 py-2 text-white">I agree to AI transcription</button>
-            </div>
-          </div>
-        </div>
-      )}
       <div className="fixed bottom-24 left-4 z-30 max-w-sm rounded-lg bg-zinc-900/95 p-3 text-xs text-white shadow-lg" role="status">
         {aiStatus.state === 'off' ? <>
           <p>AI transcription is off.</p>
-          {isHost && <button type="button" disabled={aiBusy} onClick={() => void requestAiTranscription()} className="mt-2 rounded bg-blue-600 px-2 py-1 font-semibold disabled:opacity-50">Request transcription and agree for my audio</button>}
         </> : <>
-          <p className="font-semibold">{aiStatus.state === 'active' ? (aiStatus.capturing ? 'AI transcription active' : 'AI transcription permitted; capture is starting or paused') : `AI transcription waiting: ${aiStatus.pending} pending, ${aiStatus.declined} declined`}</p>
-          {aiStatus.ownDecision === true && <button type="button" disabled={aiBusy} onClick={() => void respondAiTranscription(false)} className="mt-2 underline">Withdraw my permission</button>}
-          {aiStatus.ownDecision === false && <button type="button" disabled={aiBusy} onClick={() => void respondAiTranscription(true)} className="mt-2 underline">Change my choice to agree</button>}
+          <p className="font-semibold">{aiStatus.capturing ? 'AI transcription active. Meeting audio is processed by YLAAM Meet and OpenAI; transcript text is saved in the host’s Meeting History.' : 'AI transcription is enabled. Meeting audio will be processed by YLAAM Meet and OpenAI; transcript text is saved in the host’s Meeting History.'}</p>
           {isHost && <button type="button" disabled={aiBusy} onClick={() => void stopAiTranscription()} className="ml-3 mt-2 underline">Stop transcription</button>}
         </>}
         {aiCaptureFault && <p role="alert" className="mt-1 text-amber-200">Capture stopped after a permission check failed. Stop and request transcription again.</p>}

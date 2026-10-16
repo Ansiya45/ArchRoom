@@ -18,7 +18,7 @@ async function openInstantMeeting(page: import('@playwright/test').Page) {
   await page.getByRole('complementary').getByRole('button', { name: 'Create Meeting', exact: true }).click();
   const dialog = page.getByRole('dialog', { name: 'Create or Schedule Meeting' });
   await expect(dialog).toBeVisible();
-  await expect(dialog.getByRole('button', { name: /Start Now/ })).toHaveAttribute('aria-pressed', 'true');
+  await expect(dialog.locator('button[aria-pressed]').filter({ hasText: 'Create Meeting' })).toHaveAttribute('aria-pressed', 'true');
   return dialog;
 }
 
@@ -27,7 +27,7 @@ test.describe('instant meeting creation — isolated API', () => {
     authMock.instantCreationEnabled = true;
   });
 
-  test('authenticated host creates one live instant meeting and hands off a local session', async ({ page, authMock }) => {
+  test('authenticated host creates one reusable meeting and hands off a local session', async ({ page, authMock }) => {
     await keepMeetingRoomOutOfScope(page);
     await login(page, authMock);
     const dialog = await openInstantMeeting(page);
@@ -36,12 +36,12 @@ test.describe('instant meeting creation — isolated API', () => {
     expect(meetingCode).toMatch(/^YLM-[A-Z2-9]{6}$/);
 
     await dialog.getByLabel('Meeting Topic / Title').fill('E2E instant product sync');
-    await dialog.getByRole('button', { name: 'Start Meeting' }).click();
+    await dialog.locator('button[type=submit]').click();
     await expect(dialog).toBeHidden();
 
     expect(authMock.instantCreateCalls).toHaveLength(1);
     expect(authMock.instantCreateCalls[0]).toEqual({
-      title: 'E2E instant product sync', meetingCode, startNow: true, reusable: false,
+      title: 'E2E instant product sync', meetingCode, startNow: false, reusable: true,
     });
     await expect.poll(() => page.evaluate(() => sessionStorage.getItem('e2e_instant_navigation')))
       .toBe(`/meet/${meetingCode}`);
@@ -70,7 +70,7 @@ test.describe('instant meeting creation — isolated API', () => {
     const dialog = await openInstantMeeting(page);
     const firstLink = await dialog.getByLabel('Meeting Link').inputValue();
     await dialog.getByLabel('Meeting Topic / Title').fill('Retryable instant meeting');
-    await dialog.getByRole('button', { name: 'Start Meeting' }).click();
+    await dialog.locator('button[type=submit]').click();
 
     await expect(dialog.getByRole('alert')).toContainText('Meeting code is already in use');
     const secondLink = await dialog.getByLabel('Meeting Link').inputValue();
@@ -78,7 +78,7 @@ test.describe('instant meeting creation — isolated API', () => {
     expect(await page.evaluate(() => sessionStorage.getItem('e2e_instant_navigation'))).toBeNull();
 
     authMock.instantCreateError = false;
-    await dialog.getByRole('button', { name: 'Start Meeting' }).click();
+    await dialog.locator('button[type=submit]').click();
     await expect(dialog).toBeHidden();
     expect(authMock.instantCreateCalls).toHaveLength(2);
     expect(authMock.instantCreateCalls[1].meetingCode).not.toBe(authMock.instantCreateCalls[0].meetingCode);
@@ -88,8 +88,8 @@ test.describe('instant meeting creation — isolated API', () => {
     await keepMeetingRoomOutOfScope(page);
     await login(page, authMock);
     let dialog = await openInstantMeeting(page);
-    await dialog.getByRole('button', { name: /Schedule Later/ }).click();
-    await expect(dialog.getByRole('button', { name: /Schedule Later/ })).toHaveAttribute('aria-pressed', 'true');
+    await dialog.locator('button[aria-pressed]').filter({ hasText: 'Schedule Meeting' }).click();
+    await expect(dialog.locator('button[aria-pressed]').filter({ hasText: 'Schedule Meeting' })).toHaveAttribute('aria-pressed', 'true');
     await dialog.getByLabel('Meeting Topic / Title').fill('Discarded draft');
     await dialog.getByRole('button', { name: 'Close meeting form' }).click();
 
@@ -107,11 +107,34 @@ test.describe('instant meeting creation — isolated API', () => {
     await page.getByRole('navigation', { name: 'Mobile dashboard navigation' })
       .getByRole('button', { name: 'Create Meeting' }).click();
     const dialog = page.getByRole('dialog', { name: 'Create or Schedule Meeting' });
-    await expect(dialog.getByRole('button', { name: 'Start Meeting' })).toBeVisible();
+    await expect(dialog.locator('button[type=submit]')).toBeVisible();
     const box = await dialog.boundingBox();
     expect(box).not.toBeNull();
     expect(box!.x).toBeGreaterThanOrEqual(0);
     expect(box!.x + box!.width).toBeLessThanOrEqual(390);
     await expect(dialog.getByLabel('Meeting Link')).toBeEditable({ editable: false });
+  });
+});
+
+test('scheduled weekly training uses selected weekdays with no end date', async ({ page, authMock }) => {
+  authMock.instantCreationEnabled = true;
+  await login(page, authMock);
+  const dialog = await openInstantMeeting(page);
+  await expect(dialog.getByRole('button', { name: 'No fixed time' })).toHaveCount(0);
+  await dialog.locator('button[aria-pressed]').filter({ hasText: 'Schedule Meeting' }).click();
+  await dialog.locator('input[type=date]').fill('2099-01-05');
+  await expect(dialog.getByRole('combobox', { name: 'Repeat', exact: true }).locator('option')).toHaveText(['Does not repeat', 'Repeat']);
+  await dialog.getByRole('combobox', { name: 'Repeat', exact: true }).selectOption('repeat');
+  for (const name of ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']) {
+    await dialog.getByRole('checkbox', { name, exact: true }).uncheck();
+  }
+  await dialog.getByRole('checkbox', { name: 'Monday', exact: true }).check();
+  await dialog.getByRole('checkbox', { name: 'Wednesday', exact: true }).check();
+  await expect(dialog.getByLabel('Recurrence ends')).toHaveCount(0);
+  await dialog.locator('button[type=submit]').click();
+  await expect(dialog).toBeHidden();
+  expect(authMock.instantCreateCalls[0]).toMatchObject({
+    startNow: false, reusable: false,
+    recurrence: { frequency: 'weekly', interval: 1, weekdays: [1, 3], ends: { type: 'never' } },
   });
 });

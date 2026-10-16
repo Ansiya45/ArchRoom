@@ -6,6 +6,7 @@ import { meetings, meetingOccurrences, meetingParticipants, users } from '../db/
 import { env } from '../env.js';
 import { canManageMeetingSession } from './meeting-host-access.js';
 import { MeetingAiPermissionService } from './meeting-ai-permission.service.js';
+import { MeetingHistoryService } from './meeting-history.service.js';
 
 export type SummaryScope = { meetingCode: string; occurrenceId?: string };
 
@@ -49,7 +50,7 @@ export class MeetingSummaryService {
         eq(meetingParticipants.admission, 'admitted')));
   }
 
-  async transcribe(input: SummaryScope & { requestId: string; audio: string; mimeType: string }, hostUserId: string) {
+  async transcribe(input: SummaryScope & { requestId: string; sequence: number; audio: string; mimeType: string }, hostUserId: string) {
     await new MeetingAiPermissionService().assertCanTranscribe(input, hostUserId);
     const meeting = await this.scope(input, hostUserId);
     if (meeting.status !== 'live' || (input.occurrenceId && meeting.activeOccurrenceId !== input.occurrenceId)) throw new TRPCError({ code: 'FORBIDDEN', message: 'Speech capture requires the active meeting.' });
@@ -68,31 +69,50 @@ export class MeetingSummaryService {
     form.append('response_format', 'json');
     const result = await openAI('audio/transcriptions', form, false);
     if (typeof result.text !== 'string') throw new TRPCError({ code: 'BAD_GATEWAY', message: 'No usable speech was returned.' });
-    return { text: result.text };
+    let historyWarning: string | undefined;
+    try {
+      await new MeetingHistoryService().save({ meetingId: meeting.id, occurrenceId: input.occurrenceId,
+        kind: 'transcript', dedupeKey: `transcript:${input.requestId}:${input.sequence}`, label: String(input.sequence).padStart(8, '0'), content: result.text });
+    } catch { historyWarning = 'This transcript segment could not be saved to meeting history. Download the transcript before closing this page.'; }
+    return { text: result.text, historyWarning };
   }
 
   async generate(input: SummaryScope & { speech: string }, hostUserId: string) {
-    await this.scope(input, hostUserId);
-    if (!input.speech.trim()) return { summary: 'No intelligible speech was captured. A meeting summary could not be generated.' };
+    const meeting = await this.scope(input, hostUserId);
+    if (!input.speech.trim()) return { summary: 'No intelligible speech was captured. A meeting summary could not be generated.', historyWarning: undefined as string | undefined };
     const result = await openAI('responses', JSON.stringify({ model: env.OPENAI_SUMMARY_MODEL, store: false,
       instructions: summaryInstructions, input: JSON.stringify({ capturedMeetingSpeech: input.speech }), max_output_tokens: 2500 }));
     const summary = result.output?.flatMap((item: any) => item.type === 'message' ? item.content ?? [] : [])
       .filter((item: any) => item.type === 'output_text').map((item: any) => item.text).join('\n').trim();
     if (result.status !== 'completed' || !summary || summary.length > 11000) throw new TRPCError({ code: 'BAD_GATEWAY', message: 'OpenAI did not return a complete summary. Please retry.' });
-    return { summary: summary as string };
+    let historyWarning: string | undefined;
+    try {
+      await new MeetingHistoryService().save({ meetingId: meeting.id, occurrenceId: input.occurrenceId,
+        kind: 'summary', dedupeKey: `summary:${input.occurrenceId || 'meeting'}:${createHash('sha256').update(input.speech).digest('hex')}`, content: summary });
+    } catch { historyWarning = 'The summary could not be saved to meeting history. Download it before closing this page.'; }
+    return { summary: summary as string, historyWarning };
   }
 
-  async send(input: SummaryScope & { summary: string; transcript?: string; recipientIds: string[] }, hostUserId: string) {
+  async send(input: SummaryScope & { summary?: string; transcript?: string; recipientIds: string[] }, hostUserId: string) {
     const meeting = await this.scope(input, hostUserId);
+    if (!input.summary?.trim() && !input.transcript?.trim()) throw new TRPCError({ code: 'BAD_REQUEST', message: 'A transcript or summary is required.' });
     const attendees = await this.recipients(input, hostUserId);
     const ids = [...new Set(input.recipientIds)];
     if (!ids.length || ids.some(id => !attendees.some(a => a.id === id))) throw new TRPCError({ code: 'BAD_REQUEST', message: 'Select recipients from the attendees of this meeting session.' });
     if (!env.RESEND_API_KEY) throw new TRPCError({ code: 'PRECONDITION_FAILED', message: 'Summary email requires RESEND_API_KEY and a verified TRANSCRIPT_EMAIL_FROM sender.' });
+    // Archive the reviewed payload before sending. If delivery fails, the host
+    // can reopen History and retry without recovering the meeting's audio.
+    const history = new MeetingHistoryService();
+    if (input.transcript?.trim()) await history.save({ meetingId: meeting.id, occurrenceId: input.occurrenceId,
+      kind: 'transcript', dedupeKey: `transcript:reviewed:${createHash('sha256').update(input.transcript).digest('hex')}`,
+      label: 'reviewed-complete', content: input.transcript });
+    if (input.summary?.trim()) await history.save({ meetingId: meeting.id, occurrenceId: input.occurrenceId,
+      kind: 'summary', dedupeKey: `summary:${input.occurrenceId || 'meeting'}:${createHash('sha256').update(input.summary).digest('hex')}`, content: input.summary });
     const sentIds: string[] = [], failedIds: string[] = [];
     for (const id of ids) {
       const attendee = attendees.find(a => a.id === id)!;
-      const payload = { from: env.TRANSCRIPT_EMAIL_FROM, to: [attendee.email], subject: `${meeting.title} - meeting summary and transcript`,
-        text: `Meeting summary\n\n${input.summary}\n\nTranscript (automatically generated; review for errors)\n\n${input.transcript || 'No transcript was captured.'}` };
+      const payload = { from: env.TRANSCRIPT_EMAIL_FROM, to: [attendee.email], subject: `${meeting.title} - ${input.transcript?.trim() ? 'meeting transcript' : 'meeting summary'}`,
+        text: `${input.summary?.trim() ? `Meeting summary\n\n${input.summary}\n\n` : ''}${input.transcript?.trim() ? `Transcript (automatically generated; review for errors)\n\n${input.transcript}` : ''}` };
       // Stable per payload/session/recipient: retries do not duplicate accepted emails (Resend's 24h window).
       const key = createHash('sha256').update(JSON.stringify([meeting.id, input.occurrenceId, payload])).digest('hex');
       try {

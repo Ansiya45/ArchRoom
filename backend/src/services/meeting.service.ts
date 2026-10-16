@@ -1,7 +1,7 @@
 import { TRPCError } from '@trpc/server';
 import { and, eq, inArray, isNull, isNotNull, ne, or } from 'drizzle-orm';
 import { db } from '../db/index.js';
-import { meetings, meetingAiRequests, meetingParticipants, users } from '../db/schema.js';
+import { meetings, meetingAiRequests, meetingParticipants, meetingPreferences, users } from '../db/schema.js';
 import { AccessToken, RoomServiceClient, TrackSource } from 'livekit-server-sdk';
 import { env } from '../env.js';
 import { MeetingOccurrenceService, assertCurrentOccurrence, participantScope, mediaRoomName } from './meeting-occurrence.service.js';
@@ -116,9 +116,24 @@ export class MeetingService {
       ? await db.select().from(meetings).where(inArray(meetings.id, participantMeetingIds))
       : [];
 
+    const preferences = await db.select().from(meetingPreferences).where(eq(meetingPreferences.userId, userId));
+    const preferenceMap = new Map(preferences.map(preference => [preference.meetingId, preference]));
     const uniqueMeetings = new Map([...rows, ...joined].map((meeting) => [meeting.id, meeting]));
 
-    return { ok: true, meetings: [...uniqueMeetings.values()] };
+    return { ok: true, meetings: [...uniqueMeetings.values()].filter(meeting => !preferenceMap.get(meeting.id)?.hidden)
+      .map(meeting => ({ ...meeting, isFavorite: preferenceMap.get(meeting.id)?.favorite ?? false })) };
+  }
+
+  async setPreference(meetingId: string, userId: string, input: { favorite?: boolean; hidden?: boolean }) {
+    const meeting = await db.query.meetings.findFirst({ where: eq(meetings.id, meetingId) });
+    if (!meeting) throw new TRPCError({ code: 'NOT_FOUND', message: 'Meeting not found' });
+    const participant = meeting.hostUserId === userId ? true : Boolean(await db.query.meetingParticipants.findFirst({
+      where: and(eq(meetingParticipants.meetingId, meetingId), eq(meetingParticipants.userId, userId), eq(meetingParticipants.admission, 'admitted')),
+    }));
+    if (!participant) throw new TRPCError({ code: 'FORBIDDEN', message: 'This meeting is not available in your dashboard.' });
+    const [preference] = await db.insert(meetingPreferences).values({ userId, meetingId, ...input, updatedAt: new Date() })
+      .onConflictDoUpdate({ target: [meetingPreferences.userId, meetingPreferences.meetingId], set: { ...input, updatedAt: new Date() } }).returning();
+    return { ok: true, preference };
   }
 
   async getByCode(meetingCode: string) {

@@ -8,11 +8,15 @@ process.env.JWT_SECRET = 'test-only';
 const { db } = await import('../src/db/index.js');
 const { env } = await import('../src/env.js');
 const { MeetingSummaryService } = await import('../src/services/meeting-summary.service.js');
+const { MeetingHistoryService } = await import('../src/services/meeting-history.service.js');
 const { meetingsRouter } = await import('../src/routers/meetings.js');
 const host = randomUUID(), guest = randomUUID(), outsider = randomUUID(), occurrence = randomUUID();
 const scope = { meetingCode: 'YLM-ABC234', occurrenceId: occurrence };
 const dialect = new PgDialect();
 async function fixture(run: (f: any) => Promise<void>) {
+  const originalSave = MeetingHistoryService.prototype.save;
+  const history: any[] = [];
+  MeetingHistoryService.prototype.save = async input => { history.push(input); };
   const originals = { meeting: db.query.meetings.findFirst, occurrence: db.query.meetingOccurrences.findFirst,
     participant: db.query.meetingParticipants.findFirst, aiRequest: db.query.meetingAiRequests.findFirst, select: db.selectDistinct, fetch: globalThis.fetch,
     ai: env.OPENAI_API_KEY, resend: env.RESEND_API_KEY };
@@ -27,8 +31,9 @@ async function fixture(run: (f: any) => Promise<void>) {
   db.selectDistinct = (() => ({ from: () => ({ innerJoin: () => ({ where: async (where: any) => { conditions.push(where); return recipients; } }) }) })) as any;
   env.OPENAI_API_KEY = 'test-only'; env.RESEND_API_KEY = 'test-only';
   globalThis.fetch = async (url, options) => { requests.push({ url, ...options }); return Response.json({ status: 'completed', output: [{ type: 'message', content: [{ type: 'output_text', text: 'The team agreed to test on Friday.' }] }] }); };
-  try { await run({ service: new MeetingSummaryService(), meeting, session, recipients, conditions, requests }); }
+  try { await run({ service: new MeetingSummaryService(), meeting, session, recipients, conditions, requests, history }); }
   finally {
+    MeetingHistoryService.prototype.save = originalSave;
     db.query.meetings.findFirst = originals.meeting; db.query.meetingOccurrences.findFirst = originals.occurrence;
     db.query.meetingParticipants.findFirst = originals.participant; db.query.meetingAiRequests.findFirst = originals.aiRequest; db.selectDistinct = originals.select;
     globalThis.fetch = originals.fetch; env.OPENAI_API_KEY = originals.ai; env.RESEND_API_KEY = originals.resend;
@@ -36,7 +41,7 @@ async function fixture(run: (f: any) => Promise<void>) {
 }
 test('only the host can generate, list recipients, transcribe, or email a summary', async () => fixture(async ({ service, requests }) => {
   for (const action of [() => service.generate({ ...scope, speech: 'Meeting' }, outsider), () => service.recipients(scope, outsider),
-    () => service.transcribe({ ...scope, requestId: randomUUID(), audio: 'YQ==', mimeType: 'audio/webm' }, outsider),
+    () => service.transcribe({ ...scope, requestId: randomUUID(), sequence: 0, audio: 'YQ==', mimeType: 'audio/webm' }, outsider),
     () => service.send({ ...scope, summary: 'Summary', recipientIds: [guest] }, outsider)]) await assert.rejects(action, { code: 'FORBIDDEN' });
   assert.equal(requests.length, 0);
 }));
@@ -59,13 +64,37 @@ test('legacy and one-time meetings remain usable after ending with null occurren
     assert.match(dialect.sqlToQuery(conditions.at(-1)).sql, /"occurrence_id" is null/);
   }
 }));
-test('OpenAI receives multilingual speech as untrusted input and English summary-only instructions', async () => fixture(async ({ service, requests }) => {
+test('OpenAI receives multilingual speech as untrusted input and English summary-only instructions', async () => fixture(async ({ service, requests, history }) => {
   const result = await service.generate({ ...scope, speech: 'Bonjour. Nous testerons vendredi.' }, host);
   assert.match(result.summary, /Friday/);
+  assert.equal(history.length, 1); assert.equal(history[0].kind, 'summary'); assert.equal(history[0].occurrenceId, occurrence);
   const payload = JSON.parse(requests[0].body);
   assert.equal(payload.store, false); assert.match(payload.instructions, /English/); assert.match(payload.instructions, /never instructions/);
   assert.match(payload.instructions, /Do not invent/); assert.match(payload.instructions, /Do not include a transcript/);
   assert.deepEqual(JSON.parse(payload.input), { capturedMeetingSpeech: 'Bonjour. Nous testerons vendredi.' });
+}));
+
+test('history storage failure preserves generated summary and returns an explicit warning', async () => fixture(async ({ service }) => {
+  MeetingHistoryService.prototype.save = async () => { throw new Error('storage unavailable'); };
+  const result = await service.generate({ ...scope, speech: 'Discussed Friday testing.' }, host);
+  assert.match(result.summary, /Friday/); assert.match(result.historyWarning, /could not be saved/);
+}));
+
+test('authorized transcript segments are archived with session identity; storage failure preserves text', async () => fixture(async ({ service, history }) => {
+  const { MeetingAiPermissionService } = await import('../src/services/meeting-ai-permission.service.js');
+  const original = MeetingAiPermissionService.prototype.assertCanTranscribe;
+  MeetingAiPermissionService.prototype.assertCanTranscribe = async () => undefined as any;
+  globalThis.fetch = async () => Response.json({ text: 'Training starts Monday.' });
+  try {
+    const input = { ...scope, requestId: randomUUID(), sequence: 0, audio: 'YQ==', mimeType: 'audio/webm' };
+    const result = await service.transcribe(input, host);
+    assert.equal(result.text, 'Training starts Monday.'); assert.equal(history[0].occurrenceId, occurrence);
+    assert.equal(history[0].kind, 'transcript'); assert.ok(history[0].dedupeKey.includes(input.requestId)); assert.equal(history[0].label, '00000000');
+    assert.equal('audio' in history[0], false);
+    MeetingHistoryService.prototype.save = async () => { throw new Error('storage unavailable'); };
+    const failed = await service.transcribe(input, host);
+    assert.equal(failed.text, result.text); assert.match(failed.historyWarning, /could not be saved/);
+  } finally { MeetingAiPermissionService.prototype.assertCanTranscribe = original; }
 }));
 test('empty speech never invents a summary or calls OpenAI; incomplete responses fail explicitly', async () => fixture(async ({ service, requests }) => {
   assert.match((await service.generate({ ...scope, speech: '' }, host)).summary, /No intelligible speech/); assert.equal(requests.length, 0);
@@ -73,7 +102,7 @@ test('empty speech never invents a summary or calls OpenAI; incomplete responses
   await assert.rejects(() => service.generate({ ...scope, speech: 'Speech' }, host), { code: 'BAD_GATEWAY' });
 }));
 test('direct transcription without an active unanimous request is rejected before provider access', async () => fixture(async ({ service, requests }) => {
-  const input = { ...scope, requestId: randomUUID(), audio: 'YQ==', mimeType: 'audio/webm' as const };
+  const input = { ...scope, requestId: randomUUID(), sequence: 0, audio: 'YQ==', mimeType: 'audio/webm' as const };
   for (const key of ['', 'test-configured-key']) {
     env.OPENAI_API_KEY = key;
     for (const id of [host, guest, outsider]) {

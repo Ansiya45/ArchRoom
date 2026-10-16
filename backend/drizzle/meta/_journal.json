@@ -85,6 +85,13 @@
       "when": 1791950400000,
       "tag": "0011_meeting_ai_consent",
       "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1792108800000,
+      "tag": "0012_meeting_history",
+      "breakpoints": true
     }
   ]
 }

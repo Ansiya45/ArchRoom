@@ -1,9 +1,9 @@
 'use client';
 
 import React from 'react';
-import { Home, CalendarPlus, CalendarDays, Star, Settings } from 'lucide-react';
+import { Home, CalendarPlus, CalendarDays, Star, Settings, History } from 'lucide-react';
 
-export type SidebarTab = 'home' | 'create' | 'scheduled' | 'favorite' | 'settings';
+export type SidebarTab = 'home' | 'create' | 'scheduled' | 'favorite' | 'history' | 'settings';
 
 interface SidebarProps {
   activeTab: SidebarTab;
@@ -73,6 +73,8 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, setActiveTab }) => 
       icon: Star,
     },
   ];
+
+  topNavItems.push({ id: 'history', label: 'Meeting History', icon: History });
 
   const settingsItem: NavItem = {
     id: 'settings',

@@ -38,6 +38,9 @@ interface WaitingRoomProps {
   checkingSession: boolean;
   sessionError: string;
   onRetrySession: () => void;
+  isHost: boolean;
+  enableAiTranscription: boolean;
+  onEnableAiTranscriptionChange: (enabled: boolean) => void;
 }
 
 interface BackgroundPreset {
@@ -95,6 +98,9 @@ export const WaitingRoom: React.FC<WaitingRoomProps> = ({
   checkingSession,
   sessionError,
   onRetrySession,
+  isHost,
+  enableAiTranscription,
+  onEnableAiTranscriptionChange,
 }) => {
   const activeBg = deviceSettings.backgroundBlur || 'blur';
   const handleCameraUnavailable = useCallback(() => {
@@ -118,6 +124,7 @@ export const WaitingRoom: React.FC<WaitingRoomProps> = ({
           <div className="w-10 h-10 rounded-2xl bg-blue-600 flex items-center justify-center shadow-md shadow-blue-200 text-white">
             <Video className="w-5 h-5" />
           </div>
+
           <div>
             <h1 className="text-lg sm:text-xl font-bold text-slate-900 tracking-tight">
               YLAAM-MEET
@@ -265,6 +272,11 @@ export const WaitingRoom: React.FC<WaitingRoomProps> = ({
               className="w-full py-2.5 px-3.5 rounded-2xl bg-white border border-blue-100 text-slate-800 font-medium text-xs sm:text-sm focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100 transition-all shadow-sm"
             />
           </div>
+
+          {isHost && <div className="rounded-xl border border-violet-200 bg-violet-50 p-3 text-xs text-slate-700">
+            <label className="flex items-start gap-2 font-semibold"><input type="checkbox" checked={enableAiTranscription} onChange={event => onEnableAiTranscriptionChange(event.target.checked)} className="mt-0.5 accent-violet-600" />Enable AI transcription for this meeting</label>
+            <p className="mt-2 leading-relaxed">Off by default. If enabled, meeting audio is processed by YLAAM Meet and OpenAI. Participants will see when transcription is active. Transcript text and summaries are saved to your Meeting History.</p>
+          </div>}
 
           {sessionError && <p role="alert" className="text-sm text-red-600">{sessionError} <button onClick={onRetrySession} className="font-semibold underline">Try again</button></p>}
           {/* Join Call Action */}

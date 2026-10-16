@@ -14,6 +14,7 @@ import ScheduleModal from './components/ScheduleModal';
 import ScheduledMeetingsView from './components/ScheduledMeetingsView';
 import FavoritesView, { MeetingItem } from './components/FavoritesView';
 import SettingsView from './components/SettingsView';
+const MeetingHistoryView = React.lazy(() => import('./components/MeetingHistoryView'));
 import SettingsModal from './components/SettingsModal';
 import AuthModal from './components/AuthModal';
 import { CheckCircle2 } from 'lucide-react';
@@ -153,7 +154,7 @@ export default function App() {
             record: meeting,
             participantsCount: 1,
             hostName: account.user.fullName,
-            isFavorite: false,
+            isFavorite: meeting.isFavorite,
           }))
         );
         setIsAccountLoading(false);
@@ -210,24 +211,30 @@ export default function App() {
     }
   };
 
-  const handleToggleFavorite = (id: string) => {
-    setMeetings((prev) =>
-      prev.map((m) => {
-        if (m.id === id) {
-          const nextFav = !m.isFavorite;
-          showToast(nextFav ? `Added "${m.title}" to Favorites` : `Removed from Favorites`);
-          return { ...m, isFavorite: nextFav };
-        }
-        return m;
-      })
-    );
+  const handleToggleFavorite = async (id: string) => {
+    const target = meetings.find(meeting => meeting.id === id);
+    if (!target) return;
+    const favorite = !target.isFavorite;
+    setMeetings(current => current.map(meeting => meeting.id === id ? { ...meeting, isFavorite: favorite } : meeting));
+    try {
+      await trpc.meetings.setPreference.mutate({ meetingId: id, favorite });
+      showToast(favorite ? `Added "${target.title}" to Favorites` : `Removed from Favorites`);
+    } catch {
+      setMeetings(current => current.map(meeting => meeting.id === id ? { ...meeting, isFavorite: !favorite } : meeting));
+      showToast('Could not save the Favorites change. Please retry.', 'info');
+    }
   };
 
-  const handleDeleteMeeting = (id: string) => {
+  const handleDeleteMeeting = async (id: string) => {
     const target = meetings.find((m) => m.id === id);
+    if (!target) return;
     setMeetings((prev) => prev.filter((m) => m.id !== id));
-    if (target) {
-      showToast(`Meeting "${target.title}" deleted.`);
+    try {
+      await trpc.meetings.setPreference.mutate({ meetingId: id, hidden: true });
+      showToast(`Meeting "${target.title}" removed from your dashboard.`);
+    } catch {
+      setMeetings(current => current.some(meeting => meeting.id === id) ? current : [target, ...current]);
+      showToast('Could not remove the meeting from your dashboard. Please retry.', 'info');
     }
   };
 
@@ -337,6 +344,7 @@ export default function App() {
               />
             )}
 
+            {activeTab === 'history' && user && <React.Suspense fallback={<p role="status">Loading meeting history…</p>}><MeetingHistoryView key={user.email} /></React.Suspense>}
             {/* Tab 5: Settings View */}
             {activeTab === 'settings' && (
               <SettingsView onShowToast={(msg) => showToast(msg)} />

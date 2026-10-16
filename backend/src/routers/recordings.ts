@@ -2,10 +2,21 @@ import { z } from 'zod';
 import { t } from '../trpc/init.js';
 import { RecordingService } from '../services/recording.service.js';
 import { protectedProcedure } from '../trpc/protected.js';
+import { MeetingHistoryService, driveRecordingUrl } from '../services/meeting-history.service.js';
 
 const recordingService = new RecordingService();
 
 export const recordingsRouter = t.router({
+  saveDriveReference: protectedProcedure.input(z.object({
+    meetingCode: z.string().min(1), occurrenceId: z.string().uuid().optional(),
+    url: z.string().max(1000), fileName: z.string().min(1).max(255),
+  })).mutation(async ({ input, ctx }) => {
+    const url = driveRecordingUrl(input.url);
+    const meeting = await recordingService.authorizeExport(input, ctx.user.id);
+    await new MeetingHistoryService().save({ meetingId: meeting.id, occurrenceId: input.occurrenceId,
+      kind: 'drive', dedupeKey: `drive:${input.occurrenceId || 'meeting'}:${url.split('/')[5]}`, content: url, label: input.fileName });
+    return { ok: true };
+  }),
   authorizeExport: protectedProcedure.input(z.object({
     meetingCode: z.string().min(1), occurrenceId: z.string().uuid().optional(),
   })).mutation(async ({ input, ctx }) => {

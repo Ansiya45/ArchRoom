@@ -2,7 +2,7 @@ export type AudioInput = { local: MediaStream | null; micOn: boolean; remote: Re
 export type AudioMime = 'audio/webm;codecs=opus' | 'audio/webm' | 'audio/mp4';
 
 // Owns only the mixed recording stream. Never changes/stops the meeting's tracks.
-export function createSummaryCapture(transcribe: (blob: Blob, mime: AudioMime) => Promise<string>, warn: (message: string) => void,
+export function createSummaryCapture(transcribe: (blob: Blob, mime: AudioMime, sequence: number) => Promise<string>, warn: (message: string) => void,
   onActivity?: (active: boolean) => void, onTranscript?: (text: string) => void) {
   if (!globalThis.AudioContext || !globalThis.MediaRecorder) throw new Error('This browser cannot capture meeting speech. Use a current Chrome, Edge, or Safari browser.');
   const mime = (['audio/webm;codecs=opus', 'audio/webm', 'audio/mp4'] as AudioMime[]).find(type => MediaRecorder.isTypeSupported(type));
@@ -40,7 +40,7 @@ export function createSummaryCapture(transcribe: (blob: Blob, mime: AudioMime) =
           warn('Speech processing reached its buffer limit. The summary may be incomplete.');
         } else {
           const index = nextClip++;
-          const task = Promise.resolve().then(() => transcribe(blob, mime)).then(text => {
+          const task = Promise.resolve().then(() => transcribe(blob, mime, index)).then(text => {
             if (disposed) return;
             if (totalChars + text.length > 195000) { warn('The summary input limit was reached; some speech is missing.'); return; }
             speech[index] = text; totalChars += text.length;

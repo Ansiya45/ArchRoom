@@ -65,7 +65,7 @@ export const test = base.extend<{ authMock: AuthMock }>({
             return ok({ ok: true, meetings: [{ id, title: auth.privateTitle,
               meetingCode: `E2E-${id.slice(0, 6)}`, hostUserId: auth.user.id,
               status: auth.notificationsEnabled ? 'scheduled' : 'ended', scheduleType: 'one_time',
-              scheduledAt: auth.notificationsEnabled ? '2026-09-29T05:00:00.000Z' : null,
+              scheduledAt: '2026-09-29T05:00:00.000Z',
               timeZone: auth.notificationsEnabled ? 'Asia/Calcutta' : null,
               createdAt: '2026-09-28T05:00:00.000Z', updatedAt: '2026-09-28T05:00:00.000Z' }] });
           }
@@ -95,7 +95,7 @@ export const test = base.extend<{ authMock: AuthMock }>({
             if (auth.instantCreateError) return error('Meeting code is already in use. Please try again.', 'CONFLICT', 409, path);
             return ok({ ok: true, meeting: {
               id: randomUUID(), title: value.title, meetingCode: value.meetingCode,
-              hostUserId: auth.user.id, status: 'live', scheduleType: null,
+              hostUserId: auth.user.id, status: value.startNow ? 'live' : 'scheduled', scheduleType: value.reusable ? 'reusable' : value.recurrence ? 'recurring' : value.schedule ? 'one_time' : null,
               scheduledAt: null, timeZone: null, recurrenceRule: null,
               createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
             } });

@@ -38,7 +38,7 @@ export const ScheduleModal: React.FC<ScheduleModalProps> = ({
   const [loading, setLoading] = useState(false);
   const [meetingCode, setMeetingCode] = useState(generateMeetingCode);
   const [copied, setCopied] = useState(false);
-  const [meetingMode, setMeetingMode] = useState<'instant' | 'scheduled' | 'reusable'>('instant');
+  const [meetingMode, setMeetingMode] = useState<'instant' | 'scheduled'>('instant');
   const navigate = useNavigate();
   const submitting = useRef(false);
   const [error, setError] = useState('');
@@ -92,8 +92,8 @@ export const ScheduleModal: React.FC<ScheduleModalProps> = ({
         const payload = await trpc.meetings.create.mutate({
           title: title || 'Quick YLAAM-MEET Meeting', meetingCode,
           ...(meetingMode === 'scheduled' ? { schedule, ...(recurrence ? { recurrence } : {}) } : {}),
-          startNow: meetingMode === 'instant',
-          reusable: meetingMode === 'reusable',
+          startNow: false,
+          reusable: meetingMode === 'instant',
         });
         onCreated(payload.meeting);
         onClose();
@@ -139,7 +139,7 @@ export const ScheduleModal: React.FC<ScheduleModalProps> = ({
                 : 'text-slate-600 hover:bg-slate-200'
             }`}
           >
-            ⚡ Start Now
+            Create Meeting
           </button>
 
           <button
@@ -153,14 +153,10 @@ export const ScheduleModal: React.FC<ScheduleModalProps> = ({
                 : 'text-slate-600 hover:bg-slate-200'
             }`}
           >
-            📅 Schedule Later
-          </button>
-          <button type="button" disabled={loading} aria-pressed={meetingMode === 'reusable'} onClick={() => setMeetingMode('reusable')}
-            className={`flex-1 py-2.5 rounded-lg text-sm font-semibold transition-all ${meetingMode === 'reusable' ? 'bg-blue-600 text-white shadow' : 'text-slate-600 hover:bg-slate-200'}`}>
-            No fixed time
+            Schedule Meeting
           </button>
         </div>}
-        {meetingMode === 'reusable' && <p className="mb-4 text-sm text-slate-500">Create a reusable room link. Open a new session whenever needed; participants wait for your admission each time.</p>}
+        {meetingMode === 'instant' && <p className="mb-4 text-sm text-slate-500">Reuse this link whenever you need a meeting. You remain the host and open each session from the join page.</p>}
         <form onSubmit={handleSubmit} className="space-y-4">
 
           {/* Meeting Title */}
@@ -250,8 +246,8 @@ export const ScheduleModal: React.FC<ScheduleModalProps> = ({
         disabled={loading}
         className="w-full py-3.5 rounded-xl bg-blue-600 text-white font-semibold"
       >
-        {editingMeeting ? (loading ? "Saving..." : "Save Schedule") : meetingMode === "reusable" ? (loading ? "Creating..." : "Create Reusable Room") : meetingMode === "instant"
-          ? (loading ? "Starting..." : "Start Meeting")
+        {editingMeeting ? (loading ? "Saving..." : "Save Schedule") : meetingMode === "instant"
+          ? (loading ? "Creating..." : "Create Meeting")
           : (loading ? "Scheduling..." : "Schedule Meeting")}
       </button>
 

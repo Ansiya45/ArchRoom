@@ -16,6 +16,16 @@ export function DriveRecordingUpload({ preview, meetingCode, disabled, onBusyCha
   const [folderLink, setFolderLink] = useState(''), [folderName, setFolderName] = useState('');
   const [message, setMessage] = useState(''), [progress, setProgress] = useState<number | null>(null), [url, setUrl] = useState('');
   const lock = useRef(false), attempt = useRef<DriveUpload | null>(null);
+  const [historySaved, setHistorySaved] = useState(false);
+  const saveReference = async (recordingUrl: string) => {
+    try {
+      await trpc.recordings.saveDriveReference.mutate({ meetingCode, occurrenceId: preview.occurrenceId, url: recordingUrl, fileName: preview.fileName });
+      setHistorySaved(true);
+      setMessage('Recording uploaded and its link saved to the creator’s meeting history. Google Drive may still be processing playback.');
+    } catch {
+      setMessage('Recording uploaded, but its link could not be saved to history. Retry saving the link below; no video re-upload is needed.');
+    }
+  };
   const load = () => { setMessage(''); void loadDrive().then(() => setReady(true)).catch(error => setMessage(error.message)); };
   useEffect(() => { if (expanded && configured && !ready) load(); }, [expanded]);
   const run = async (action: () => Promise<void>) => {
@@ -61,6 +71,7 @@ export function DriveRecordingUpload({ preview, meetingCode, disabled, onBusyCha
     setProgress(0);
     const result = await uploadRecordingToDrive(active, folder.id, preview, attempt.current, setProgress);
     setUrl(result); setMessage('MP4 uploaded. Google Drive may briefly process it before online playback is ready. Your local preview remains available.');
+    await saveReference(result);
   });
   return <>
     <button type="button" disabled={disabled || busy} onClick={() => setExpanded(value => !value)} aria-expanded={expanded}
@@ -91,6 +102,7 @@ export function DriveRecordingUpload({ preview, meetingCode, disabled, onBusyCha
         {busy && <Loader2 aria-label="Google Drive operation in progress" className="inline h-4 w-4 animate-spin" />}
         {progress !== null && <div><progress max={100} value={progress} className="w-full" aria-label="Drive upload progress" /><p>{progress}% uploaded</p></div>}
         {url && <a href={url} target="_blank" rel="noopener noreferrer" className="inline-block font-semibold text-emerald-700 underline">Open recording in Google Drive</a>}
+        {url && !historySaved && <button type="button" disabled={busy || disabled} className="block underline" onClick={() => void run(() => saveReference(url))}>Retry saving link to history</button>}
       </>}
       {message && <p role="status">{message}</p>}
     </div>}

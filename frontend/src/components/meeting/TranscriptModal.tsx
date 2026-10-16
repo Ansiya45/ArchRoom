@@ -22,6 +22,7 @@ export function TranscriptModal({ meetingCode, occurrenceId, speech, warning, on
       if (!summary) {
         const result = await trpc.meetings.generateSummary.mutate({ meetingCode, occurrenceId, speech }, { signal: AbortSignal.timeout(90000) });
         setSummary(result.summary);
+        if ('historyWarning' in result && result.historyWarning) setNotice(result.historyWarning);
       }
       setAttendees(await trpc.meetings.summaryRecipients.query({ meetingCode, occurrenceId }));
     } catch (cause) { setError(cause instanceof Error ? cause.message : 'Unable to generate the summary.'); }

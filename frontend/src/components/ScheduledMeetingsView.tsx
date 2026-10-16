@@ -35,9 +35,10 @@ export const ScheduledMeetingsView: React.FC<ScheduledMeetingsViewProps> = ({
 
   const filteredMeetings = meetings.filter(
     (m) =>
+      m.record?.scheduleType !== 'reusable' && Boolean(m.record?.scheduledAt || m.record?.scheduleType === 'recurring') && (
       m.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
       m.code.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      m.hostName.toLowerCase().includes(searchQuery.toLowerCase())
+      m.hostName.toLowerCase().includes(searchQuery.toLowerCase()))
   );
 
   const handleCopy = (id: string, code: string) => {
@@ -116,7 +117,7 @@ export const ScheduledMeetingsView: React.FC<ScheduledMeetingsViewProps> = ({
                     </button>
                     <button
                       onClick={() => onDeleteMeeting(m.id)}
-                      title="Delete meeting"
+                      title="Remove from dashboard"
                       className="text-slate-300 hover:text-red-500 p-1.5 rounded-lg transition-colors cursor-pointer"
                     >
                       <Trash2 className="w-4 h-4" />

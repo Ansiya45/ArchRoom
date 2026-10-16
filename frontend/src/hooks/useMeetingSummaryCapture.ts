@@ -25,12 +25,13 @@ export function useMeetingSummaryCapture(active: boolean, meetingCode: string, o
     setError('');
     const warn = (message: string) => { warning.current = message; setError(message); };
     try {
-      const capture = createSummaryCapture(async (blob, mimeType) => {
+      const capture = createSummaryCapture(async (blob, mimeType, sequence) => {
         const audio = await new Promise<string>((resolve, reject) => {
           const reader = new FileReader(); reader.onerror = reject;
           reader.onload = () => resolve(String(reader.result).split(',')[1]); reader.readAsDataURL(blob);
         });
-        const result = await trpc.meetings.transcribeSpeech.mutate({ meetingCode, occurrenceId, requestId, mimeType, audio }, { signal: AbortSignal.timeout(75000) });
+        const result = await trpc.meetings.transcribeSpeech.mutate({ meetingCode, occurrenceId, requestId, sequence, mimeType, audio }, { signal: AbortSignal.timeout(75000) });
+        if (result.historyWarning) warn(result.historyWarning);
         return result.text;
       }, warn, setCapturing, text => { if (captureActive.current) segmentHandler.current?.(text); });
       runtime.current = capture;
