@@ -83,18 +83,45 @@ test('reset response hides provider failure while verification resend reports it
   await assert.rejects(service.resendVerification(user.email), { message: 'Email delivery failed' });
 });
 
+test('simultaneous signups for the same email create one account and send one code', async () => {
+  const originalInsert = db.insert;
+  const { service, sent } = serviceFor(undefined);
+  Object.assign(service, { findUser: async () => undefined });
+  let created = false;
+  db.insert = (() => ({ values: (input: any) => ({ returning: async () => {
+    if (created) throw Object.assign(new Error('duplicate'), { code: '23505' });
+    created = true;
+    return [{ ...user, ...input, emailVerifiedAt: null }];
+  } }) })) as any;
+  try {
+    const input = { fullName: 'Test Member', email: user.email, password: 'CorrectPassword1' };
+    const results = await Promise.allSettled([service.signup(input), service.signup(input)]);
+    assert.equal(results.filter(result => result.status === 'fulfilled').length, 1);
+    const rejected = results.find(result => result.status === 'rejected');
+    assert.equal(rejected?.status === 'rejected' && rejected.reason.code, 'CONFLICT');
+    assert.equal(sent.length, 1);
+  } finally { db.insert = originalInsert; }
+});
+
 test('resend replaces the code on success and preserves it when the email provider fails', async () => {
   const originalTransaction = db.transaction;
   const originalFetch = globalThis.fetch;
   const originalKey = env.RESEND_API_KEY;
-  let codes: Array<{ codeHash: string; expiresAt: Date }> = [{ codeHash: 'previous-code', expiresAt: new Date(Date.now() + 600000) }];
+  let codes: Array<{ id: string; codeHash: string; expiresAt: Date }> = [{ id: 'old', codeHash: 'previous-code', expiresAt: new Date(Date.now() + 600000) }];
   const tx = {
     execute: async (query: unknown) => {
       const { PgDialect } = await import('drizzle-orm/pg-core');
       return new PgDialect().sqlToQuery(query as any).sql.includes('for update') ? [{ email_verified_at: null }] : [];
     },
-    delete: () => ({ where: async () => { codes = []; } }),
-    insert: () => ({ values: async (value: typeof codes[number]) => { codes.push(value); } }),
+    select: () => ({ from: () => ({ where: async () => [...codes] }) }),
+    delete: () => ({ where: () => {
+      const remove = () => { const old = codes; codes = []; return old.map(code => ({ id: code.id })); };
+      return { then: (resolve: any, reject: any) => Promise.resolve(remove()).then(resolve, reject), returning: async () => remove() };
+    } }),
+    insert: () => ({ values: (value: typeof codes[number] | typeof codes) => {
+      const insert = () => { const items = (Array.isArray(value) ? value : [value]).map(item => ({ ...item, id: item.id || 'new' })); codes.push(...items); return items; };
+      return { then: (resolve: any, reject: any) => Promise.resolve(insert()).then(resolve, reject), returning: async () => insert() };
+    } }),
   };
   db.transaction = (async (callback: (transaction: typeof tx) => Promise<void>) => {
     const previous = [...codes];

@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { randomUUID } from 'node:crypto';
+import { PgDialect } from 'drizzle-orm/pg-core';
 process.env.DOTENV_CONFIG_PATH = 'tests/.nonexistent-ai-env';
 process.env.DATABASE_URL = 'postgres://test:test@localhost:5432/test';
 process.env.JWT_SECRET = 'test-only';
@@ -12,7 +13,15 @@ test('host enabled transcription needs no participant consent, but stale/stopped
   const request: any = { requestId, meetingId, occurrenceId: null, requestedByUserId: host, stoppedAt: null, lastHeartbeatAt: new Date() };
   const original = { meeting: db.query.meetings.findFirst, participant: db.query.meetingParticipants.findFirst, request: db.query.meetingAiRequests.findFirst };
   db.query.meetings.findFirst = (async () => ({ id: meetingId, meetingCode: 'YLM-TEST', scheduleType: 'one_time', status: 'live', hostUserId: host })) as any;
-  db.query.meetingParticipants.findFirst = (async ({ where }: any) => ({ id: randomUUID(), userId: guest })) as any;
+  const dialect = new PgDialect();
+  db.query.meetingParticipants.findFirst = (async ({ where }: any) => {
+    const query = dialect.sqlToQuery(where);
+    // Scope lookup requires an admitted participant; host access separately
+    // requires the host role. The guest must not match that second query.
+    if (query.params.includes('host')) return undefined;
+    const userId = query.params.includes(host) ? host : query.params.includes(guest) ? guest : undefined;
+    return userId ? { id: randomUUID(), userId, role: userId === host ? 'host' : 'participant' } : undefined;
+  }) as any;
   db.query.meetingAiRequests.findFirst = (async () => request) as any;
   const service = new MeetingAiPermissionService(), input = { meetingCode: 'YLM-TEST', requestId };
   try {

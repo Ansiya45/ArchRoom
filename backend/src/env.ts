@@ -1,13 +1,15 @@
 import 'dotenv/config';
 import { z } from 'zod';
 
-const envSchema = z.object({
+export const envSchema = z.object({
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
   PORT: z.coerce.number().int().positive().default(3001),
   CORS_ALLOWED_ORIGINS: z.string().default(
     'http://localhost:3000,http://127.0.0.1:3000,http://localhost:5173,http://127.0.0.1:5173'
   ),
   DATABASE_URL: z.string().min(1, 'DATABASE_URL is required'),
+  // Each backend or worker process has its own pool; keep the shared DB budget bounded.
+  DB_POOL_MAX: z.string().regex(/^[1-5]$/, 'DB_POOL_MAX must be an integer from 1 to 5').default('3').transform(Number),
   JWT_SECRET: z.string().min(1, 'JWT_SECRET is required'),
   JWT_EXPIRES_IN: z.string().default('1h'),
   SUPABASE_URL: z.string().optional(),

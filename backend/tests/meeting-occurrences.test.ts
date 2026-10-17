@@ -9,7 +9,7 @@ process.env.LIVEKIT_URL = 'wss://example.invalid';
 process.env.LIVEKIT_API_KEY = 'test-key';
 process.env.LIVEKIT_API_SECRET = 'test-secret-for-local-token-tests';
 const { db } = await import('../src/db/index.js');
-const { meetings, meetingOccurrences, meetingParticipants, recordings } = await import('../src/db/schema.js');
+const { meetings, meetingOccurrences, meetingParticipants, meetingHistoryItems, recordings } = await import('../src/db/schema.js');
 const { MeetingService } = await import('../src/services/meeting.service.js');
 const { MeetingOccurrenceService, assertCurrentOccurrence, mediaRoomName, attachmentPrefix } = await import('../src/services/meeting-occurrence.service.js');
 const { RecordingService } = await import('../src/services/recording.service.js');
@@ -36,7 +36,7 @@ async function fixture(run: (f: any) => Promise<void>) {
   const original = { transaction: db.transaction, update: db.update, insert: db.insert, occurrence: db.query.meetingOccurrences.findFirst,
     meeting: db.query.meetings.findFirst, participant: db.query.meetingParticipants.findFirst,
     user: db.query.users.findFirst };
-  const rows = new Map<any, any[]>([[meetings, []], [meetingOccurrences, []], [meetingParticipants, []], [recordings, []]]);
+  const rows = new Map<any, any[]>([[meetings, []], [meetingOccurrences, []], [meetingParticipants, []], [meetingHistoryItems, []], [recordings, []]]);
   const find = (table: any) => async ({ where }: any) => rows.get(table)!.find(row => matches(row, where));
   const update = (table: any) => ({ set: (patch: any) => ({ where: (where: any) => {
     const apply = () => rows.get(table)!.filter(row => matches(row, where)).map(row => { Object.assign(row, patch); return { ...row }; });
@@ -50,7 +50,7 @@ async function fixture(run: (f: any) => Promise<void>) {
         activeOccurrenceId: null, occurrenceId: null, leftAt: null, endedAt: null,
         createdAt: new Date(), updatedAt: new Date(), joinedAt: new Date(), startedAt: new Date(), ...values };
       rows.get(table)!.push(row);
-      return { returning: async () => [{ ...row }] };
+      return { returning: async () => [{ ...row }], onConflictDoNothing: async () => undefined };
     } }), update,
   };
   let tail = Promise.resolve();
@@ -243,8 +243,11 @@ test('summary recipients belong only to the selected room session', async () => 
       env.RESEND_API_KEY = 'fake-test-key';
       globalThis.fetch = async (_url, options) => { recipients.push(...JSON.parse(options!.body as string).to); return new Response('{}'); };
       const { MeetingSummaryService } = await import('../src/services/meeting-summary.service.js');
+      await assert.rejects(new MeetingSummaryService().send({ meetingCode: meeting.meetingCode, occurrenceId: second.activeOccurrenceId, summary: 'Summary', recipientIds: [attendee] }, host), { code: 'BAD_REQUEST' });
+      assert.deepEqual(recipients, []);
       await new MeetingSummaryService().send({ meetingCode: meeting.meetingCode, occurrenceId: second.activeOccurrenceId, summary: 'Summary', recipientIds: [currentUser] }, host);
       assert.deepEqual(recipients, [currentUser + '@example.invalid']);
+      assert.equal(rows.get(meetingHistoryItems)[0].occurrenceId, second.activeOccurrenceId);
     });
   } finally { db.selectDistinct = originalSelect; globalThis.fetch = originalFetch; env.RESEND_API_KEY = originalKey; }
 });

@@ -100,7 +100,7 @@ export class AuthService {
   private async sendCode(user: typeof users.$inferSelect, purpose: Purpose) {
     const code = randomInt(100000, 1000000).toString();
     const email = purpose === 'verify_email' ? verificationEmail(user.fullName, code) : passwordResetEmail(user.fullName, code);
-    await db.transaction(async (tx) => {
+    const { previousCodes, codeId } = await db.transaction(async (tx) => {
       {
         // Serialize senders across processes, including when no code exists yet.
         const locked = await tx.execute(sql`select email_verified_at from users where id = ${user.id} for update`);
@@ -109,10 +109,27 @@ export class AuthService {
         const recent = await tx.execute(sql`select id from auth_codes where user_id = ${user.id} and purpose = ${purpose} and created_at > clock_timestamp() - interval '60 seconds' limit 1`);
         if (recent.length) throw new TRPCError({ code: 'TOO_MANY_REQUESTS', message: 'Please wait 60 seconds before requesting another code.' });
       }
+      const previousCodes = await tx.select().from(authCodes).where(and(eq(authCodes.userId, user.id), eq(authCodes.purpose, purpose)));
       await tx.delete(authCodes).where(and(eq(authCodes.userId, user.id), eq(authCodes.purpose, purpose)));
-      await tx.insert(authCodes).values({ userId: user.id, purpose, codeHash: digest(code), expiresAt: new Date(Date.now() + 600000), createdAt: sql`clock_timestamp()` });
-      await sendEmail({ to: user.email, ...email });
+      const [inserted] = await tx.insert(authCodes).values({ userId: user.id, purpose, codeHash: digest(code), expiresAt: new Date(Date.now() + 600000), createdAt: sql`clock_timestamp()` }).returning({ id: authCodes.id });
+      return { previousCodes, codeId: inserted.id };
     });
+    try {
+      await sendEmail({ to: user.email, ...email });
+    } catch (error) {
+      // Restore the previous code only if this particular code still exists.
+      // A later send or a successful verification must never be overwritten.
+      try {
+        await db.transaction(async tx => {
+          await tx.execute(sql`select id from users where id = ${user.id} for update`);
+          const removed = await tx.delete(authCodes).where(and(eq(authCodes.id, codeId), eq(authCodes.userId, user.id), eq(authCodes.purpose, purpose))).returning({ id: authCodes.id });
+          if (removed.length && previousCodes.length) await tx.insert(authCodes).values(previousCodes);
+        });
+      } catch {
+        console.error('Could not restore the previous authentication code after email delivery failed.');
+      }
+      throw error;
+    }
   }
 
   private async consumeCode(userId: string, purpose: Purpose, code: string, store: Pick<typeof db, 'query' | 'delete'> = db) {
