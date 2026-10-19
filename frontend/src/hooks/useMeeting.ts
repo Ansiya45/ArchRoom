@@ -67,13 +67,17 @@ export function useMeeting(initialMeetingCode: string = 'YLM-9284-XKP') {
   const [polls, setPolls] = useState<Poll[]>([]);
 
   // Devices & Audio Settings
-  const [deviceSettings, setDeviceSettings] = useState<DeviceSettings>({
-    micId: 'default',
-    cameraId: 'default',
-    speakerId: 'default-speaker',
+  const [deviceSettings, setDeviceSettings] = useState<DeviceSettings>(() => {
+    let saved: Partial<{ micDevice: string; camDevice: string; speakerDevice: string }> = {};
+    try { saved = JSON.parse(window.localStorage.getItem('ylaam-device-settings') || '{}'); } catch { /* ignore invalid local settings */ }
+    return {
+    micId: saved.micDevice || 'default',
+    cameraId: saved.camDevice || 'default',
+    speakerId: saved.speakerDevice || 'default-speaker',
     noiseCancellation: true,
     backgroundBlur: 'none',
     resolution: '1080p',
+    };
   });
 
   // Timer tick effect
