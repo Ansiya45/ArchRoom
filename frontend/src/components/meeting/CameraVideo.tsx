@@ -18,7 +18,7 @@ interface CameraVideoProps {
 
 declare global {
   interface Window {
-    SelfieSegmentation?: any;
+    SelfieSegmentation?: new (options: { locateFile: (file: string) => string }) => any;
   }
 }
 
@@ -92,7 +92,12 @@ export const CameraVideo: React.FC<CameraVideoProps> = ({
   const [errorMessage, setErrorMessage] = useState<string>('');
   const [isAiSegmentationReady, setIsAiSegmentationReady] = useState<boolean>(false);
 
-  const currentBgUrl = BACKGROUND_IMAGES[activeBg];
+  // Background effects are applied before the local track is published. A
+  // remote participant's track is already processed by that participant and
+  // must always be rendered directly; running segmentation again would blur
+  // the entire remote video while the MediaPipe mask is unavailable.
+  const effectiveBg = isSelf ? activeBg : 'none';
+  const currentBgUrl = BACKGROUND_IMAGES[effectiveBg];
 
   useEffect(() => {
     if (cameraDeviceRef.current === cameraDeviceId) return;
@@ -257,7 +262,7 @@ export const CameraVideo: React.FC<CameraVideoProps> = ({
         void videoElement.play().catch(() => undefined);
       }
     });
-  }, [stream, activeBg, isCameraOn]);
+  }, [stream, effectiveBg, isCameraOn]);
 
   // 2. Load MediaPipe SelfieSegmentation for real-time AI background removal
   useEffect(() => {
@@ -299,7 +304,7 @@ export const CameraVideo: React.FC<CameraVideoProps> = ({
 
   // 3. Canvas Segmentation Render Loop
   useEffect(() => {
-    if (activeBg === 'none' || !isCameraOn) return;
+    if (!isSelf || effectiveBg === 'none' || !isCameraOn) return;
 
     let animFrameId: number;
     let cancelled = false;
@@ -343,7 +348,7 @@ export const CameraVideo: React.FC<CameraVideoProps> = ({
             ctx.scale(-1, 1);
 
             // Step A: Draw Virtual Background or Blur
-            if (activeBg === 'blur') {
+            if (effectiveBg === 'blur') {
               ctx.filter = 'blur(16px)';
               ctx.drawImage(video, -20, -20, width + 40, height + 40);
               ctx.filter = 'none';
@@ -403,7 +408,7 @@ export const CameraVideo: React.FC<CameraVideoProps> = ({
       cancelled = true;
       if (animFrameId) cancelAnimationFrame(animFrameId);
     };
-  }, [activeBg, isCameraOn, stream, isSelf, hasError, isAiSegmentationReady]);
+  }, [effectiveBg, isCameraOn, stream, isSelf, hasError, isAiSegmentationReady]);
 
   if (!isCameraOn) {
     return (
@@ -432,7 +437,7 @@ export const CameraVideo: React.FC<CameraVideoProps> = ({
       />
 
       {/* Mode A: Clean direct camera view when activeBg === 'none' */}
-      {activeBg === 'none' ? (
+      {effectiveBg === 'none' ? (
         <div className="relative w-full h-full flex items-center justify-center bg-slate-950">
           {!hasError && stream ? (
             <video

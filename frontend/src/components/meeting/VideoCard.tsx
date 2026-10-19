@@ -149,7 +149,7 @@ export const VideoCard: React.FC<VideoCardProps> = ({
         <div className="absolute inset-0 bg-slate-900 overflow-hidden">
           <CameraVideo
             isCameraOn={isCameraOn || Boolean(mediaStream?.getVideoTracks().length)}
-            activeBg={activeBg}
+            activeBg={isScreenSharing ? 'none' : activeBg}
             fallbackAvatar={avatar}
             isSelf={isSelf || id === 'user-self'}
             mediaStream={mediaStream}

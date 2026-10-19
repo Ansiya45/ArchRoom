@@ -3,6 +3,7 @@ import { Room, RoomEvent, Track, type Participant } from 'livekit-client';
 import { getMeetingSession, type MeetingSession } from '@/lib/meetingSession';
 import { trpc } from '@/lib/trpc';
 import { updateMediaStream } from '@/lib/mediaStream';
+import { createBackgroundVideoProcessor } from '@/lib/backgroundVideoProcessor';
 import type { BackgroundChoice, ChatMessage } from '@/types/meeting';
 import type { TranscriptSegment } from '@/components/meeting/TranscriptModal';
 
@@ -63,6 +64,7 @@ export function useWebRtcMeeting(
   const micStateCallbackRef = useRef(onMicrophoneStateChange);
   micStateCallbackRef.current = onMicrophoneStateChange;
   const cameraStateCallbackRef = useRef(onCameraStateChange);
+  const backgroundProcessorRef = useRef<any>(null);
   cameraStateCallbackRef.current = onCameraStateChange;
 
   const describeCameraError = (error: unknown) => {
@@ -242,6 +244,24 @@ export function useWebRtcMeeting(
 
   useEffect(() => {
     const room = roomRef.current;
+    const track = room?.localParticipant.getTrackPublication(Track.Source.Camera)?.track as any;
+    if (!track || !room) return;
+    const updateProcessor = async () => {
+      if (background === 'none') {
+        if (backgroundProcessorRef.current) { await track.stopProcessor(); backgroundProcessorRef.current = null; refreshMedia(room); }
+        return;
+      }
+      if (backgroundProcessorRef.current) await track.stopProcessor();
+      const processor = createBackgroundVideoProcessor(background as 'blur' | 'office' | 'skyline' | 'studio');
+      await track.setProcessor(processor, true);
+      backgroundProcessorRef.current = processor;
+      refreshMedia(room);
+    };
+    void updateProcessor().catch(() => undefined);
+  }, [background, isConnected]);
+
+  useEffect(() => {
+    const room = roomRef.current;
     if (room) {
       void room.localParticipant.setAttributes({ handRaised: String(handRaised) })
         .then(() => refreshMedia(room))
@@ -336,6 +356,12 @@ export function useWebRtcMeeting(
           setCameraError(describeCameraError(cameraResult.reason));
           cameraStateCallbackRef.current(false);
         }
+        const cameraTrack = room.localParticipant.getTrackPublication(Track.Source.Camera)?.track as any;
+        if (cameraTrack && background !== 'none') {
+          const processor = createBackgroundVideoProcessor(background as 'blur' | 'office' | 'skyline' | 'studio');
+          await cameraTrack.setProcessor(processor, true);
+          backgroundProcessorRef.current = processor;
+        }
         refreshMedia(room);
       } catch (error) {
         if (!cancelled) {
@@ -348,6 +374,7 @@ export function useWebRtcMeeting(
     return () => {
       cancelled = true;
       room.removeAllListeners();
+      if (backgroundProcessorRef.current) { const cameraTrack = room.localParticipant.getTrackPublication(Track.Source.Camera)?.track as any; void cameraTrack?.stopProcessor(); backgroundProcessorRef.current = null; }
       void room.disconnect();
       if (roomRef.current === room) roomRef.current = null;
       streamsRef.current.clear();
