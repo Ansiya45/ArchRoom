@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { SlidersHorizontal, Mic, Video, Volume2, Sparkles, Check, ShieldCheck, RefreshCw, Radio } from 'lucide-react';
 
 interface SettingsViewProps {
@@ -8,9 +8,28 @@ interface SettingsViewProps {
 }
 
 export const SettingsView: React.FC<SettingsViewProps> = ({ onShowToast }) => {
-  const [micDevice, setMicDevice] = useState('Default - MacBook Pro Microphone');
-  const [camDevice, setCamDevice] = useState('FaceTime HD Camera (Built-in)');
-  const [speakerDevice, setSpeakerDevice] = useState('Built-in Output Speakers');
+  const [micDevice, setMicDevice] = useState('default');
+  const [camDevice, setCamDevice] = useState('default');
+  const [speakerDevice, setSpeakerDevice] = useState('default');
+  const [audioDevices, setAudioDevices] = useState<MediaDeviceInfo[]>([]);
+  const [videoDevices, setVideoDevices] = useState<MediaDeviceInfo[]>([]);
+  const [deviceError, setDeviceError] = useState<string | null>(null);
+  const meterStream = useRef<MediaStream | null>(null);
+  const meterFrame = useRef<number | null>(null);
+
+  useEffect(() => {
+    const saved = localStorage.getItem('ylaam-device-settings');
+    if (saved) { try { const value = JSON.parse(saved); setMicDevice(value.micDevice || 'default'); setCamDevice(value.camDevice || 'default'); setSpeakerDevice(value.speakerDevice || 'default'); } catch { /* ignore invalid local settings */ } }
+    const refresh = async () => {
+      if (!navigator.mediaDevices?.enumerateDevices) { setDeviceError('This browser does not support device selection.'); return; }
+      const devices = await navigator.mediaDevices.enumerateDevices();
+      setAudioDevices(devices.filter(device => device.kind === 'audioinput'));
+      setVideoDevices(devices.filter(device => device.kind === 'videoinput'));
+    };
+    void refresh();
+    navigator.mediaDevices?.addEventListener?.('devicechange', refresh);
+    return () => { navigator.mediaDevices?.removeEventListener?.('devicechange', refresh); if (meterFrame.current) cancelAnimationFrame(meterFrame.current); meterStream.current?.getTracks().forEach(track => track.stop()); };
+  }, []);
   
   const [noiseCancel, setNoiseCancel] = useState(true);
   const [hdVideo, setHdVideo] = useState(true);
@@ -20,27 +39,23 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onShowToast }) => {
   const [testingMic, setTestingMic] = useState(false);
   const [micLevel, setMicLevel] = useState(0);
 
-  const handleTestMic = () => {
+  const handleTestMic = async () => {
     if (testingMic) {
-      setTestingMic(false);
+      meterStream.current?.getTracks().forEach(track => track.stop()); meterStream.current = null; setTestingMic(false);
       setMicLevel(0);
       return;
     }
-    setTestingMic(true);
-    let count = 0;
-    const interval = setInterval(() => {
-      setMicLevel(Math.floor(20 + Math.random() * 75));
-      count++;
-      if (count > 20) {
-        clearInterval(interval);
-        setTestingMic(false);
-        setMicLevel(0);
-      }
-    }, 150);
+    try {
+      meterStream.current = await navigator.mediaDevices.getUserMedia({ audio: micDevice === 'default' ? true : { deviceId: { exact: micDevice } } });
+      const context = new AudioContext(); const source = context.createMediaStreamSource(meterStream.current); const analyser = context.createAnalyser(); source.connect(analyser); const data = new Uint8Array(analyser.fftSize);
+      setTestingMic(true); const tick = () => { analyser.getByteTimeDomainData(data); let sum = 0; for (const sample of data) sum += Math.abs(sample - 128); setMicLevel(Math.min(100, Math.round(sum / data.length * 3))); meterFrame.current = requestAnimationFrame(tick); }; tick();
+      setTimeout(() => { if (meterFrame.current) cancelAnimationFrame(meterFrame.current); meterStream.current?.getTracks().forEach(track => track.stop()); meterStream.current = null; void context.close(); setTestingMic(false); setMicLevel(0); }, 5000);
+    } catch { setDeviceError('Microphone permission was denied or the selected microphone is unavailable.'); setTestingMic(false); }
   };
 
   const handleSave = () => {
-    onShowToast('Settings saved successfully!');
+    localStorage.setItem('ylaam-device-settings', JSON.stringify({ micDevice, camDevice, speakerDevice }));
+    onShowToast('Device preferences saved. They will be applied when the next meeting starts.');
   };
 
   return (
@@ -73,9 +88,8 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onShowToast }) => {
               onChange={(e) => setMicDevice(e.target.value)}
               className="w-full px-4 py-3 rounded-xl border border-slate-200 text-slate-800 text-sm focus:border-blue-500 focus:outline-none bg-slate-50 font-medium"
             >
-              <option>Default - MacBook Pro Microphone</option>
-              <option>External USB Audio Interface</option>
-              <option>AirPods Pro (Bluetooth)</option>
+              <option value="default">Default microphone</option>
+              {audioDevices.map((device, index) => <option key={device.deviceId} value={device.deviceId}>{device.label || `Microphone ${index + 1}`}</option>)}
             </select>
           </div>
 
@@ -107,9 +121,8 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onShowToast }) => {
               onChange={(e) => setCamDevice(e.target.value)}
               className="w-full px-4 py-3 rounded-xl border border-slate-200 text-slate-800 text-sm focus:border-blue-500 focus:outline-none bg-slate-50 font-medium"
             >
-              <option>FaceTime HD Camera (Built-in)</option>
-              <option>YLAAM-MEET 4K Pro Webcam</option>
-              <option>Virtual Continuity Camera</option>
+              <option value="default">Default camera</option>
+              {videoDevices.map((device, index) => <option key={device.deviceId} value={device.deviceId}>{device.label || `Camera ${index + 1}`}</option>)}
             </select>
           </div>
 
@@ -122,11 +135,10 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onShowToast }) => {
               onChange={(e) => setSpeakerDevice(e.target.value)}
               className="w-full px-4 py-3 rounded-xl border border-slate-200 text-slate-800 text-sm focus:border-blue-500 focus:outline-none bg-slate-50 font-medium"
             >
-              <option>Built-in Output Speakers</option>
-              <option>Headphones (3.5mm Output)</option>
-              <option>External Monitor HDMI Audio</option>
+              <option value="default">Default speaker</option>
             </select>
           </div>
+          {deviceError && <p role="alert" className="text-xs text-amber-700">{deviceError}</p>}
         </div>
 
         {/* Right Column: AI & Quality Enhancements */}

@@ -116,6 +116,12 @@ export const meetingsRouter = t.router({
       return meetingService.decideAdmission(input.meetingCode, input.participantId, input.admit, ctx.user!.id, input.occurrenceId);
     }),
 
+  admitAll: protectedProcedure
+    .input(z.object({ meetingCode: z.string().min(1), occurrenceId: z.string().uuid().optional() }))
+    .mutation(async ({ input, ctx }) => {
+      return meetingService.admitAll(input.meetingCode, ctx.user!.id, input.occurrenceId);
+    }),
+
   start: protectedProcedure
     .input(
       z.object({

@@ -8,10 +8,10 @@ process.env.JWT_SECRET = 'test-only';
 const { db } = await import('../src/db/index.js');
 const { MeetingAiPermissionService } = await import('../src/services/meeting-ai-permission.service.js');
 
-test('host enabled transcription needs no participant consent, but stale/stopped sessions and non-hosts cannot upload', async () => {
+test('transcription requires unanimous consent, and stale/stopped sessions and non-hosts cannot upload', async () => {
   const host = randomUUID(), guest = randomUUID(), meetingId = randomUUID(), requestId = randomUUID();
   const request: any = { requestId, meetingId, occurrenceId: null, requestedByUserId: host, stoppedAt: null, lastHeartbeatAt: new Date() };
-  const original = { meeting: db.query.meetings.findFirst, participant: db.query.meetingParticipants.findFirst, request: db.query.meetingAiRequests.findFirst };
+  const original = { meeting: db.query.meetings.findFirst, participant: db.query.meetingParticipants.findFirst, participants: db.query.meetingParticipants.findMany, consents: db.query.meetingAiConsents.findMany, request: db.query.meetingAiRequests.findFirst };
   db.query.meetings.findFirst = (async () => ({ id: meetingId, meetingCode: 'YLM-TEST', scheduleType: 'one_time', status: 'live', hostUserId: host })) as any;
   const dialect = new PgDialect();
   db.query.meetingParticipants.findFirst = (async ({ where }: any) => {
@@ -22,16 +22,18 @@ test('host enabled transcription needs no participant consent, but stale/stopped
     const userId = query.params.includes(host) ? host : query.params.includes(guest) ? guest : undefined;
     return userId ? { id: randomUUID(), userId, role: userId === host ? 'host' : 'participant' } : undefined;
   }) as any;
+  db.query.meetingParticipants.findMany = (async () => [{ id: randomUUID(), userId: host, role: 'host', admission: 'admitted', leftAt: null }]) as any;
+  db.query.meetingAiConsents.findMany = (async () => []) as any;
   db.query.meetingAiRequests.findFirst = (async () => request) as any;
   const service = new MeetingAiPermissionService(), input = { meetingCode: 'YLM-TEST', requestId };
   try {
-    await service.assertCanTranscribe(input, host);
+    await assert.rejects(() => service.assertCanTranscribe(input, host), { code: 'FORBIDDEN' });
     await assert.rejects(() => service.assertCanTranscribe(input, guest), { code: 'FORBIDDEN' });
     request.lastHeartbeatAt = new Date(Date.now() - 11000);
     await assert.rejects(() => service.assertCanTranscribe(input, host), { code: 'FORBIDDEN' });
     request.lastHeartbeatAt = new Date(); request.stoppedAt = new Date();
     await assert.rejects(() => service.assertCanTranscribe(input, host), { code: 'FORBIDDEN' });
   } finally {
-    db.query.meetings.findFirst = original.meeting; db.query.meetingParticipants.findFirst = original.participant; db.query.meetingAiRequests.findFirst = original.request;
+    db.query.meetings.findFirst = original.meeting; db.query.meetingParticipants.findFirst = original.participant; db.query.meetingParticipants.findMany = original.participants; db.query.meetingAiConsents.findMany = original.consents; db.query.meetingAiRequests.findFirst = original.request;
   }
 });

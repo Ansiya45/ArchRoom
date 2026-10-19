@@ -14,12 +14,6 @@ export const Footer: React.FC = () => {
           <a href="/privacy-policy" className="hover:text-slate-600 transition-colors">
             Privacy Policy
           </a>
-          <a href="#terms" onClick={(e) => e.preventDefault()} className="hover:text-slate-600 transition-colors">
-            TERMS
-          </a>
-          <a href="#security" onClick={(e) => e.preventDefault()} className="hover:text-slate-600 transition-colors">
-            SECURITY
-          </a>
         </div>
       </div>
     </footer>

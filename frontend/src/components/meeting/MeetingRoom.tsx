@@ -93,6 +93,8 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
   const [enableAiOnJoin, setEnableAiOnJoin] = useState(false);
   const aiStartedForSession = useRef('');
   const [joinRequests, setJoinRequests] = useState<Array<{ id: string; name: string }>>([]);
+  const [admissionError, setAdmissionError] = useState('');
+  const [admissionActionError, setAdmissionActionError] = useState('');
   const [isRecordingsOpen, setIsRecordingsOpen] = useState(false);
   const [summaryReview, setSummaryReview] = useState<{ speech: string; occurrenceId?: string; warning: string } | null>(null);
   const [closingForSummary, setClosingForSummary] = useState(false);
@@ -102,7 +104,6 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
   const chatToastTimerRef = useRef<number | null>(null);
   const leavingRef = useRef(false);
   const joiningRef = useRef(false);
-  const loadingRequestsRef = useRef(false);
   const admissionActionsRef = useRef(new Set<string>());
   const recorder = useScreenRecorder();
   const aiAgreedIds = aiStatus.state === 'off' ? [] : Object.keys(call.remoteStreams);
@@ -308,23 +309,37 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
   }, [admission, meetingCode]);
 
   useEffect(() => {
-    if (!meeting.inMeeting || !isHost) return;
+    if (!meeting.inMeeting || (!isHost && !isOwner)) return;
+    let cancelled = false;
+    let checking = false;
+    let controller: AbortController | undefined;
     const loadRequests = async () => {
-      if (loadingRequestsRef.current) return;
-      loadingRequestsRef.current = true;
+      if (checking) return;
+      checking = true;
+      controller = new AbortController();
+      let timeout = 0;
       try {
-        const result = await trpc.meetings.pendingAdmissions.query({ meetingCode, occurrenceId: sessionRef.current?.occurrenceId });
-        setJoinRequests([...new Map(result.requests.map(({ id, name }) => [id, { id, name }])).values()]);
+        const result = await Promise.race([
+          trpc.meetings.pendingAdmissions.query({ meetingCode, occurrenceId: sessionRef.current?.occurrenceId }, { signal: controller.signal }),
+          new Promise<never>((_, reject) => {
+            timeout = window.setTimeout(() => { controller?.abort(); reject(new Error('Join request check timed out')); }, 8000);
+          }),
+        ]);
+        if (!cancelled) {
+          setJoinRequests([...new Map(result.requests.map(({ id, name }) => [id, { id, name }])).values()]);
+          setAdmissionError('');
+        }
       } catch {
-        // Preserve the last known list during temporary network failures.
+        if (!cancelled) setAdmissionError('Unable to check join requests. Retrying automatically.');
       } finally {
-        loadingRequestsRef.current = false;
+        window.clearTimeout(timeout);
+        checking = false;
       }
     };
     void loadRequests();
     const timer = window.setInterval(() => void loadRequests(), 750);
-    return () => window.clearInterval(timer);
-  }, [isHost, meeting.inMeeting, meetingCode]);
+    return () => { cancelled = true; controller?.abort(); window.clearInterval(timer); };
+  }, [isHost, isOwner, meeting.inMeeting, meetingCode]);
 
   useEffect(() => {
     if (!meeting.inMeeting) return;
@@ -682,15 +697,39 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
   const decideAdmission = async (participantId: string, admit: boolean) => {
     if (admissionActionsRef.current.has(participantId)) return;
     admissionActionsRef.current.add(participantId);
+    setAdmissionActionError('');
     setAdmissionActions((current) => new Set(current).add(participantId));
     try {
       await trpc.meetings.decideAdmission.mutate({ meetingCode, occurrenceId: sessionRef.current?.occurrenceId, participantId, admit });
       setJoinRequests((requests) => requests.filter((request) => request.id !== participantId));
+    } catch {
+      setAdmissionActionError('Unable to update the join request. Please try again.');
     } finally {
       admissionActionsRef.current.delete(participantId);
       setAdmissionActions((current) => {
         const next = new Set(current);
         next.delete(participantId);
+        return next;
+      });
+    }
+  };
+
+  const admitAll = async () => {
+    if (admissionActionsRef.current.has('__all__')) return;
+    admissionActionsRef.current.add('__all__');
+    setAdmissionActions((current) => new Set(current).add('__all__'));
+    setAdmissionActionError('');
+    try {
+      const result = await trpc.meetings.admitAll.mutate({ meetingCode, occurrenceId: sessionRef.current?.occurrenceId });
+      const admitted = new Set(result.participantIds);
+      setJoinRequests((requests) => requests.filter((request) => !admitted.has(request.id)));
+    } catch {
+      setAdmissionActionError('Unable to admit all join requests. Please try again.');
+    } finally {
+      admissionActionsRef.current.delete('__all__');
+      setAdmissionActions((current) => {
+        const next = new Set(current);
+        next.delete('__all__');
         return next;
       });
     }
@@ -766,7 +805,10 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
           {call.cameraError}
         </div>
       )}
-      {isHost && joinRequests.length > 0 && (
+      {(isHost || isOwner) && (admissionError || admissionActionError) && (
+        <div role="alert" className="fixed left-1/2 top-4 z-[120] w-[min(92vw,560px)] -translate-x-1/2 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-medium text-amber-900 shadow-xl">{admissionActionError || admissionError}</div>
+      )}
+      {(isHost || isOwner) && joinRequests.length > 0 && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-950/55 p-4 backdrop-blur-sm">
           <div role="dialog" aria-modal="true" aria-label="Meeting join requests" className="w-full max-w-md rounded-3xl border border-blue-200 bg-white p-6 shadow-2xl">
             <div className="mb-2 flex items-center gap-3 text-slate-900">
@@ -779,6 +821,11 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
               </div>
             </div>
             <div className="mt-5 space-y-3">
+              {joinRequests.length > 1 && (
+                <button type="button" onClick={() => void admitAll()} disabled={admissionActionsRef.current.has('__all__')} className="w-full rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-blue-500 disabled:cursor-wait disabled:opacity-50">
+                  {admissionActionsRef.current.has('__all__') ? 'Admitting...' : `Admit All (${joinRequests.length})`}
+                </button>
+              )}
               {joinRequests.map((request) => (
                 <div key={request.id} className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
                   <p className="mb-3 truncate text-base font-semibold text-slate-900">{request.name}</p>

@@ -356,6 +356,22 @@ export class MeetingService {
     return { ok: true, participant };
   }
 
+  async admitAll(meetingCode: string, hostUserId: string, occurrenceId?: string) {
+    const meeting = await this.requireHost(meetingCode, hostUserId);
+    assertCurrentOccurrence(meeting, occurrenceId);
+    const scope = participantScope(meeting);
+    const updated = await db
+      .update(meetingParticipants)
+      .set({ admission: 'admitted', leftAt: null })
+      .where(and(
+        eq(meetingParticipants.meetingId, meeting.id), scope,
+        eq(meetingParticipants.admission, 'pending'),
+        isNull(meetingParticipants.leftAt),
+      ))
+      .returning({ id: meetingParticipants.id });
+    return { ok: true, admittedCount: updated.length, participantIds: updated.map((row) => row.id) };
+  }
+
   async startMeeting(meetingCode: string, userId: string, startRequestId?: string, expectedUpdatedAt?: string, occurrenceId?: string) {
     const normalizedCode = meetingCode.trim().toUpperCase();
     const meeting = await db.query.meetings.findFirst({

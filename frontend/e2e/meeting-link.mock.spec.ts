@@ -2,16 +2,20 @@ import { randomUUID } from 'node:crypto';
 import type { Page } from '@playwright/test';
 import { test as base, expect, login, logout, type AuthMock } from './fixtures/auth-mock';
 const code = 'YLM-W8Z3SE', path = `/meet/${code}`;
-type Room = { admission: 'pending' | 'admitted' | 'denied'; status: string; cancelled: boolean; missing: boolean; calls: Array<{ path: string; input: any }> };
+type Room = { admission: 'pending' | 'admitted' | 'denied'; status: string; cancelled: boolean; missing: boolean; host: boolean; rosterRole: 'host' | 'participant'; pollFails: boolean; stallPending: boolean; requests: Array<{ id: string; name: string }>; calls: Array<{ path: string; input: any }> };
 const test = base.extend<{ room: Room }>({
   room: [async ({ context, authMock }, use) => {
-    const room: Room = { admission: 'pending', status: 'live', cancelled: false, missing: false, calls: [] };
+    const room: Room = { admission: 'pending', status: 'live', cancelled: false, missing: false, host: false, rosterRole: 'participant', pollFails: false, stallPending: false, requests: [], calls: [] };
     const id = randomUUID();
     await context.routeWebSocket('**/api/whiteboard', socket => { socket.onMessage(() => {}); });
     await context.route('**/api/meetings.*', async route => {
       const url = new URL(route.request().url());
       const paths = decodeURIComponent(url.pathname.slice('/api/'.length)).split(',');
       if (paths.every(p => p === 'meetings.list')) { await route.fallback(); return; }
+      if (paths.includes('meetings.pendingAdmissions') && room.stallPending) {
+        room.stallPending = false;
+        await new Promise(resolve => setTimeout(resolve, 10_000));
+      }
       const batched = url.searchParams.get('batch') === '1';
       const input = route.request().method() === 'POST' ? route.request().postDataJSON() : JSON.parse(url.searchParams.get('input') || '{}');
       const results = paths.map((procedure, index) => {
@@ -20,11 +24,14 @@ const test = base.extend<{ room: Room }>({
         expect(value.meetingCode).toMatch(/^YLM-/);
         const ok = (data: unknown) => ({ result: { data } });
         const error = (message: string, errorCode = 'NOT_FOUND') => ({ error: { message, code: -32004, data: { code: errorCode, httpStatus: 404, path: procedure } } });
-        const meeting = { id, meetingCode: value.meetingCode, title: 'Private shared meeting', hostUserId: 'another-user', status: room.status, scheduleType: room.cancelled ? 'recurring' : null, recurrenceCancelledAt: room.cancelled ? new Date().toISOString() : null };
+        const meeting = { id, meetingCode: value.meetingCode, title: 'Private shared meeting', hostUserId: room.host ? authMock.user.id : 'another-user', status: room.status, scheduleType: room.cancelled ? 'recurring' : null, recurrenceCancelledAt: room.cancelled ? new Date().toISOString() : null };
         if (procedure === 'meetings.getByCode') return room.missing ? error('Meeting not found') : ok({ ok: true, meeting });
-        if (procedure === 'meetings.join' || procedure === 'meetings.rejoin') return ok({ ok: true, meeting, participant: { id, admission: room.admission } });
+        if (procedure === 'meetings.join' || procedure === 'meetings.rejoin') return ok({ ok: true, meeting, participant: { id, admission: room.host ? 'admitted' : room.admission } });
         if (procedure === 'meetings.admissionStatus') return ok({ admission: room.admission, meeting, leftAt: null, sessionEnded: false });
-        if (procedure === 'meetings.participants') return ok({ participants: [] });
+        if (procedure === 'meetings.participants') return ok({ participants: room.host ? [{ id, name: authMock.user.fullName, role: room.rosterRole, isSelf: true }] : [] });
+        if (procedure === 'meetings.pendingAdmissions') return room.pollFails ? error('Temporarily unavailable', 'INTERNAL_SERVER_ERROR') : ok({ requests: room.requests });
+        if (procedure === 'meetings.decideAdmission') { room.requests = room.requests.filter(request => request.id !== value.participantId); return ok({ ok: true }); }
+        if (procedure === 'meetings.admitAll') { const participantIds = room.requests.map(request => request.id); room.requests = []; return ok({ ok: true, admittedCount: participantIds.length, participantIds }); }
         if (procedure === 'meetings.aiStatus') return ok({ state: 'off' });
         // Verify the admission transition without connecting to real media.
         if (procedure === 'meetings.livekitToken') return error('Media disabled in isolated test', 'PRECONDITION_FAILED');
@@ -122,6 +129,59 @@ test('M: host denial never unlocks guest media', async ({ page, room }) => {
   await openJoin(page); await expect(waiting(page)).toBeVisible(); room.admission = 'denied';
   await expect(page.getByRole('heading', { name: 'Request not accepted' })).toBeVisible();
   expect(room.calls.some(c => c.path === 'meetings.livekitToken')).toBe(false);
+});
+test('creator can see and admit requests even if the roster temporarily reports a participant role', async ({ page, authMock, room }) => {
+  room.host = true;
+  room.admission = 'admitted';
+  await seedAccount(page, authMock);
+  await page.goto(path);
+  await page.getByRole('button', { name: 'Join Meeting Now' }).click();
+  await expect.poll(() => room.calls.some(call => call.path === 'meetings.participants')).toBe(true);
+  room.requests = [{ id: randomUUID(), name: 'Waiting guest' }];
+  const dialog = page.getByRole('dialog', { name: 'Meeting join requests' });
+  await expect(dialog).toContainText('Waiting guest');
+  await dialog.getByRole('button', { name: 'Admit' }).click();
+  await expect(dialog).toBeHidden();
+  expect(room.calls.find(call => call.path === 'meetings.decideAdmission')?.input.admit).toBe(true);
+});
+test('host can admit all currently pending guests with one idempotent backend call', async ({ page, authMock, room }) => {
+  room.host = true;
+  room.admission = 'admitted';
+  room.rosterRole = 'host';
+  room.requests = [{ id: randomUUID(), name: 'Guest One' }, { id: randomUUID(), name: 'Guest Two' }];
+  await seedAccount(page, authMock);
+  await page.goto(path);
+  await page.getByRole('button', { name: 'Join Meeting Now' }).click();
+  const dialog = page.getByRole('dialog', { name: 'Meeting join requests' });
+  await expect(dialog).toContainText('Guest One');
+  await dialog.getByRole('button', { name: 'Admit All (2)' }).click();
+  await expect(dialog).toBeHidden();
+  expect(room.calls.filter(call => call.path === 'meetings.admitAll')).toHaveLength(1);
+  expect(room.calls.some(call => call.path === 'meetings.decideAdmission')).toBe(false);
+});
+test('host sees a warning when checking requests fails and it clears on recovery', async ({ page, authMock, room }) => {
+  room.host = true;
+  room.admission = 'admitted';
+  room.pollFails = true;
+  await seedAccount(page, authMock);
+  await page.goto(path);
+  await page.getByRole('button', { name: 'Join Meeting Now' }).click();
+  const warning = page.getByRole('alert').filter({ hasText: 'Unable to check join requests' });
+  await expect(warning).toBeVisible();
+  room.pollFails = false;
+  await expect(warning).toBeHidden();
+});
+test('a stalled request check recovers and shows a waiting guest without a refresh', async ({ page, authMock, room }) => {
+  room.host = true;
+  room.admission = 'admitted';
+  room.rosterRole = 'host';
+  room.stallPending = true;
+  room.requests = [{ id: randomUUID(), name: 'Waiting guest' }];
+  await seedAccount(page, authMock);
+  await page.goto(path);
+  await page.getByRole('button', { name: 'Join Meeting Now' }).click();
+  await expect(page.getByRole('alert').filter({ hasText: 'Unable to check join requests' })).toBeVisible({ timeout: 15_000 });
+  await expect(page.getByRole('dialog', { name: 'Meeting join requests' })).toContainText('Waiting guest', { timeout: 20_000 });
 });
 test('expired account session falls back to guest joining on the shared URL', async ({ page, authMock }) => {
   await seedAccount(page, authMock); authMock.expired = true; await page.goto(path);
