@@ -11,6 +11,7 @@
     "db:migrate": "tsx src/db/migrate-cli.ts",
     "test": "node --import tsx --test tests/*.test.ts",
     "test:integration": "node --import tsx --test tests/integration/*.test.ts",
+    "test:integration:local": "node --import tsx --test tests/local/*.test.ts",
     "typecheck": "tsc --noEmit --project tsconfig.json",
     "drizzle:generate": "drizzle-kit generate",
     "drizzle:migrate": "npm run db:migrate",

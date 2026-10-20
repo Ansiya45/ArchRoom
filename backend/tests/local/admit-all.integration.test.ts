@@ -11,8 +11,8 @@ database.password = password;
 process.env.DATABASE_URL = database.href;
 process.env.JWT_SECRET = 'local-admit-all-test';
 const sql = postgres({ host: '127.0.0.1', port: 5432, database: 'ylaam_auth_test', username: 'postgres', password, max: 2 });
-const { db } = await import('../src/db/index.js');
-const { MeetingService } = await import('../src/services/meeting.service.js');
+const { db } = await import('../../src/db/index.js');
+const { MeetingService } = await import('../../src/services/meeting.service.js');
 
 test('real PostgreSQL Admit All is host-authorized, scoped, idempotent, and concurrent-safe', { timeout: 120000 }, async () => {
   const [identity] = await sql`select current_database() as name, inet_server_addr() as host, inet_server_port() as port`;
