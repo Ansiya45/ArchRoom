@@ -74,3 +74,14 @@ test('resend prevents concurrent clicks and clears the old input on success (moc
   expect(calls).toBe(1);
   await expectNoSession(page);
 });
+
+test('failed resend shows an error without claiming a new email was sent', async ({ page }) => {
+  await page.route('**/api/auth.resendVerification*', route => route.fulfill({
+    contentType: 'application/json', body: JSON.stringify([{ error: { message: 'Unable to send email', code: -32603,
+      data: { code: 'INTERNAL_SERVER_ERROR', httpStatus: 500, path: 'auth.resendVerification' } } }]),
+  }));
+  await page.getByRole('button', { name: 'Resend code', exact: true }).click();
+  await expect(page.getByRole('alert')).toHaveText('Unable to send email');
+  await expect(page.getByText('A new verification code was sent to your email.', { exact: true })).toBeHidden();
+  await expectNoSession(page);
+});

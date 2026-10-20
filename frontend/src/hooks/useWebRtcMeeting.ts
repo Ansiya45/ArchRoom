@@ -257,7 +257,11 @@ export function useWebRtcMeeting(
       backgroundProcessorRef.current = processor;
       refreshMedia(room);
     };
-    void updateProcessor().catch(() => undefined);
+    void updateProcessor().catch((error) => {
+      // Keep the camera usable, but surface a truthful failure instead of
+      // silently leaving the user with a local-only background preview.
+      setCameraError(error instanceof Error ? error.message : 'Unable to publish background effect');
+    });
   }, [background, isConnected]);
 
   useEffect(() => {

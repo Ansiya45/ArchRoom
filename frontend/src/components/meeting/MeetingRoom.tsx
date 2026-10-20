@@ -93,6 +93,8 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
   const [enableAiOnJoin, setEnableAiOnJoin] = useState(false);
   const aiStartedForSession = useRef('');
   const [joinRequests, setJoinRequests] = useState<Array<{ id: string; name: string }>>([]);
+  const previousJoinRequestIdsRef = useRef<Set<string>>(new Set());
+  const [admissionNotice, setAdmissionNotice] = useState('');
   const [admissionError, setAdmissionError] = useState('');
   const [admissionActionError, setAdmissionActionError] = useState('');
   const [isRecordingsOpen, setIsRecordingsOpen] = useState(false);
@@ -326,7 +328,14 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
           }),
         ]);
         if (!cancelled) {
-          setJoinRequests([...new Map(result.requests.map(({ id, name }) => [id, { id, name }])).values()]);
+          const requests = [...new Map(result.requests.map(({ id, name }) => [id, { id, name }])).values()];
+          const fresh = requests.filter(request => !previousJoinRequestIdsRef.current.has(request.id));
+          if (fresh.length > 0) {
+            setAdmissionNotice(fresh.length === 1 ? `${fresh[0].name} is waiting to join.` : `${fresh.length} people are waiting to join.`);
+            window.setTimeout(() => setAdmissionNotice(''), 6000);
+          }
+          previousJoinRequestIdsRef.current = new Set(requests.map(request => request.id));
+          setJoinRequests(requests);
           setAdmissionError('');
         }
       } catch {
@@ -609,6 +618,10 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
 
   const handleJoin = async () => {
     if (checkingSession || sessionError) return;
+    // Auth hydration can finish in the same render that enables the pre-join
+    // action. Read the verified local identity as a fallback so a creator is
+    // never treated as an anonymous guest during that transition.
+    const authenticatedUser = user ?? getStoredUser();
     const displayName = meeting.displayName.trim();
     if (!displayName || joiningRef.current || admission === 'pending') return;
     joiningRef.current = true;
@@ -619,7 +632,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
       if (room.recurrenceCancelledAt) throw new Error('This meeting series has been cancelled.');
       if (room.status === 'ended' && room.scheduleType !== 'reusable' && room.scheduleType !== 'recurring') throw new Error('This meeting has ended.');
       if ((room.scheduleType === 'reusable' || room.scheduleType === 'recurring')) {
-        if (!room.activeOccurrenceId && room.hostUserId === user?.id) {
+        if (!room.activeOccurrenceId && room.hostUserId === authenticatedUser?.id) {
           ({ meeting: room } = await startHostedMeeting(room));
         }
         if (!room.activeOccurrenceId) throw new Error('The host has not opened this room yet. Please try again when the host starts it.');
@@ -640,14 +653,14 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
             participantId: existingSession.participantId,
           });
         } catch (error) {
-          if (user && (!(error instanceof Error) || !error.message.includes('A new admission is required'))) throw error;
+          if (authenticatedUser && (!(error instanceof Error) || !error.message.includes('A new admission is required'))) throw error;
           joinRequestId = crypto.randomUUID();
           rememberSession(meeting.meetingCode, { displayName, occurrenceId: sessionRef.current?.occurrenceId, joinRequestId });
           const joined = await trpc.meetings.join.mutate({
             meetingCode: meeting.meetingCode,
             occurrenceId: sessionRef.current?.occurrenceId,
             joinRequestId,
-            ...(!user ? { guestName: displayName } : {}),
+            ...(!authenticatedUser ? { guestName: displayName } : {}),
           });
           rememberSession(meeting.meetingCode, {
             displayName,
@@ -676,7 +689,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
           meetingCode: meeting.meetingCode,
           occurrenceId: sessionRef.current?.occurrenceId,
           joinRequestId,
-          ...(!user ? { guestName: displayName } : {}),
+          ...(!authenticatedUser ? { guestName: displayName } : {}),
         });
         rememberSession(meeting.meetingCode, {
           displayName,
@@ -808,6 +821,9 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
       {(isHost || isOwner) && (admissionError || admissionActionError) && (
         <div role="alert" className="fixed left-1/2 top-4 z-[120] w-[min(92vw,560px)] -translate-x-1/2 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-medium text-amber-900 shadow-xl">{admissionActionError || admissionError}</div>
       )}
+      {(isHost || isOwner) && admissionNotice && (
+        <div role="status" className="fixed right-5 top-5 z-[120] rounded-2xl border border-blue-200 bg-white px-4 py-3 text-sm font-semibold text-slate-900 shadow-xl">{admissionNotice}</div>
+      )}
       {(isHost || isOwner) && joinRequests.length > 0 && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-950/55 p-4 backdrop-blur-sm">
           <div role="dialog" aria-modal="true" aria-label="Meeting join requests" className="w-full max-w-md rounded-3xl border border-blue-200 bg-white p-6 shadow-2xl">
@@ -828,13 +844,16 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
               )}
               {joinRequests.map((request) => (
                 <div key={request.id} className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
-                  <p className="mb-3 truncate text-base font-semibold text-slate-900">{request.name}</p>
+                  <div className="mb-3 flex items-center justify-between gap-3">
+                    <p className="truncate text-base font-semibold text-slate-900">{request.name}</p>
+                    <button type="button" disabled={admissionActions.has(request.id)} onClick={() => void decideAdmission(request.id, true)} className="shrink-0 rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-bold text-white hover:bg-emerald-500 disabled:cursor-wait disabled:opacity-50">{admissionActions.has(request.id) ? '...' : 'Admit'}</button>
+                  </div>
                   <div className="grid grid-cols-2 gap-2">
                     <button disabled={admissionActions.has(request.id)} onClick={() => void decideAdmission(request.id, false)} className="flex items-center justify-center gap-2 rounded-xl border border-slate-300 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-100 disabled:cursor-wait disabled:opacity-50">
                       <X className="h-4 w-4" /> {admissionActions.has(request.id) ? 'Processing...' : 'Deny'}
                     </button>
-                    <button disabled={admissionActions.has(request.id)} onClick={() => void decideAdmission(request.id, true)} className="flex items-center justify-center gap-2 rounded-xl bg-emerald-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-emerald-500 disabled:cursor-wait disabled:opacity-50">
-                      <Check className="h-4 w-4" /> {admissionActions.has(request.id) ? 'Processing...' : 'Admit'}
+                    <button type="button" disabled={admissionActions.has(request.id)} onClick={() => void decideAdmission(request.id, true)} className="flex items-center justify-center gap-2 rounded-xl bg-emerald-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-emerald-500 disabled:cursor-wait disabled:opacity-50">
+                      <Check className="h-4 w-4" /> {admissionActions.has(request.id) ? 'Processing...' : 'Admit participant'}
                     </button>
                   </div>
                 </div>
