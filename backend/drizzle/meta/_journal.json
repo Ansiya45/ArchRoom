@@ -92,6 +92,27 @@
       "when": 1792108800000,
       "tag": "0012_meeting_history",
       "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1792800000000,
+      "tag": "0013_meeting_recording_settings",
+      "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "7",
+      "when": 1793188800000,
+      "tag": "0014_drive_security_foundation",
+      "breakpoints": true
+    },
+    {
+      "idx": 15,
+      "version": "7",
+      "when": 1793275200000,
+      "tag": "0015_recording_folder_creators",
+      "breakpoints": true
     }
   ]
 }

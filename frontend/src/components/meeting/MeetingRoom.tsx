@@ -90,6 +90,9 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
   const [aiStatus, setAiStatus] = useState<AiStatus>({ state: 'off' });
   const [aiBusy, setAiBusy] = useState(false);
   const [aiCaptureFault, setAiCaptureFault] = useState(false);
+  const [aiError, setAiError] = useState('');
+  const [aiStatusError, setAiStatusError] = useState('');
+  const [aiNoticeVisible, setAiNoticeVisible] = useState(false);
   const [enableAiOnJoin, setEnableAiOnJoin] = useState(false);
   const aiStartedForSession = useRef('');
   const [joinRequests, setJoinRequests] = useState<Array<{ id: string; name: string }>>([]);
@@ -118,13 +121,24 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
   );
 
   useEffect(() => {
+    if (!meeting.inMeeting || aiStatus.state === 'off') {
+      setAiNoticeVisible(false);
+      return;
+    }
+    setAiNoticeVisible(true);
+    const timer = window.setTimeout(() => setAiNoticeVisible(false), 7000);
+    return () => window.clearTimeout(timer);
+  }, [meeting.inMeeting, aiStatus.state, aiStatus.state === 'off' ? '' : aiStatus.requestId]);
+
+  useEffect(() => {
     if (aiStatus.state !== 'active' || aiStatus.requestedByUserId !== user?.id) return;
     let cancelled = false;
     const heartbeat = async () => {
       try {
         await trpc.meetings.aiCaptureHeartbeat.mutate({ meetingCode, occurrenceId: sessionRef.current?.occurrenceId, requestId: aiStatus.requestId });
+        if (!cancelled) setAiCaptureFault(false);
       } catch {
-        if (!cancelled) { setAiCaptureFault(true); setAiStatus({ state: 'off' }); }
+        if (!cancelled) setAiCaptureFault(true);
       }
     };
     void heartbeat();
@@ -138,9 +152,9 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
     const refresh = async () => {
       try {
         const status = await trpc.meetings.aiStatus.query({ meetingCode, occurrenceId: sessionRef.current?.occurrenceId, participantId: sessionRef.current?.participantId });
-        if (!cancelled) setAiStatus(status);
+        if (!cancelled) { setAiStatus(status); setAiStatusError(''); }
       } catch {
-        if (!cancelled) setAiStatus({ state: 'off' });
+        if (!cancelled) setAiStatusError('Unable to check transcription status. Retrying automatically.');
       }
     };
     void refresh();
@@ -156,11 +170,13 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
     void (async () => {
       setAiBusy(true); setAiCaptureFault(false);
       try {
+        setAiError('');
         await trpc.meetings.requestAiTranscription.mutate({ meetingCode, occurrenceId: sessionRef.current?.occurrenceId });
         setAiStatus(await trpc.meetings.aiStatus.query({ meetingCode, occurrenceId: sessionRef.current?.occurrenceId, participantId: sessionRef.current?.participantId }));
+        setAiError('');
       } catch (error) {
         setEnableAiOnJoin(false); aiStartedForSession.current = ''; setAiStatus({ state: 'off' });
-        alert(error instanceof Error ? error.message : 'Could not enable AI transcription.');
+        setAiError(error instanceof Error ? error.message : 'Could not enable AI transcription.');
       } finally { setAiBusy(false); }
     })();
   }, [meeting.inMeeting, isOwner, user?.id, enableAiOnJoin, meetingCode]);
@@ -192,6 +208,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
   }, [sessionAttempt]);
 
   useEffect(() => meeting.syncParticipantAudio(call.remoteMicMuted), [call.remoteMicMuted]);
+  useEffect(() => meeting.syncParticipantSpeaking(call.speakingLevels), [call.speakingLevels]);
   useEffect(() => meeting.syncParticipantVideo(call.remoteCameraOn), [call.remoteCameraOn]);
 
   useEffect(() => {
@@ -552,6 +569,22 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
     finally { setAiBusy(false); }
   };
 
+  const respondToAiTranscription = async (agree: boolean) => {
+    if (aiStatus.state === 'off' || aiBusy) return;
+    setAiBusy(true); setAiError('');
+    try {
+      await trpc.meetings.respondAiTranscription.mutate({
+        meetingCode, occurrenceId: sessionRef.current?.occurrenceId,
+        participantId: sessionRef.current?.participantId, requestId: aiStatus.requestId, agree,
+      });
+      setAiStatus(await trpc.meetings.aiStatus.query({
+        meetingCode, occurrenceId: sessionRef.current?.occurrenceId, participantId: sessionRef.current?.participantId,
+      }));
+    } catch (error) {
+      setAiError(error instanceof Error ? error.message : 'Unable to save your transcription choice.');
+    } finally { setAiBusy(false); }
+  };
+
   const toggleRecording = async () => {
     if (!isHost) return;
     if (recorder.isRecording) {
@@ -902,7 +935,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
         onEndMeeting={() => void handleEndMeeting()}
       />
 
-      <div className="relative z-40 shrink-0 px-3 sm:px-4 pt-2">
+      <div className="relative z-40 shrink-0 px-3 sm:px-4 pt-2 flex items-center gap-2">
         <button
           type="button"
           onClick={() => setIsLeftPanelOpen((open) => !open)}
@@ -914,6 +947,12 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
         >
           <Menu className="h-5 w-5" aria-hidden="true" />
         </button>
+        {aiStatus.state !== 'off' && <>
+          <span className="rounded-lg bg-slate-900/80 px-2 py-1 text-xs text-white">
+            {aiStatus.state === 'pending' ? 'AI transcription awaiting consent' : aiStatus.capturing && !aiCaptureFault && transcript.capturing ? 'AI transcription active' : 'AI transcription preparing'}
+          </span>
+          {isHost && <button type="button" disabled={aiBusy} onClick={() => void stopAiTranscription()} className="rounded-lg bg-slate-900/80 px-2 py-1 text-xs text-white underline disabled:opacity-50">Stop transcription</button>}
+        </>}
       </div>
 
       {/* MAIN CONTENT AREA: Left Panel + Video Stage + Right Sidebar */}
@@ -963,16 +1002,27 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
       />
 
       {closingForSummary && <div role="status" className="fixed inset-0 z-[110] bg-black/80 text-white flex items-center justify-center">Finishing speech capture and closing the call...</div>}
+      {(aiNoticeVisible && aiStatus.state !== 'off' || aiStatus.state !== 'off' && aiStatus.needsResponse || aiError || aiStatusError || aiCaptureFault || transcript.error) &&
       <div className="fixed bottom-24 left-4 z-30 max-w-sm rounded-lg bg-zinc-900/95 p-3 text-xs text-white shadow-lg" role="status">
-        {aiStatus.state === 'off' ? <>
-          <p>AI transcription is off.</p>
-        </> : <>
-          <p className="font-semibold">{aiStatus.capturing ? 'AI transcription active. Meeting audio is processed by YLAAM Meet and OpenAI; transcript text is saved in the host’s Meeting History.' : 'AI transcription is enabled. Meeting audio will be processed by YLAAM Meet and OpenAI; transcript text is saved in the host’s Meeting History.'}</p>
-          {isHost && <button type="button" disabled={aiBusy} onClick={() => void stopAiTranscription()} className="ml-3 mt-2 underline">Stop transcription</button>}
+        {aiNoticeVisible && aiStatus.state !== 'off' &&
+          <p className="font-semibold">{aiStatus.state === 'pending'
+            ? `Waiting for participant consent${aiStatus.pending ? ` (${aiStatus.pending} remaining)` : ''}.`
+            : aiStatus.capturing && !aiCaptureFault && transcript.capturing
+              ? 'AI transcription active. Meeting audio is processed by YLAAM Meet and OpenAI; transcript text is saved in the host’s Meeting History.'
+              : 'AI transcription is enabled and preparing capture.'}</p>
+        }
+        {aiStatus.state !== 'off' && aiStatus.needsResponse && <>
+          {!aiNoticeVisible && <p>AI transcription requires your consent.</p>}
+          <div className="mt-2 flex gap-3">
+            <button type="button" disabled={aiBusy} onClick={() => void respondToAiTranscription(true)} className="underline">Agree</button>
+            <button type="button" disabled={aiBusy} onClick={() => void respondToAiTranscription(false)} className="underline">Decline</button>
+          </div>
         </>}
+        {aiError && <p role="alert" className="mt-1 text-amber-200">{aiError}</p>}
+        {aiStatusError && <p role="alert" className="mt-1 text-amber-200">{aiStatusError}</p>}
         {aiCaptureFault && <p role="alert" className="mt-1 text-amber-200">Capture stopped after a permission check failed. Stop and request transcription again.</p>}
         {transcript.error && <p role="alert" className="mt-1 text-amber-200">{transcript.error}</p>}
-      </div>
+      </div>}
 
 
         {/* CENTER VIDEO GRID & STAGE */}

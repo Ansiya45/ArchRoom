@@ -12,6 +12,12 @@ export const envSchema = z.object({
   DB_POOL_MAX: z.string().regex(/^[1-5]$/, 'DB_POOL_MAX must be an integer from 1 to 5').default('3').transform(Number),
   JWT_SECRET: z.string().min(1, 'JWT_SECRET is required'),
   JWT_EXPIRES_IN: z.string().default('1h'),
+  // Stage A only: no OAuth endpoint or Drive client is enabled by these values.
+  GOOGLE_INTEGRATION_ADMIN_USER_ID: z.string().uuid().optional(),
+  GOOGLE_INTEGRATION_TOKEN_KEY: z.string().optional(),
+  GOOGLE_CLIENT_ID: z.string().optional(),
+  GOOGLE_CLIENT_SECRET: z.string().optional(),
+  GOOGLE_OAUTH_CALLBACK_URL: z.string().url().optional(),
   SUPABASE_URL: z.string().optional(),
   SUPABASE_SERVICE_ROLE_KEY: z.string().optional(),
   SUPABASE_STORAGE_BUCKET: z.string().default('meeting-recordings'),

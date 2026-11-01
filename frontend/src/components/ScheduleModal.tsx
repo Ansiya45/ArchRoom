@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useEffect, useRef, useState } from 'react';
-import { X, CalendarPlus, Copy, Check } from 'lucide-react';
+import { X, CalendarPlus, Copy, Check, Settings, ChevronDown } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { trpc } from '../lib/trpc';
 import { localScheduleFields, type MeetingRecord } from '../lib/meetingSchedule';
@@ -13,7 +13,7 @@ interface ScheduleModalProps {
   onClose: () => void;
   onCreated: (meeting: MeetingRecord) => void;
   editingMeeting?: MeetingRecord | null;
-  onUpdated: (meeting: MeetingRecord) => void;
+  onUpdated: (meeting: MeetingRecord, action: 'reschedule' | 'recordingSettings') => void;
 }
 
 const CODE_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
@@ -39,6 +39,15 @@ export const ScheduleModal: React.FC<ScheduleModalProps> = ({
   const [meetingCode, setMeetingCode] = useState(generateMeetingCode);
   const [copied, setCopied] = useState(false);
   const [meetingMode, setMeetingMode] = useState<'instant' | 'scheduled'>('instant');
+  const [recordingSettingsOpen, setRecordingSettingsOpen] = useState(false);
+  const [previewAccess, setPreviewAccess] = useState<'private' | 'restricted' | 'public'>('private');
+  const [savingRecordingSettings, setSavingRecordingSettings] = useState(false);
+  const [recordingSettingsMessage, setRecordingSettingsMessage] = useState('');
+  const [selectedFolderId, setSelectedFolderId] = useState<string | null>(null);
+  const [folderState, setFolderState] = useState<{ connected: boolean; canCreate: boolean; folders: { id: string; name: string }[] } | null>(null);
+  const [folderLoading, setFolderLoading] = useState(false);
+  const [folderError, setFolderError] = useState('');
+  const [newFolderName, setNewFolderName] = useState('');
   const navigate = useNavigate();
   const submitting = useRef(false);
   const [error, setError] = useState('');
@@ -63,8 +72,43 @@ export const ScheduleModal: React.FC<ScheduleModalProps> = ({
       setRecurrence(null);
       setError('');
       setCopied(false);
+      setRecordingSettingsOpen(false);
+      setPreviewAccess(editingMeeting?.recordingAccessPolicy === 'anyone_with_link' ? 'public' : editingMeeting?.recordingAccessPolicy ?? 'private');
+      setRecordingSettingsMessage('');
+      setSelectedFolderId(editingMeeting?.recordingFolderId ?? null);
+      setFolderState(null);
+      setFolderError('');
+      setNewFolderName('');
     }
   }, [isOpen, editingMeeting]);
+
+  useEffect(() => {
+    if (!isOpen || !recordingSettingsOpen) return;
+    let active = true;
+    setFolderLoading(true);
+    void trpc.recordingFolders.list.query().then(result => { if (active) setFolderState(result); })
+      .catch(() => { if (active) { setFolderState({ connected: false, canCreate: false, folders: [] }); setFolderError('Recording folders could not be loaded.'); } })
+      .finally(() => { if (active) setFolderLoading(false); });
+    return () => { active = false; };
+  }, [isOpen, recordingSettingsOpen]);
+
+  const refreshFolders = async () => {
+    setFolderLoading(true); setFolderError('');
+    try { setFolderState(await trpc.recordingFolders.refresh.mutate()); }
+    catch { setFolderState({ connected: false, canCreate: false, folders: [] }); setFolderError('Recording folders could not be refreshed.'); }
+    finally { setFolderLoading(false); }
+  };
+
+  const createFolder = async () => {
+    setFolderLoading(true); setFolderError('');
+    try {
+      const created = await trpc.recordingFolders.create.mutate({ name: newFolderName });
+      setFolderState(await trpc.recordingFolders.refresh.mutate());
+      setSelectedFolderId(created.id);
+      setNewFolderName('');
+    } catch (cause) { setFolderError(cause instanceof Error ? cause.message : 'Batch folder could not be created.'); }
+    finally { setFolderLoading(false); }
+  };
 
   if (!isOpen) return null;
 
@@ -86,7 +130,7 @@ export const ScheduleModal: React.FC<ScheduleModalProps> = ({
       const schedule = { localDateTime: `${date}T${time}`, timeZone };
       if (editingMeeting) {
         const payload = await trpc.meetings.reschedule.mutate({ meetingId: editingMeeting.id, schedule });
-        onUpdated(payload.meeting);
+        onUpdated(payload.meeting, 'reschedule');
         onClose();
       } else {
         const payload = await trpc.meetings.create.mutate({
@@ -94,6 +138,8 @@ export const ScheduleModal: React.FC<ScheduleModalProps> = ({
           ...(meetingMode === 'scheduled' ? { schedule, ...(recurrence ? { recurrence } : {}) } : {}),
           startNow: false,
           reusable: meetingMode === 'instant',
+          recordingFolderId: selectedFolderId,
+          recordingAccessPolicy: previewAccess === 'public' ? 'anyone_with_link' : previewAccess,
         });
         onCreated(payload.meeting);
         onClose();
@@ -109,10 +155,26 @@ export const ScheduleModal: React.FC<ScheduleModalProps> = ({
     }
   };
 
+  const saveRecordingSettings = async () => {
+    if (!editingMeeting) return;
+    setSavingRecordingSettings(true);
+    setRecordingSettingsMessage('');
+    try {
+      const result = await trpc.meetings.updateRecordingSettings.mutate({
+        meetingId: editingMeeting.id, recordingFolderId: selectedFolderId,
+        recordingAccessPolicy: previewAccess === 'public' ? 'anyone_with_link' : previewAccess,
+      });
+      onUpdated(result.meeting, 'recordingSettings');
+      setRecordingSettingsMessage('Preference saved. Drive sharing and automatic uploads are not active.');
+    } catch (error) {
+      setRecordingSettingsMessage(error instanceof Error ? error.message : 'Unable to save recording preference.');
+    } finally { setSavingRecordingSettings(false); }
+  };
+
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in duration-200">
-      <div role="dialog" aria-modal="true" aria-labelledby="meeting-form-title" className="bg-white rounded-3xl max-w-lg max-h-[90vh] overflow-y-auto w-full p-6 sm:p-7 shadow-2xl border border-slate-100 relative">
+      <div role="dialog" aria-modal="true" aria-labelledby="meeting-form-title" className="bg-white rounded-3xl max-w-lg max-h-[90vh] overflow-y-auto w-full p-6 sm:p-7 shadow-xl border border-slate-200 relative text-white [&_button:focus-visible]:outline-2 [&_button:focus-visible]:outline-offset-2 [&_button:focus-visible]:outline-blue-400 [&_input:focus-visible]:outline-2 [&_input:focus-visible]:outline-offset-2 [&_input:focus-visible]:outline-blue-400 [&_select:focus-visible]:outline-2 [&_select:focus-visible]:outline-offset-2 [&_select:focus-visible]:outline-blue-400 [&_input]:accent-blue-500 [&_input::placeholder]:text-slate-400">
         <button
           onClick={onClose}
           disabled={loading}
@@ -122,7 +184,7 @@ export const ScheduleModal: React.FC<ScheduleModalProps> = ({
           <X className="w-5 h-5" />
         </button>
 
-        <div className="w-12 h-12 rounded-2xl bg-blue-50 text-blue-600 flex items-center justify-center mb-4 border border-blue-100">
+        <div className="w-12 h-12 rounded-2xl bg-blue-500/10 text-blue-300 flex items-center justify-center mb-4 border border-blue-500/20">
           <CalendarPlus className="w-6 h-6 stroke-[2.2]" />
         </div>
 
@@ -135,7 +197,7 @@ export const ScheduleModal: React.FC<ScheduleModalProps> = ({
             onClick={() => setMeetingMode('instant')}
             className={`flex-1 py-2.5 rounded-lg text-sm font-semibold transition-all ${
               meetingMode === 'instant'
-                ? 'bg-blue-600 text-white shadow'
+                ? 'bg-blue-600 text-white'
                 : 'text-slate-600 hover:bg-slate-200'
             }`}
           >
@@ -149,7 +211,7 @@ export const ScheduleModal: React.FC<ScheduleModalProps> = ({
             onClick={() => setMeetingMode('scheduled')}
             className={`flex-1 py-2.5 rounded-lg text-sm font-semibold transition-all ${
               meetingMode === 'scheduled'
-                ? 'bg-blue-600 text-white shadow'
+                ? 'bg-blue-600 text-white'
                 : 'text-slate-600 hover:bg-slate-200'
             }`}
           >
@@ -161,7 +223,7 @@ export const ScheduleModal: React.FC<ScheduleModalProps> = ({
 
           {/* Meeting Title */}
           <div>
-            <label htmlFor="meeting-title" className="block text-xs font-semibold text-slate-700 uppercase tracking-wider mb-1.5">
+            <label htmlFor="meeting-title" className="block text-xs font-semibold text-white uppercase tracking-wider mb-1.5">
               Meeting Topic / Title
             </label>
             <input
@@ -171,7 +233,7 @@ export const ScheduleModal: React.FC<ScheduleModalProps> = ({
               value={title}
               readOnly={!!editingMeeting}
               onChange={(e) => setTitle(e.target.value)}
-              className="w-full px-4 py-3 rounded-xl border border-slate-200 focus:border-blue-500 text-sm focus:outline-none"
+              className="w-full px-4 py-3 rounded-xl border border-slate-200 bg-slate-50 text-white text-sm"
             />
           </div>
 
@@ -185,7 +247,7 @@ export const ScheduleModal: React.FC<ScheduleModalProps> = ({
                   required
                   value={date}
                   onChange={(e) => setDate(e.target.value)}
-                  className="w-full px-3 py-3 rounded-xl border border-slate-200"
+                  className="w-full px-3 py-3 rounded-xl border border-slate-200 bg-slate-50 text-white"
                 />
               </div>
 
@@ -196,7 +258,7 @@ export const ScheduleModal: React.FC<ScheduleModalProps> = ({
                   required
                   value={time}
                   onChange={(e) => setTime(e.target.value)}
-                  className="w-full px-3 py-3 rounded-xl border border-slate-200"
+                  className="w-full px-3 py-3 rounded-xl border border-slate-200 bg-slate-50 text-white"
                 />
               </div>
             </div>
@@ -205,18 +267,66 @@ export const ScheduleModal: React.FC<ScheduleModalProps> = ({
             <div>
               <label htmlFor="meeting-timezone" className="block text-xs font-semibold mb-1.5">Timezone</label>
               <select id="meeting-timezone" value={timeZone} onChange={(event) => setTimeZone(event.target.value)}
-                className="schedule-dark-options w-full px-3 py-3 rounded-xl border border-slate-200 text-sm">
+                className="schedule-dark-options w-full px-3 py-3 rounded-xl border border-slate-200 bg-slate-50 text-white text-sm">
                 {timeZones.map((zone) => <option key={zone} value={zone}>{zone}</option>)}
               </select>
               {!editingMeeting?.timeZone && editingMeeting && <p className="mt-1 text-xs text-slate-500">The original timezone was not recorded. Confirm the date, time and timezone before saving.</p>}
             </div>
           )}
           {meetingMode === 'scheduled' && !editingMeeting && <RecurrenceControls key={String(isOpen)} value={recurrence} onChange={setRecurrence} date={date} />}
+          <div className="rounded-xl border border-slate-200 p-3">
+            <button type="button" aria-expanded={recordingSettingsOpen} aria-controls="recording-settings-preview"
+              onClick={() => setRecordingSettingsOpen(open => !open)}
+              className="flex w-full items-center gap-2 text-left rounded-md text-sm font-semibold text-white hover:text-blue-300 transition-colors">
+              <Settings className="h-4 w-4" /> Settings <span className="ml-auto text-xs font-normal text-slate-500">Recording preview</span>
+              <ChevronDown aria-hidden="true" className={`h-4 w-4 shrink-0 text-blue-300 transition-transform motion-reduce:transition-none ${recordingSettingsOpen ? 'rotate-180' : ''}`} />
+            </button>
+            {recordingSettingsOpen && <section id="recording-settings-preview" aria-label="Recording Settings" className="mt-3 space-y-4 border-t border-slate-200 pt-3 text-sm">
+              <div>
+                <h4 className="font-semibold text-slate-900">Recording Settings</h4>
+                <p className="mt-1 rounded-lg border border-blue-500/20 bg-blue-500/10 p-2 text-xs text-blue-200">Folder choice and access preferences are saved with the meeting. Drive sharing and automatic recording uploads are not active.</p>
+              </div>
+              <div className="space-y-2">
+                <p className="font-semibold text-white">Save recordings to</p>
+                <p className="text-slate-600">Recording Sessions (central root is the default)</p>
+                <label htmlFor="recording-folder-preview" className="block text-xs text-slate-500">Select batch/course folder</label>
+                <select id="recording-folder-preview" value={selectedFolderId ?? ''} onChange={event => setSelectedFolderId(event.target.value || null)}
+                  disabled={folderLoading || !folderState?.connected} className="w-full rounded-xl border border-slate-200 bg-slate-50 p-2 text-slate-700 disabled:opacity-60">
+                  <option value="">Central Recording Sessions root</option>
+                  {folderState?.folders.map(folder => <option key={folder.id} value={folder.id}>{folder.name}</option>)}
+                </select>
+                {!folderState?.connected && !folderLoading && <p className="text-xs text-slate-500">Google Drive is not connected or the recording root is not verified. Batch folders are unavailable.</p>}
+                {folderLoading && <p role="status" className="text-xs text-slate-500">Loading verified folders...</p>}
+                {folderError && <p role="alert" className="text-xs text-red-700">{folderError}</p>}
+                <div className="flex flex-wrap gap-2">
+                  <button type="button" disabled={folderLoading || !folderState?.connected} onClick={() => void refreshFolders()} className="rounded-lg border border-slate-200 bg-slate-100 px-3 py-2 text-xs hover:bg-slate-200 transition-colors disabled:opacity-50">Refresh Folders</button>
+                  {folderState?.canCreate && <><input aria-label="New batch folder name" value={newFolderName} onChange={event => setNewFolderName(event.target.value)} maxLength={255} className="rounded-lg border border-slate-200 bg-slate-50 text-white px-3 py-2 text-xs" />
+                    <button type="button" disabled={folderLoading || !newFolderName.trim()} onClick={() => void createFolder()} className="rounded-lg border border-slate-200 bg-slate-100 px-3 py-2 text-xs hover:bg-slate-200 transition-colors disabled:opacity-50">Create New Batch Folder</button></>}
+                </div>
+              </div>
+              <fieldset className="space-y-2">
+                <legend className="font-semibold text-white">Recording access preference</legend>
+                {([
+                  ['private', 'Private — Host/Manager only', 'Recordings are not shared with students.'],
+                  ['restricted', 'Restricted — Approved batch students', 'Only Google accounts granted access can view recordings.'],
+                  ['public', 'Anyone with the link — Viewer', 'Anyone receiving the link can view, including people outside the batch.'],
+                ] as const).map(([value, label, description]) => <label key={value} className="flex gap-2 rounded-lg border border-slate-200 p-2">
+                  <input type="radio" name="recording-access-preview" checked={previewAccess === value} onChange={() => setPreviewAccess(value)} className="mt-1" />
+                  <span><span className="block font-medium text-slate-800">{label}</span><span className="text-xs text-slate-500">{description}</span></span>
+                </label>)}
+                {previewAccess === 'public' && <p role="alert" className="rounded-lg border border-blue-500/20 bg-blue-500/10 p-2 text-xs text-blue-200">Public links can be forwarded outside the intended audience. Saving a public video inside a private batch folder will require a separate permission check and confirmation.</p>}
+              </fieldset>
+              {editingMeeting && <button type="button" disabled={savingRecordingSettings} onClick={() => void saveRecordingSettings()}
+                className="rounded-lg bg-blue-600 px-3 py-2 text-xs font-semibold text-white disabled:opacity-50">{savingRecordingSettings ? 'Saving...' : 'Save Recording Settings'}</button>}
+              {recordingSettingsMessage && <p role="status" className="text-xs text-slate-700">{recordingSettingsMessage}</p>}
+              <p className="text-xs text-slate-500">Viewer download, copy, and print restrictions will be applied where supported after automatic Drive integration. They cannot prevent screen recording.</p>
+            </section>}
+          </div>
           {error && <p role="alert" className="rounded-xl bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}
 
         {/* Meeting Link */}
         <div>
-          <label htmlFor="meeting-link" className="block text-xs font-semibold text-slate-700 uppercase tracking-wider mb-1.5">
+          <label htmlFor="meeting-link" className="block text-xs font-semibold text-white uppercase tracking-wider mb-1.5">
           Meeting Link
           </label>
 
@@ -227,7 +337,7 @@ export const ScheduleModal: React.FC<ScheduleModalProps> = ({
               readOnly
               value={meetingLink}
               onFocus={(event) => event.currentTarget.select()}
-              className="min-w-0 flex-1 px-4 py-3 rounded-xl border border-slate-200 bg-slate-50 text-slate-700 font-mono text-sm"
+              className="min-w-0 flex-1 px-4 py-3 rounded-xl border border-blue-400/40 bg-blue-500/10 text-blue-200 font-mono text-sm"
             />
             <button
               type="button"
@@ -244,7 +354,7 @@ export const ScheduleModal: React.FC<ScheduleModalProps> = ({
       <button
         type="submit"
         disabled={loading}
-        className="w-full py-3.5 rounded-xl bg-blue-600 text-white font-semibold"
+        className="w-full py-3.5 rounded-xl bg-blue-600 text-white font-semibold hover:bg-blue-700 transition-colors disabled:opacity-60"
       >
         {editingMeeting ? (loading ? "Saving..." : "Save Schedule") : meetingMode === "instant"
           ? (loading ? "Creating..." : "Create Meeting")

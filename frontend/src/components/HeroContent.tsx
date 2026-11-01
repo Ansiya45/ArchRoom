@@ -37,7 +37,7 @@ export const HeroContent: React.FC<HeroContentProps> = ({
         {/* Create Meeting Button */}
         <button
           onClick={onCreateMeeting}
-          className="px-5 py-2.5 bg-blue-600 text-white font-bold text-xs sm:text-sm rounded-xl shadow-md shadow-blue-200 hover:scale-[1.02] hover:bg-blue-700 transition-all flex items-center justify-center gap-2 group active:scale-98 cursor-pointer"
+          className="px-5 py-2.5 bg-blue-600 text-white font-bold text-xs sm:text-sm rounded-xl hover:scale-[1.02] hover:bg-blue-700 transition-all flex items-center justify-center gap-2 group active:scale-98 cursor-pointer"
         >
           <Plus className="w-4 h-4 stroke-[2.5]" />
           <span>Create Meeting</span>
@@ -46,7 +46,7 @@ export const HeroContent: React.FC<HeroContentProps> = ({
         {/* Join Meeting Button */}
         <button
           onClick={onJoinMeeting}
-          className="px-5 py-2.5 bg-white border border-slate-200 text-slate-700 font-bold text-xs sm:text-sm rounded-xl shadow-2xs hover:bg-slate-50 transition-colors flex items-center justify-center gap-2 group active:scale-98 cursor-pointer"
+          className="px-5 py-2.5 bg-white border border-slate-200 text-slate-700 font-bold text-xs sm:text-sm rounded-xl hover:bg-slate-50 transition-colors flex items-center justify-center gap-2 group active:scale-98 cursor-pointer"
         >
           <Video className="w-4 h-4 text-slate-600" />
           <span>Join Meeting</span>

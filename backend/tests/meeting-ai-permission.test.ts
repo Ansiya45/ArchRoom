@@ -9,9 +9,9 @@ const { db } = await import('../src/db/index.js');
 const { MeetingAiPermissionService } = await import('../src/services/meeting-ai-permission.service.js');
 
 test('transcription requires unanimous consent, and stale/stopped sessions and non-hosts cannot upload', async () => {
-  const host = randomUUID(), guest = randomUUID(), meetingId = randomUUID(), requestId = randomUUID();
-  const request: any = { requestId, meetingId, occurrenceId: null, requestedByUserId: host, stoppedAt: null, lastHeartbeatAt: new Date() };
-  const original = { meeting: db.query.meetings.findFirst, participant: db.query.meetingParticipants.findFirst, participants: db.query.meetingParticipants.findMany, consents: db.query.meetingAiConsents.findMany, request: db.query.meetingAiRequests.findFirst };
+  const host = randomUUID(), guest = randomUUID(), meetingId = randomUUID(), requestId = randomUUID(), hostParticipantId = randomUUID();
+  const request: any = { requestId, meetingId, occurrenceId: null, requestedByUserId: host, stoppedAt: null, lastHeartbeatAt: null };
+  const original = { meeting: db.query.meetings.findFirst, participant: db.query.meetingParticipants.findFirst, participants: db.query.meetingParticipants.findMany, consents: db.query.meetingAiConsents.findMany, request: db.query.meetingAiRequests.findFirst, update: db.update };
   db.query.meetings.findFirst = (async () => ({ id: meetingId, meetingCode: 'YLM-TEST', scheduleType: 'one_time', status: 'live', hostUserId: host })) as any;
   const dialect = new PgDialect();
   db.query.meetingParticipants.findFirst = (async ({ where }: any) => {
@@ -22,18 +22,26 @@ test('transcription requires unanimous consent, and stale/stopped sessions and n
     const userId = query.params.includes(host) ? host : query.params.includes(guest) ? guest : undefined;
     return userId ? { id: randomUUID(), userId, role: userId === host ? 'host' : 'participant' } : undefined;
   }) as any;
-  db.query.meetingParticipants.findMany = (async () => [{ id: randomUUID(), userId: host, role: 'host', admission: 'admitted', leftAt: null }]) as any;
-  db.query.meetingAiConsents.findMany = (async () => []) as any;
+  db.query.meetingParticipants.findMany = (async () => [{ id: hostParticipantId, userId: host, role: 'host', admission: 'admitted', leftAt: null }]) as any;
+  let consents: any[] = [{ participantId: hostParticipantId, agreed: true }];
+  db.query.meetingAiConsents.findMany = (async () => consents) as any;
   db.query.meetingAiRequests.findFirst = (async () => request) as any;
+  let heartbeatWritten = false;
+  db.update = (() => ({ set: () => ({ where: async () => { heartbeatWritten = true; return []; } }) })) as any;
   const service = new MeetingAiPermissionService(), input = { meetingCode: 'YLM-TEST', requestId };
   try {
+    await service.heartbeat(input, host);
+    assert.equal(heartbeatWritten, true, 'the first unanimous heartbeat must bootstrap capture');
+    await assert.rejects(() => service.heartbeat(input, guest), { code: 'FORBIDDEN' });
+    consents = []; request.lastHeartbeatAt = new Date();
     await assert.rejects(() => service.assertCanTranscribe(input, host), { code: 'FORBIDDEN' });
     await assert.rejects(() => service.assertCanTranscribe(input, guest), { code: 'FORBIDDEN' });
     request.lastHeartbeatAt = new Date(Date.now() - 11000);
     await assert.rejects(() => service.assertCanTranscribe(input, host), { code: 'FORBIDDEN' });
-    request.lastHeartbeatAt = new Date(); request.stoppedAt = new Date();
+    request.lastHeartbeatAt = new Date(); request.stoppedAt = new Date(); consents = [{ participantId: hostParticipantId, agreed: false }];
     await assert.rejects(() => service.assertCanTranscribe(input, host), { code: 'FORBIDDEN' });
+    assert.deepEqual(await service.status({ meetingCode: 'YLM-TEST' }, { userId: host }), { state: 'off', reason: 'declined' });
   } finally {
-    db.query.meetings.findFirst = original.meeting; db.query.meetingParticipants.findFirst = original.participant; db.query.meetingParticipants.findMany = original.participants; db.query.meetingAiConsents.findMany = original.consents; db.query.meetingAiRequests.findFirst = original.request;
+    db.query.meetings.findFirst = original.meeting; db.query.meetingParticipants.findFirst = original.participant; db.query.meetingParticipants.findMany = original.participants; db.query.meetingAiConsents.findMany = original.consents; db.query.meetingAiRequests.findFirst = original.request; db.update = original.update;
   }
 });

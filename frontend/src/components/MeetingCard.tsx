@@ -189,7 +189,7 @@ export const MeetingCard: React.FC<ActiveMeetingProps> = ({
   ];
 
   return (
-    <div className="relative w-full max-w-lg lg:max-w-xl mx-auto rounded-2xl bg-white p-2.5 sm:p-3 shadow-xl shadow-blue-500/10 border border-slate-200/80 transition-all duration-300 hover:shadow-blue-500/15">
+    <div className="relative w-full max-w-lg lg:max-w-xl mx-auto rounded-2xl bg-white p-2.5 sm:p-3 border border-slate-200/80 transition-all duration-300">
       {/* Screen Sharing Banner */}
       {screenSharing && (
         <div className="mb-2 px-3 py-1 bg-blue-50 border border-blue-200 rounded-lg flex items-center justify-between text-xs text-blue-700 font-medium">
@@ -441,7 +441,7 @@ export const MeetingCard: React.FC<ActiveMeetingProps> = ({
             title="Share Screen"
             className={`p-2 rounded-lg transition-all duration-200 cursor-pointer ${
               screenSharing
-                ? 'bg-blue-600 text-white shadow-md shadow-blue-500/30'
+                ? 'bg-blue-600 text-white'
                 : 'bg-slate-800 hover:bg-slate-700 text-slate-200'
             }`}
           >
@@ -507,7 +507,7 @@ export const MeetingCard: React.FC<ActiveMeetingProps> = ({
               alert('Leaving YLAAM-MEET Meeting Preview...');
             }
           }}
-          className="bg-red-500 hover:bg-red-600 text-white px-3 py-1.5 rounded-lg font-semibold text-xs flex items-center gap-1.5 shadow-md shadow-red-500/25 active:scale-95 transition-all cursor-pointer"
+          className="bg-red-500 hover:bg-red-600 text-white px-3 py-1.5 rounded-lg font-semibold text-xs flex items-center gap-1.5 active:scale-95 transition-all cursor-pointer"
         >
           <PhoneOff className="w-3.5 h-3.5" />
           <span className="hidden xs:inline">Leave</span>

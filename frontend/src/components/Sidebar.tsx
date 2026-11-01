@@ -28,7 +28,7 @@ const SidebarButton: React.FC<{
       onClick={onClick}
       title={item.label}
       aria-label={item.label}
-      className={`relative group p-3 rounded-xl transition-all duration-200 flex items-center justify-center cursor-pointer ${
+      className={`relative group p-3 rounded-[8px] transition-all duration-200 flex items-center justify-center cursor-pointer ${
         isActive
           ? 'bg-blue-50 text-blue-600 font-bold'
           : 'text-slate-400 hover:text-blue-600 hover:bg-slate-50'

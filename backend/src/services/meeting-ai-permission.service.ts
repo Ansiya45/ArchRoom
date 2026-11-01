@@ -53,7 +53,11 @@ export class MeetingAiPermissionService {
   async status(input: Scope, identity: ParticipantIdentity) {
     const { meeting } = await this.scope(input, identity);
     const request = await db.query.meetingAiRequests.findFirst({ where: eq(meetingAiRequests.meetingId, meeting.id) });
-    if (!request || request.stoppedAt || request.occurrenceId !== (input.occurrenceId ?? null)) return { state: 'off' as const };
+    if (!request || request.occurrenceId !== (input.occurrenceId ?? null)) return { state: 'off' as const };
+    if (request.stoppedAt) {
+      const consents = await db.query.meetingAiConsents.findMany({ where: eq(meetingAiConsents.requestId, request.requestId) });
+      return { state: 'off' as const, reason: consents.some(row => row.agreed === false) ? 'declined' as const : 'stopped' as const };
+    }
     const state = await this.consentState(meeting, request.requestId);
     const own = await db.query.meetingParticipants.findFirst({ where: and(eq(meetingParticipants.meetingId, meeting.id), participantScope(meeting), identity.userId ? eq(meetingParticipants.userId, identity.userId) : eq(meetingParticipants.id, identity.participantId || ''), eq(meetingParticipants.admission, 'admitted'), isNull(meetingParticipants.leftAt)) });
     const ownConsent = own ? await db.query.meetingAiConsents.findFirst({ where: and(eq(meetingAiConsents.requestId, request.requestId), eq(meetingAiConsents.participantId, own.id)) }) : undefined;
@@ -86,8 +90,13 @@ export class MeetingAiPermissionService {
   }
 
   async heartbeat(input: Scope & { requestId: string }, userId: string) {
-    await this.assertCanTranscribe(input, userId);
     const { meeting } = await this.scope(input, { userId });
+    const request = await db.query.meetingAiRequests.findFirst({ where: eq(meetingAiRequests.meetingId, meeting.id) });
+    const consent = request && !request.stoppedAt ? await this.consentState(meeting, request.requestId) : null;
+    if (!request || request.stoppedAt || !consent?.active || request.requestId !== input.requestId ||
+      request.occurrenceId !== (input.occurrenceId ?? null) || !await canManageMeetingSession(meeting, userId, input.occurrenceId)) {
+      throw new TRPCError({ code: 'FORBIDDEN', message: 'Transcription requires unanimous consent and an active request from the meeting host.' });
+    }
     await db.update(meetingAiRequests).set({ lastHeartbeatAt: new Date() }).where(and(
       eq(meetingAiRequests.meetingId, meeting.id), eq(meetingAiRequests.requestId, input.requestId), isNull(meetingAiRequests.stoppedAt),
     ));

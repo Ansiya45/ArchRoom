@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { LogIn, UserPlus, Menu, X, User, LogOut, Sparkles } from 'lucide-react';
 
 interface HeaderProps {
@@ -20,6 +20,31 @@ export const Header: React.FC<HeaderProps> = ({
 }) => {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [userDropdownOpen, setUserDropdownOpen] = useState(false);
+  const accountDropdownRef = useRef<HTMLDivElement>(null);
+  const accountTriggerRef = useRef<HTMLButtonElement>(null);
+
+  useEffect(() => {
+    if (!userDropdownOpen) return;
+    const closeOutside = (event: Event) => {
+      if (event.target instanceof Node && !accountDropdownRef.current?.contains(event.target)) {
+        setUserDropdownOpen(false);
+      }
+    };
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setUserDropdownOpen(false);
+        accountTriggerRef.current?.focus();
+      }
+    };
+    document.addEventListener('pointerdown', closeOutside, true);
+    document.addEventListener('click', closeOutside, true);
+    document.addEventListener('keydown', closeOnEscape);
+    return () => {
+      document.removeEventListener('pointerdown', closeOutside, true);
+      document.removeEventListener('click', closeOutside, true);
+      document.removeEventListener('keydown', closeOnEscape);
+    };
+  }, [userDropdownOpen]);
 
   return (
     <header className="sticky top-0 z-50 w-full bg-white/80 backdrop-blur-md border-b border-slate-200 px-4 sm:px-8 py-2.5 flex items-center justify-between transition-all duration-200 h-14">
@@ -46,9 +71,11 @@ export const Header: React.FC<HeaderProps> = ({
         {/* Desktop Navigation / User Profile */}
         <div className="hidden md:flex items-center gap-3">
           {user && user.isLoggedIn ? (
-            <div className="relative">
+            <div ref={accountDropdownRef} className="relative">
               <button
-                onClick={() => setUserDropdownOpen(!userDropdownOpen)}
+                ref={accountTriggerRef}
+                aria-expanded={userDropdownOpen}
+                onClick={() => setUserDropdownOpen(open => !open)}
                 className="flex items-center gap-2 px-3 py-1.5 rounded-full border border-slate-200 hover:border-blue-300 bg-slate-50 transition-colors cursor-pointer"
               >
                 <div className="w-6 h-6 rounded-full bg-blue-600 text-white flex items-center justify-center text-xs font-bold">

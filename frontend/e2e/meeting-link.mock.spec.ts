@@ -2,10 +2,10 @@ import { randomUUID } from 'node:crypto';
 import type { Page } from '@playwright/test';
 import { test as base, expect, login, logout, type AuthMock } from './fixtures/auth-mock';
 const code = 'YLM-W8Z3SE', path = `/meet/${code}`;
-type Room = { admission: 'pending' | 'admitted' | 'denied'; status: string; cancelled: boolean; missing: boolean; host: boolean; rosterRole: 'host' | 'participant'; pollFails: boolean; stallPending: boolean; requests: Array<{ id: string; name: string }>; calls: Array<{ path: string; input: any }> };
+type Room = { admission: 'pending' | 'admitted' | 'denied'; status: string; cancelled: boolean; missing: boolean; host: boolean; rosterRole: 'host' | 'participant'; pollFails: boolean; stallPending: boolean; requests: Array<{ id: string; name: string }>; calls: Array<{ path: string; input: any }>; aiStatus: any; aiRequestError: string };
 const test = base.extend<{ room: Room }>({
   room: [async ({ context, authMock }, use) => {
-    const room: Room = { admission: 'pending', status: 'live', cancelled: false, missing: false, host: false, rosterRole: 'participant', pollFails: false, stallPending: false, requests: [], calls: [] };
+    const room: Room = { admission: 'pending', status: 'live', cancelled: false, missing: false, host: false, rosterRole: 'participant', pollFails: false, stallPending: false, requests: [], calls: [], aiStatus: { state: 'off' }, aiRequestError: '' };
     const id = randomUUID();
     await context.routeWebSocket('**/api/whiteboard', socket => { socket.onMessage(() => {}); });
     await context.route('**/api/meetings.*', async route => {
@@ -13,8 +13,10 @@ const test = base.extend<{ room: Room }>({
       const paths = decodeURIComponent(url.pathname.slice('/api/'.length)).split(',');
       if (paths.every(p => p === 'meetings.list')) { await route.fallback(); return; }
       if (paths.includes('meetings.pendingAdmissions') && room.stallPending) {
-        room.stallPending = false;
-        await new Promise(resolve => setTimeout(resolve, 10_000));
+        // Hold every polling attempt until the test observes the timeout warning.
+        // Role discovery can cancel/restart the initial effect, so stalling only
+        // its first request does not reliably exercise the timeout path.
+        while (room.stallPending) await new Promise(resolve => setTimeout(resolve, 50));
       }
       const batched = url.searchParams.get('batch') === '1';
       const input = route.request().method() === 'POST' ? route.request().postDataJSON() : JSON.parse(url.searchParams.get('input') || '{}');
@@ -32,14 +34,26 @@ const test = base.extend<{ room: Room }>({
         if (procedure === 'meetings.pendingAdmissions') return room.pollFails ? error('Temporarily unavailable', 'INTERNAL_SERVER_ERROR') : ok({ requests: room.requests });
         if (procedure === 'meetings.decideAdmission') { room.requests = room.requests.filter(request => request.id !== value.participantId); return ok({ ok: true }); }
         if (procedure === 'meetings.admitAll') { const participantIds = room.requests.map(request => request.id); room.requests = []; return ok({ ok: true, admittedCount: participantIds.length, participantIds }); }
-        if (procedure === 'meetings.aiStatus') return ok({ state: 'off' });
+        if (procedure === 'meetings.aiStatus') return ok(room.aiStatus);
+        if (procedure === 'meetings.requestAiTranscription') {
+          if (room.aiRequestError) return error(room.aiRequestError, 'PRECONDITION_FAILED');
+          room.aiStatus = { state: 'pending', requestId: 'fe3aa2ba-a378-4a7d-985b-a37725bd2dd7', requestedByUserId: authMock.user.id, capturing: false, pending: 1, declined: 0, needsResponse: false, ownDecision: true, agreedParticipantIds: [id], participantIds: [id] };
+          return ok({ requestId: room.aiStatus.requestId });
+        }
+        if (procedure === 'meetings.respondAiTranscription') {
+          room.aiStatus = value.agree
+            ? { ...room.aiStatus, state: 'active', capturing: false, pending: 0, needsResponse: false, ownDecision: true }
+            : { state: 'off', reason: 'declined' };
+          return ok({ ok: true });
+        }
+        if (procedure === 'meetings.aiCaptureHeartbeat') return ok({ ok: true });
         // Verify the admission transition without connecting to real media.
         if (procedure === 'meetings.livekitToken') return error('Media disabled in isolated test', 'PRECONDITION_FAILED');
         throw new Error(`Unexpected meeting API: ${procedure}`);
       });
       await route.fulfill({ contentType: 'application/json', body: JSON.stringify(batched ? results : results[0]) });
     });
-    await use(room);
+    try { await use(room); } finally { room.stallPending = false; }
   }, { auto: true }],
 });
 async function openJoin(page: Page) {
@@ -140,7 +154,7 @@ test('creator can see and admit requests even if the roster temporarily reports 
   room.requests = [{ id: randomUUID(), name: 'Waiting guest' }];
   const dialog = page.getByRole('dialog', { name: 'Meeting join requests' });
   await expect(dialog).toContainText('Waiting guest');
-  await dialog.getByRole('button', { name: 'Admit' }).click();
+  await dialog.getByRole('button', { name: 'Admit', exact: true }).click();
   await expect(dialog).toBeHidden();
   expect(room.calls.find(call => call.path === 'meetings.decideAdmission')?.input.admit).toBe(true);
 });
@@ -175,13 +189,21 @@ test('a stalled request check recovers and shows a waiting guest without a refre
   room.host = true;
   room.admission = 'admitted';
   room.rosterRole = 'host';
-  room.stallPending = true;
-  room.requests = [{ id: randomUUID(), name: 'Waiting guest' }];
+  // Let initial role discovery and a successful poll finish before stalling.
+  room.requests = [];
   await seedAccount(page, authMock);
   await page.goto(path);
   await page.getByRole('button', { name: 'Join Meeting Now' }).click();
-  await expect(page.getByRole('alert').filter({ hasText: 'Unable to check join requests' })).toBeVisible({ timeout: 15_000 });
-  await expect(page.getByRole('dialog', { name: 'Meeting join requests' })).toContainText('Waiting guest', { timeout: 20_000 });
+  await expect(page.getByRole('button', { name: 'End meeting', exact: true })).toBeVisible();
+  await expect.poll(() => room.calls.filter(call => call.path === 'meetings.pendingAdmissions').length).toBeGreaterThanOrEqual(2);
+  room.stallPending = true;
+  room.requests = [{ id: randomUUID(), name: 'Waiting guest' }];
+  const warning = page.getByRole('alert').filter({ hasText: 'Unable to check join requests' });
+  try {
+    await expect(warning).toBeVisible({ timeout: 15_000 });
+  } finally { room.stallPending = false; }
+  await expect(page.getByRole('dialog', { name: 'Meeting join requests' })).toContainText('Waiting guest');
+  await expect(warning).toBeHidden();
 });
 test('expired account session falls back to guest joining on the shared URL', async ({ page, authMock }) => {
   await seedAccount(page, authMock); authMock.expired = true; await page.goto(path);
@@ -193,4 +215,55 @@ test('expired account session falls back to guest joining on the shared URL', as
 test('legacy query invitation and grouped code reach shared-link landing', async ({ page }) => {
   await page.goto('/?join=YLM-1234-ABC'); await expect(page).toHaveURL(/\/meet\/YLM-1234-ABC$/);
   await expect(page.getByPlaceholder('Enter your name')).toBeVisible();
+});
+
+test('AI transcription stays off by default', async ({ page, authMock, room }) => {
+  room.host = true; room.admission = 'admitted'; room.rosterRole = 'host';
+  await seedAccount(page, authMock); await page.goto(path);
+  await expect(page.getByLabel('Enable AI transcription for this meeting')).not.toBeChecked();
+  await page.getByRole('button', { name: 'Join Meeting Now' }).click();
+  await expect.poll(() => room.calls.filter(call => call.path === 'meetings.aiStatus').length).toBeGreaterThanOrEqual(2);
+  await expect(page.getByText(/AI transcription active|AI transcription preparing|Waiting for participant consent/)).toBeHidden();
+  await expect(page.getByRole('button', { name: 'Stop transcription' })).toBeHidden();
+  expect(room.calls.some(call => ['meetings.requestAiTranscription', 'meetings.aiCaptureHeartbeat', 'meetings.transcribeSpeech'].includes(call.path))).toBe(false);
+});
+
+test('missing OpenAI configuration is displayed after the host opts in', async ({ page, authMock, room }) => {
+  room.host = true; room.admission = 'admitted'; room.rosterRole = 'host'; room.aiRequestError = 'AI transcription is not configured.';
+  await seedAccount(page, authMock); await page.goto(path);
+  await page.getByLabel('Enable AI transcription for this meeting').check();
+  await page.getByRole('button', { name: 'Join Meeting Now' }).click();
+  await expect(page.getByRole('alert').filter({ hasText: 'AI transcription is not configured.' })).toBeVisible();
+});
+
+test('an admitted participant can agree without showing active before capture starts', async ({ page, room }) => {
+  room.admission = 'admitted';
+  room.aiStatus = { state: 'pending', requestId: 'fe3aa2ba-a378-4a7d-985b-a37725bd2dd7', requestedByUserId: randomUUID(), capturing: false, pending: 1, declined: 0, needsResponse: true, ownDecision: null, agreedParticipantIds: [], participantIds: [] };
+  await openJoin(page);
+  await expect(page.getByText(/Waiting for participant consent/)).toBeVisible();
+  await page.getByRole('button', { name: 'Agree', exact: true }).click();
+  await expect(page.getByText('AI transcription is enabled and preparing capture.')).toBeVisible();
+  await expect(page.getByText(/AI transcription active/)).toBeHidden();
+  expect(room.calls.find(call => call.path === 'meetings.respondAiTranscription')?.input.agree).toBe(true);
+});
+
+test('an admitted participant can decline and transcription remains off', async ({ page, room }) => {
+  room.admission = 'admitted';
+  room.aiStatus = { state: 'pending', requestId: 'fe3aa2ba-a378-4a7d-985b-a37725bd2dd7', requestedByUserId: randomUUID(), capturing: false, pending: 1, declined: 0, needsResponse: true, ownDecision: null, agreedParticipantIds: [], participantIds: [] };
+  await openJoin(page);
+  await page.getByRole('button', { name: 'Decline', exact: true }).click();
+  await expect.poll(() => room.calls.find(call => call.path === 'meetings.respondAiTranscription')?.input.agree).toBe(false);
+  await expect(page.getByRole('button', { name: 'Decline', exact: true })).toBeHidden();
+  await expect(page.getByRole('button', { name: 'Agree', exact: true })).toBeHidden();
+  await expect(page.getByText(/Waiting for participant consent|AI transcription active|AI transcription preparing|AI transcription is enabled and preparing capture/)).toBeHidden();
+  await expect(page.getByRole('button', { name: 'Stop transcription' })).toBeHidden();
+  expect(room.calls.some(call => ['meetings.aiCaptureHeartbeat', 'meetings.transcribeSpeech'].includes(call.path))).toBe(false);
+});
+
+test('a fresh backend heartbeat is not labelled active until browser capture is running', async ({ page, room }) => {
+  room.admission = 'admitted';
+  room.aiStatus = { state: 'active', requestId: 'fe3aa2ba-a378-4a7d-985b-a37725bd2dd7', requestedByUserId: randomUUID(), capturing: true, pending: 0, declined: 0, needsResponse: false, ownDecision: true, agreedParticipantIds: [], participantIds: [] };
+  await openJoin(page);
+  await expect(page.getByText('AI transcription is enabled and preparing capture.')).toBeVisible();
+  await expect(page.getByText(/AI transcription active/)).toBeHidden();
 });

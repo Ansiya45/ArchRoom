@@ -14,6 +14,7 @@ import ScheduleModal from './components/ScheduleModal';
 import ScheduledMeetingsView from './components/ScheduledMeetingsView';
 import FavoritesView, { MeetingItem } from './components/FavoritesView';
 import SettingsView from './components/SettingsView';
+import DriveIntegrationPanel from './components/DriveIntegrationPanel';
 const MeetingHistoryView = React.lazy(() => import('./components/MeetingHistoryView'));
 import SettingsModal from './components/SettingsModal';
 import AuthModal from './components/AuthModal';
@@ -347,7 +348,7 @@ export default function App() {
             {activeTab === 'history' && user && <React.Suspense fallback={<p role="status">Loading meeting history…</p>}><MeetingHistoryView key={user.email} /></React.Suspense>}
             {/* Tab 5: Settings View */}
             {activeTab === 'settings' && (
-              <SettingsView onShowToast={(msg) => showToast(msg)} />
+              <><SettingsView onShowToast={(msg) => showToast(msg)} /><DriveIntegrationPanel /></>
             )}
             </>
           </div>
@@ -380,10 +381,10 @@ export default function App() {
         isOpen={isCreateOpen}
         onClose={() => { setIsCreateOpen(false); setEditingMeeting(null); }}
         editingMeeting={editingMeeting}
-        onUpdated={(record) => {
+        onUpdated={(record, action) => {
           setMeetings((current) => current.map((item) => item.id === record.id
             ? { ...item, record, time: formatMeetingTime(record) } : item));
-          showToast(`Meeting "${record.title}" rescheduled. The link is unchanged.`);
+          showToast(action === 'recordingSettings' ? 'Recording settings saved.' : `Meeting "${record.title}" rescheduled. The link is unchanged.`);
         }}
         onCreated={(record) => {
           storeMeetingSession(record.meetingCode, { displayName: user?.name || 'You' });

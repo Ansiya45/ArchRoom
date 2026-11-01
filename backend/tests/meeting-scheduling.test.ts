@@ -83,6 +83,37 @@ test('tRPC creates one classified scheduled parent, correct instant/zone and exi
     assert.equal(result.meeting.scheduleType, 'one_time'); assert.equal(result.meeting.timeZone, 'Asia/Kolkata');
     assert.equal(result.meeting.scheduledAt?.toISOString(), '2026-09-20T18:00:00.000Z');
     assert.equal(store.participants[0].admission, 'admitted'); assert.equal(store.participants[0].role, 'host');
+    assert.equal(result.meeting.recordingFolderId, null);
+    assert.equal(result.meeting.recordingAccessPolicy, 'private');
+  });
+});
+
+test('recording policy persists on create, including recurring parents; invalid or unverified input is rejected', async () => {
+  await withStore(null, async store => {
+    const caller = meetingsRouter.createCaller({ isAuthenticated: true, user: { id: hostId } } as never);
+    const created = await caller.create({ title: 'Class', meetingCode: code, schedule, recurrence: { frequency: 'weekly', interval: 1, weekdays: [0], ends: { type: 'never' } }, recordingAccessPolicy: 'restricted' });
+    assert.equal(created.meeting.recordingAccessPolicy, 'restricted');
+    assert.equal(created.meeting.recordingFolderId, null);
+    assert.equal(store.meeting.recordingAccessPolicy, 'restricted');
+    await assert.rejects(caller.create({ title: 'Bad', recordingAccessPolicy: 'invalid' as never }), { code: 'BAD_REQUEST' });
+    await assert.rejects(caller.create({ title: 'Bad', recordingFolderId: 'unverified' as never }), { code: 'BAD_REQUEST' });
+  });
+});
+
+test('only meeting creator can update recording settings without changing schedule', async () => {
+  await withStore(base(), async store => {
+    const creator = meetingsRouter.createCaller({ isAuthenticated: true, user: { id: hostId } } as never);
+    const other = meetingsRouter.createCaller({ isAuthenticated: true, user: { id: 'cohost-or-participant' } } as never);
+    const input = { meetingId, recordingFolderId: null, recordingAccessPolicy: 'anyone_with_link' as const };
+    await assert.rejects(other.updateRecordingSettings(input), { code: 'FORBIDDEN' });
+    await assert.rejects(meetingsRouter.createCaller({ user: null } as never).updateRecordingSettings(input), { code: 'UNAUTHORIZED' });
+    await assert.rejects(creator.updateRecordingSettings({ ...input, recordingFolderId: 'unverified' as never }), { code: 'BAD_REQUEST' });
+    assert.equal(store.writes, 0);
+    const updated = await creator.updateRecordingSettings(input);
+    assert.equal(updated.meeting.recordingAccessPolicy, 'anyone_with_link');
+    assert.equal(store.patch.scheduledAt, undefined);
+    assert.equal(store.patch.recurrenceRule, undefined);
+    assert.equal(store.writes, 1);
   });
 });
 

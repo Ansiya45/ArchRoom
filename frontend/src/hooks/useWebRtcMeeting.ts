@@ -60,6 +60,7 @@ export function useWebRtcMeeting(
   const [remoteMicMuted, setRemoteMicMuted] = useState<Record<string, boolean>>({});
   const [videoInputDevices, setVideoInputDevices] = useState<MediaDeviceInfo[]>([]);
   const [remoteCameraOn, setRemoteCameraOn] = useState<Record<string, boolean>>({});
+  const [speakingLevels, setSpeakingLevels] = useState<Record<string, number>>({});
   const [cameraError, setCameraError] = useState<string | null>(null);
   const micStateCallbackRef = useRef(onMicrophoneStateChange);
   micStateCallbackRef.current = onMicrophoneStateChange;
@@ -295,6 +296,13 @@ export function useWebRtcMeeting(
       RoomEvent.ParticipantAttributesChanged,
     ];
     mediaEvents.forEach((event) => room.on(event, refresh));
+    room.on(RoomEvent.ActiveSpeakersChanged, (speakers: Participant[]) => {
+      const levels: Record<string, number> = {};
+      for (const speaker of speakers) {
+        levels[speaker.isLocal ? 'user-self' : speaker.identity] = Math.round(speaker.audioLevel * 100);
+      }
+      setSpeakingLevels(levels);
+    });
     room.on(RoomEvent.Reconnecting, () => setIsConnected(false));
     room.on(RoomEvent.Reconnected, () => setIsConnected(true));
     room.on(RoomEvent.Disconnected, () => setIsConnected(false));
@@ -387,6 +395,7 @@ export function useWebRtcMeeting(
       setIsConnected(false);
       setDisplayStream(null);
       setRemoteStreams({});
+      setSpeakingLevels({});
       setRemoteBackgrounds({});
       setRemoteScreenShares({});
       setRemoteRaisedHands({});
@@ -471,6 +480,7 @@ export function useWebRtcMeeting(
     remoteRaisedHands,
     remoteMicMuted,
     remoteCameraOn,
+    speakingLevels,
     audioInputDevices,
     videoInputDevices,
     microphoneError,

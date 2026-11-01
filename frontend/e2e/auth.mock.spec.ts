@@ -34,6 +34,37 @@ test.describe('authentication UI — mocked API', () => {
     expect(await page.evaluate(() => JSON.parse(localStorage.getItem('ylaam_meet_user')!))).toEqual(authMock.user);
   });
 
+  for (const mode of ['login', 'signup'] as const) {
+    test(`${mode} explains an empty server response without exposing a JSON parsing error`, async ({ page, authMock }) => {
+      await page.route(`**/api/auth.${mode}*`, route => route.fulfill({ status: 500, contentType: 'text/plain', body: '' }));
+      await page.goto('/');
+      if (mode === 'login') {
+        await openLogin(page);
+        await page.getByPlaceholder('name@company.com').fill(authMock.user.email);
+        await page.locator('input[autocomplete="current-password"]').fill(authMock.password);
+        await page.getByRole('button', { name: 'Sign in', exact: true }).click();
+      } else {
+        await page.getByRole('button', { name: 'Sign Up', exact: true }).click();
+        await page.getByPlaceholder('Jordan Miller').fill(authMock.user.fullName);
+        await page.getByPlaceholder('name@company.com').fill(authMock.user.email);
+        for (const input of await page.locator('input[autocomplete="new-password"]').all()) await input.fill(authMock.password);
+        await page.getByRole('button', { name: 'Create account', exact: true }).click();
+      }
+      await expect(page.getByRole('alert')).toHaveText('The server did not return a valid response. Check that the backend is running, then try again.');
+      await expectNoSession(page);
+    });
+  }
+
+  test('login explains an HTML server error without displaying parser internals', async ({ page, authMock }) => {
+    await page.route('**/api/auth.login*', route => route.fulfill({ status: 502, contentType: 'text/html', body: '<html><body>Proxy error</body></html>' }));
+    await openLogin(page);
+    await page.getByPlaceholder('name@company.com').fill(authMock.user.email);
+    await page.locator('input[autocomplete="current-password"]').fill(authMock.password);
+    await page.getByRole('button', { name: 'Sign in', exact: true }).click();
+    await expect(page.getByRole('alert')).toHaveText('The server did not return a valid response. Check that the backend is running, then try again.');
+    await expectNoSession(page);
+  });
+
   test('incorrect password displays the backend error and permits retry', async ({ page, authMock }) => {
     await openLogin(page);
     await page.getByPlaceholder('name@company.com').fill(authMock.user.email);

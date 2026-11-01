@@ -12,6 +12,10 @@ import { MeetingOccurrenceService } from '../services/meeting-occurrence.service
 import { RecurrenceSeriesService } from '../services/recurrence-series.service.js';
 
 const meetingService = new MeetingService();
+const recordingSettingsInput = z.object({
+  recordingFolderId: z.string().min(1).max(128).nullable().optional(),
+  recordingAccessPolicy: z.enum(['private', 'restricted', 'anyone_with_link']),
+});
 const scheduleInput = z.object({
   localDateTime: z.string().regex(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/),
   timeZone: z.string().min(1).max(100),
@@ -32,6 +36,8 @@ export const meetingsRouter = t.router({
         schedule: scheduleInput.optional(),
         reusable: z.boolean().optional(),
         recurrence: recurrenceInput.optional(),
+        recordingFolderId: z.string().min(1).max(128).nullable().optional(),
+        recordingAccessPolicy: z.enum(['private', 'restricted', 'anyone_with_link']).optional(),
       })
     )
     .mutation(async ({ input, ctx }) => {
@@ -53,6 +59,10 @@ export const meetingsRouter = t.router({
   reschedule: protectedProcedure
     .input(z.object({ meetingId: z.string().uuid(), schedule: scheduleInput }))
     .mutation(({ input, ctx }) => meetingService.rescheduleMeeting(input.meetingId, input.schedule, ctx.user!.id)),
+
+  updateRecordingSettings: protectedProcedure
+    .input(recordingSettingsInput.extend({ meetingId: z.string().uuid() }))
+    .mutation(({ input, ctx }) => meetingService.updateRecordingSettings(input.meetingId, input, ctx.user!.id)),
 
   list: protectedProcedure.query(async ({ ctx }) => {
     return meetingService.listMeetings(ctx.user!.id);

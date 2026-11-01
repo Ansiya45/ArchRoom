@@ -9,6 +9,7 @@ import { canManageMeetingSession } from './meeting-host-access.js';
 import { resolveMeetingSchedule, type MeetingSchedule } from './meeting-schedule.service.js';
 
 import { validateRecurrence, type RecurrenceRule } from './recurrence.service.js';
+import { validateRecordingDestination } from './recording-folder-access.service.js';
 
 export type CreateMeetingInput = {
   title: string;
@@ -18,6 +19,8 @@ export type CreateMeetingInput = {
   schedule?: MeetingSchedule;
   reusable?: boolean;
   recurrence?: RecurrenceRule;
+  recordingFolderId?: string | null;
+  recordingAccessPolicy?: 'private' | 'restricted' | 'anyone_with_link';
 };
 
 export type JoinMeetingIdentity = {
@@ -42,6 +45,7 @@ export class MeetingService {
     if (!title) {
       throw new TRPCError({ code: 'BAD_REQUEST', message: 'Meeting title is required' });
     }
+    const recordingFolderId = await validateRecordingDestination(hostUserId, input.recordingFolderId ?? null);
 
     const code = input.meetingCode
       ? await this.validateAvailableMeetingCode(input.meetingCode)
@@ -52,6 +56,8 @@ export class MeetingService {
         .insert(meetings)
         .values({
           title,
+          recordingFolderId,
+          recordingAccessPolicy: input.recordingAccessPolicy ?? 'private',
           hostUserId,
           meetingCode: code,
           scheduledAt: schedule?.scheduledAt ?? (input.scheduledAt ? new Date(input.scheduledAt) : null),
@@ -96,6 +102,17 @@ export class MeetingService {
       or(eq(meetings.scheduleType, 'one_time'), isNotNull(meetings.scheduledAt)),
     )).returning();
     if (!updated) throw new TRPCError({ code: 'CONFLICT', message: 'Only a scheduled, not-yet-started meeting can be rescheduled.' });
+    return { ok: true, meeting: updated };
+  }
+
+  async updateRecordingSettings(meetingId: string, input: { recordingFolderId?: string | null; recordingAccessPolicy: 'private' | 'restricted' | 'anyone_with_link' }, userId: string) {
+    const meeting = await db.query.meetings.findFirst({ where: eq(meetings.id, meetingId) });
+    if (!meeting) throw new TRPCError({ code: 'NOT_FOUND', message: 'Meeting not found' });
+    if (meeting.hostUserId !== userId) throw new TRPCError({ code: 'FORBIDDEN', message: 'Only the meeting creator can change recording settings.' });
+    const recordingFolderId = await validateRecordingDestination(userId, input.recordingFolderId ?? null);
+    const [updated] = await db.update(meetings).set({ recordingFolderId, recordingAccessPolicy: input.recordingAccessPolicy })
+      .where(and(eq(meetings.id, meetingId), eq(meetings.hostUserId, userId))).returning();
+    if (!updated) throw new TRPCError({ code: 'CONFLICT', message: 'Meeting settings could not be updated.' });
     return { ok: true, meeting: updated };
   }
 

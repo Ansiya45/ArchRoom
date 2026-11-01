@@ -41,6 +41,37 @@ export const users = pgTable(
   ]
 );
 
+// Stage A: app permissions are separate from Google Drive sharing permissions.
+export const recordingBatchFolders = pgTable('recording_batch_folders', {
+  folderId: text('folder_id').primaryKey(),
+  name: varchar('name', { length: 255 }).notNull(),
+  createdByUserId: uuid('created_by_user_id').notNull().references(() => users.id),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+});
+
+export const recordingBatchFolderPermissions = pgTable('recording_batch_folder_permissions', {
+  folderId: text('folder_id').notNull().references(() => recordingBatchFolders.folderId, { onDelete: 'cascade' }),
+  userId: uuid('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  role: varchar('role', { length: 20 }).$type<'manager' | 'trainer' | 'viewer'>().notNull(),
+}, table => [primaryKey({ columns: [table.folderId, table.userId] }), index('recording_batch_folder_permissions_user_idx').on(table.userId)]);
+
+// Global permission to create a new direct child of the configured root.
+// A manager assignment on an existing folder does not imply this grant.
+export const recordingFolderCreators = pgTable('recording_folder_creators', {
+  userId: uuid('user_id').primaryKey().references(() => users.id, { onDelete: 'cascade' }),
+  grantedByUserId: uuid('granted_by_user_id').notNull().references(() => users.id),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+});
+
+// Only ciphertext is persisted. The encryption key is provided separately at runtime.
+export const driveIntegrationCredentials = pgTable('drive_integration_credentials', {
+  id: integer('id').primaryKey(),
+  googleAccountEmail: varchar('google_account_email', { length: 255 }).notNull(),
+  encryptedRefreshToken: text('encrypted_refresh_token').notNull(),
+  connectedByUserId: uuid('connected_by_user_id').notNull().references(() => users.id),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+});
+
 export const authSessions = pgTable('auth_sessions', {
   id: uuid('id').primaryKey().defaultRandom(),
   userId: uuid('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
@@ -70,6 +101,8 @@ export const meetings = pgTable(
     id: uuid('id').primaryKey().defaultRandom(),
     meetingCode: varchar('meeting_code', { length: 80 }).notNull().unique(),
     title: varchar('title', { length: 255 }).notNull(),
+    recordingFolderId: text('recording_folder_id'),
+    recordingAccessPolicy: text('recording_access_policy').$type<'private' | 'restricted' | 'anyone_with_link'>().notNull().default('private'),
     hostUserId: uuid('host_user_id').notNull().references(() => users.id, {
       onDelete: 'cascade',
     }),
