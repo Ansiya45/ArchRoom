@@ -49,7 +49,16 @@ export default function MeetingHistoryView() {
       {items.filter(item => item.kind === 'drive').map(item => <a className="block break-all text-blue-600 underline" key={item.id} href={item.content} target="_blank" rel="noopener noreferrer">Google Drive: {item.label || 'Recording'}</a>)}
       {items.some(item => item.kind === 'drive') && <p className="text-xs text-slate-500">Drive permissions still apply. A saved link does not guarantee that the file is available.</p>}
       {items.some(item => item.kind === 'transcript') && <div className="space-y-3 rounded-xl border border-slate-200 p-3">
-        <button className="font-semibold text-blue-600 underline" onClick={async () => {
+        <button className="font-semibold text-blue-600 underline" onClick={() => {
+          const texts = items.filter(item => item.kind === 'transcript' && (item.label === 'reviewed-complete' || !items.some(candidate => candidate.kind === 'transcript' && candidate.label === 'reviewed-complete'))).sort((a, b) => (a.label || '').localeCompare(b.label || '')).map(item => item.content);
+          const blob = new Blob([texts.join('\n\n')], { type: 'text/plain;charset=utf-8' });
+          const anchor = document.createElement('a');
+          anchor.href = URL.createObjectURL(blob);
+          anchor.download = `${detail.meeting.meetingCode}-${occurrenceId || 'meeting'}-transcript.txt`;
+          anchor.click();
+          setTimeout(() => URL.revokeObjectURL(anchor.href), 30000);
+        }}>Download transcript (.txt)</button>
+        <button className="ml-4 font-semibold text-blue-600 underline" onClick={async () => {
           try {
             const scope = occurrenceId || 'meeting';
             if (emailScope === scope) { setEmailScope(null); return; }

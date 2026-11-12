@@ -10,6 +10,29 @@ import { resolveMeetingSchedule, type MeetingSchedule } from './meeting-schedule
 
 import { validateRecurrence, type RecurrenceRule } from './recurrence.service.js';
 
+// Every connected client polls the roster endpoint; hitting LiveKit's
+// management API on each poll blows through its 1,000 req/min project cap at
+// ~30 concurrent users. Cache presence per room briefly — a few seconds of
+// staleness in the roster is invisible next to the poll interval itself.
+const LIVEKIT_PRESENCE_TTL_MS = 15_000;
+const livekitPresenceCache = new Map<string, { at: number; identities: Set<string> }>();
+
+async function liveIdentitiesFor(roomName: string): Promise<Set<string> | null> {
+  if (!env.LIVEKIT_URL || !env.LIVEKIT_API_KEY || !env.LIVEKIT_API_SECRET) return null;
+  const cached = livekitPresenceCache.get(roomName);
+  if (cached && Date.now() - cached.at < LIVEKIT_PRESENCE_TTL_MS) return cached.identities;
+  try {
+    const livekit = new RoomServiceClient(env.LIVEKIT_URL.replace(/^ws/, 'http'), env.LIVEKIT_API_KEY, env.LIVEKIT_API_SECRET);
+    const liveParticipants = await livekit.listParticipants(roomName);
+    const identities = new Set(liveParticipants.map((entry) => entry.identity));
+    livekitPresenceCache.set(roomName, { at: Date.now(), identities });
+    return identities;
+  } catch {
+    // Preserve database presence if LiveKit's management API is temporarily unavailable.
+    return null;
+  }
+}
+
 export type CreateMeetingInput = {
   title: string;
   meetingCode?: string;
@@ -307,15 +330,9 @@ export class MeetingService {
       ));
 
     let visibleParticipants = participants;
-    if (env.LIVEKIT_URL && env.LIVEKIT_API_KEY && env.LIVEKIT_API_SECRET) {
-      try {
-        const livekit = new RoomServiceClient(env.LIVEKIT_URL.replace(/^ws/, 'http'), env.LIVEKIT_API_KEY, env.LIVEKIT_API_SECRET);
-        const liveParticipants = await livekit.listParticipants(mediaRoomName(meeting));
-        const liveIdentities = new Set(liveParticipants.map((entry) => entry.identity));
-        visibleParticipants = participants.filter((entry) => entry.id === requester.id || liveIdentities.has(entry.id));
-      } catch {
-        // Preserve database presence if LiveKit's management API is temporarily unavailable.
-      }
+    const liveIdentities = await liveIdentitiesFor(mediaRoomName(meeting));
+    if (liveIdentities) {
+      visibleParticipants = participants.filter((entry) => entry.id === requester.id || liveIdentities.has(entry.id));
     }
 
     return {

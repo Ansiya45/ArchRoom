@@ -5,6 +5,7 @@ import { trpc } from '@/lib/trpc';
 import { isDriveReadyMp4 } from '@/lib/recordingEncoding';
 import { checkDriveFolder, connectDrive, driveFolderId, loadDrive, newDriveUpload, pickDriveFolder, resolveDriveFolder, uploadRecordingToDrive,
   type DriveConnection, type DriveUpload } from '@/lib/googleDriveRecording';
+import { storeDriveFolderId } from '@/hooks/useMeetingRecorder';
 const config = { clientId: import.meta.env.VITE_GOOGLE_DRIVE_CLIENT_ID || '', apiKey: import.meta.env.VITE_GOOGLE_DRIVE_API_KEY || '', appId: import.meta.env.VITE_GOOGLE_DRIVE_APP_ID || '' };
 const configured = Boolean(config.clientId && config.apiKey && config.appId);
 
@@ -45,6 +46,7 @@ export function DriveRecordingUpload({ preview, meetingCode, disabled, onBusyCha
     const selected = await pickDriveFolder(config, connection!);
     if (selected) {
       const folder = await checkDriveFolder(connection!, selected.id);
+      storeDriveFolderId(folder.id);
       setFolderLink(`https://drive.google.com/drive/folders/${folder.id}`); setFolderName(folder.name); attempt.current = null; setProgress(null);
     }
   });
@@ -66,6 +68,7 @@ export function DriveRecordingUpload({ preview, meetingCode, disabled, onBusyCha
       setMessage('Select the folder from your link to allow this upload.');
       return pickDriveFolder(config, active!);
     });
+    storeDriveFolderId(folder.id);
     setFolderName(folder.name); setMessage('Uploading MP4 recording to Google Drive...');
     attempt.current ??= await newDriveUpload(active);
     setProgress(0);

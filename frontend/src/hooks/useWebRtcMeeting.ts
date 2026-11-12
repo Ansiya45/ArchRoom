@@ -51,6 +51,7 @@ export function useWebRtcMeeting(
   const [remoteBackgrounds, setRemoteBackgrounds] = useState<Record<string, BackgroundChoice>>({});
   const [remoteScreenShares, setRemoteScreenShares] = useState<Record<string, boolean>>({});
   const [remoteRaisedHands, setRemoteRaisedHands] = useState<Record<string, boolean>>({});
+  const [activeSpeakerIds, setActiveSpeakerIds] = useState<string[]>([]);
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
   const [transcriptSegments, setTranscriptSegments] = useState<TranscriptSegment[]>([]);
   const [transcriptAccessAllowed, setTranscriptAccessAllowed] = useState(false);
@@ -297,7 +298,12 @@ export function useWebRtcMeeting(
     mediaEvents.forEach((event) => room.on(event, refresh));
     room.on(RoomEvent.Reconnecting, () => setIsConnected(false));
     room.on(RoomEvent.Reconnected, () => setIsConnected(true));
-    room.on(RoomEvent.Disconnected, () => setIsConnected(false));
+    room.on(RoomEvent.Disconnected, () => { setIsConnected(false); setActiveSpeakerIds([]); });
+    // LiveKit computes dominant speakers from real audio levels — no client
+    // timers or guesswork needed.
+    room.on(RoomEvent.ActiveSpeakersChanged, (speakers) => {
+      setActiveSpeakerIds(speakers.map((speaker) => speaker.isLocal ? 'user-self' : speaker.identity));
+    });
 
     room.on(RoomEvent.DataReceived, (payload, participant, _kind, topic) => {
       if (!participant) return;
@@ -393,6 +399,7 @@ export function useWebRtcMeeting(
       setChatMessages([]);
       setTranscriptSegments([]);
       setTranscriptAccessAllowed(false);
+      setActiveSpeakerIds([]);
     };
   }, [enabled, meetingCode]);
 
@@ -471,6 +478,7 @@ export function useWebRtcMeeting(
     remoteRaisedHands,
     remoteMicMuted,
     remoteCameraOn,
+    activeSpeakerIds,
     audioInputDevices,
     videoInputDevices,
     microphoneError,

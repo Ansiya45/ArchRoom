@@ -102,25 +102,20 @@ export function useMeeting(initialMeetingCode: string = 'YLM-9284-XKP') {
     return () => clearInterval(interval);
   }, [isRecording, inMeeting]);
 
-  // Audio equalizer level animation simulation for active speaking
-  useEffect(() => {
-    if (!inMeeting) return;
-    const interval = setInterval(() => {
-      setParticipants((prev) =>
-        prev.map((p) => {
-          if (p.isMuted) return { ...p, isSpeaking: false, audioLevel: 0 };
-          const isMain = p.id === activeSpeakerId || p.id === 'user-self';
-          const randomLevel = isMain ? Math.floor(Math.random() * 60) + 30 : Math.floor(Math.random() * 20);
-          return {
-            ...p,
-            isSpeaking: randomLevel > 25,
-            audioLevel: randomLevel,
-          };
-        })
-      );
-    }, 600);
-    return () => clearInterval(interval);
-  }, [inMeeting, activeSpeakerId]);
+  // Speaking state comes from LiveKit's ActiveSpeakersChanged event via
+  // syncSpeakers — it reflects real audio, not an animation timer.
+  const syncSpeakers = useCallback((activeIds: string[]) => {
+    const active = new Set(activeIds);
+    setParticipants((prev) =>
+      prev.map((p) => ({
+        ...p,
+        isSpeaking: !p.isMuted && active.has(p.id),
+        audioLevel: !p.isMuted && active.has(p.id) ? 70 : 0,
+      }))
+    );
+    const first = activeIds.find((id) => id !== 'user-self') ?? activeIds[0];
+    if (first) setActiveSpeakerId(first);
+  }, []);
 
   // Toggle Handlers
   const toggleMic = useCallback(() => {
@@ -354,6 +349,7 @@ export function useMeeting(initialMeetingCode: string = 'YLM-9284-XKP') {
     syncParticipantAudio,
     syncParticipantVideo,
     syncParticipants,
+    syncSpeakers,
 
     // Layout & Sidebar
     layoutMode,

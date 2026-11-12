@@ -31,7 +31,8 @@ import { clearMeetingSession, getMeetingSession, storeMeetingSession, type Meeti
 import { useSharedWhiteboard } from '@/hooks/useSharedWhiteboard';
 import { clearStoredSession, getAuthToken, getStoredUser, type SessionUser } from '@/lib/auth';
 import { useWebRtcMeeting } from '@/hooks/useWebRtcMeeting';
-import { useScreenRecorder } from '@/hooks/useScreenRecorder';
+import { useMeetingRecorder } from '@/hooks/useMeetingRecorder';
+import type { RecorderAudioInput, RecorderTile } from '@/lib/compositeMeetingRecorder';
 import { RecordingsModal } from './RecordingsModal';
 import { TranscriptModal } from './TranscriptModal';
 import { useMeetingSummaryCapture } from '@/hooks/useMeetingSummaryCapture';
@@ -107,8 +108,28 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
   const leavingRef = useRef(false);
   const joiningRef = useRef(false);
   const admissionActionsRef = useRef(new Set<string>());
-  const recorder = useScreenRecorder();
-  const aiAgreedIds = aiStatus.state === 'off' ? [] : Object.keys(call.remoteStreams);
+  // The recorder reads live room state through this ref so its draw/audio
+  // loops always see the newest streams without re-creating the hook.
+  const recorderInputRef = useRef<{ tiles: RecorderTile[]; audio: RecorderAudioInput }>({ tiles: [], audio: { local: null, micOn: false, remote: {}, muted: {} } });
+  const getRecorderTiles = React.useCallback(() => recorderInputRef.current.tiles, []);
+  const getRecorderAudio = React.useCallback(() => recorderInputRef.current.audio, []);
+  const recorder = useMeetingRecorder(meetingCode, getRecorderTiles, getRecorderAudio);
+  useEffect(() => {
+    const tiles: RecorderTile[] = [];
+    if (call.localStream) tiles.push({ id: 'user-self', name: `${meeting.displayName} (You)`, stream: call.localStream });
+    for (const [id, stream] of Object.entries(call.remoteStreams)) {
+      const name = meeting.participants.find(p => p.id === id)?.name?.replace(/ \(You\)$/, '') || 'Participant';
+      tiles.push({ id, name, stream });
+    }
+    recorderInputRef.current = {
+      tiles,
+      audio: { local: call.localStream, micOn: meeting.isMicOn, remote: call.remoteStreams, muted: call.remoteMicMuted },
+    };
+  }, [call.localStream, call.remoteStreams, call.remoteMicMuted, meeting.participants, meeting.displayName, meeting.isMicOn]);
+  // Only mix audio from participants who actually consented — the status
+  // endpoint returns their participant ids, which are also the LiveKit
+  // identities used as remoteStreams keys.
+  const aiAgreedIds = aiStatus.state === 'off' ? [] : aiStatus.agreedParticipantIds;
   const aiCaptureActive = meeting.inMeeting && isHost && call.isConnected && !aiCaptureFault && aiStatus.state === 'active' && aiStatus.requestedByUserId === user?.id;
   const transcript = useMeetingSummaryCapture(
     aiCaptureActive, meetingCode, sessionRef.current?.occurrenceId,
@@ -144,7 +165,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
       }
     };
     void refresh();
-    const timer = window.setInterval(() => void refresh(), 1000);
+    const timer = window.setInterval(() => void refresh(), 5000);
     return () => { cancelled = true; window.clearInterval(timer); };
   }, [meeting.inMeeting, meetingCode, user?.id]);
 
@@ -193,6 +214,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
 
   useEffect(() => meeting.syncParticipantAudio(call.remoteMicMuted), [call.remoteMicMuted]);
   useEffect(() => meeting.syncParticipantVideo(call.remoteCameraOn), [call.remoteCameraOn]);
+  useEffect(() => meeting.syncSpeakers(call.activeSpeakerIds), [call.activeSpeakerIds]);
 
   useEffect(() => {
     if (meeting.inMeeting && !meeting.isCameraOn) stopAllCameraStreams();
@@ -306,7 +328,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
     };
 
     void checkAdmission();
-    const timer = window.setInterval(() => void checkAdmission(), 500);
+    const timer = window.setInterval(() => void checkAdmission(), 2500);
     return () => window.clearInterval(timer);
   }, [admission, meetingCode]);
 
@@ -346,7 +368,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
       }
     };
     void loadRequests();
-    const timer = window.setInterval(() => void loadRequests(), 750);
+    const timer = window.setInterval(() => void loadRequests(), 3000);
     return () => { cancelled = true; controller?.abort(); window.clearInterval(timer); };
   }, [isHost, isOwner, meeting.inMeeting, meetingCode]);
 
@@ -367,7 +389,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
       }
     };
     void loadParticipants();
-    const timer = window.setInterval(() => void loadParticipants(), 2000);
+    const timer = window.setInterval(() => void loadParticipants(), 8000);
     return () => window.clearInterval(timer);
   }, [meeting.inMeeting, meetingCode]);
 
@@ -410,7 +432,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
       }
     };
     void checkMembership();
-    const timer = window.setInterval(() => void checkMembership(), 2000);
+    const timer = window.setInterval(() => void checkMembership(), 10000);
     return () => window.clearInterval(timer);
   }, [meeting.inMeeting, meetingCode]);
 
@@ -552,6 +574,30 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
     finally { setAiBusy(false); }
   };
 
+  const respondToAiConsent = async (agree: boolean) => {
+    if (aiStatus.state === 'off' || aiBusy) return;
+    setAiBusy(true);
+    try {
+      await trpc.meetings.respondAiTranscription.mutate({
+        meetingCode,
+        occurrenceId: sessionRef.current?.occurrenceId,
+        participantId: sessionRef.current?.participantId,
+        requestId: aiStatus.requestId,
+        agree,
+      });
+      setAiStatus(await trpc.meetings.aiStatus.query({ meetingCode, occurrenceId: sessionRef.current?.occurrenceId, participantId: sessionRef.current?.participantId }));
+    } catch (error) {
+      alert(error instanceof Error ? error.message : 'Unable to record your response.');
+    } finally { setAiBusy(false); }
+  };
+
+  const [recoveryError, setRecoveryError] = useState('');
+  const resumeRecovery = async (spoolId: string) => {
+    setRecoveryError('');
+    try { await recorder.resumeRecovery(spoolId); }
+    catch (error) { setRecoveryError(error instanceof Error ? error.message : 'The recording could not be uploaded. You can still download it.'); }
+  };
+
   const toggleRecording = async () => {
     if (!isHost) return;
     if (recorder.isRecording) {
@@ -562,7 +608,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
     try {
       await recorder.start(sessionRef.current?.occurrenceId);
     } catch (error) {
-      alert(error instanceof Error ? error.message : 'Unable to start screen recording.');
+      alert(error instanceof Error ? error.message : 'Unable to start the meeting recording.');
     }
   };
 
@@ -962,12 +1008,46 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
         onDiscardPreview={recorder.clearPreview}
       />
 
+      {isHost && recorder.recoveries.length > 0 && (
+        <div role="alert" className="fixed left-4 top-16 z-[115] w-[min(92vw,420px)] space-y-3 rounded-2xl border border-amber-300 bg-amber-50 p-4 text-sm text-amber-950 shadow-2xl">
+          <p className="font-bold">Unfinished recording{recorder.recoveries.length > 1 ? 's' : ''} found</p>
+          {recorder.recoveries.map(item => (
+            <div key={item.id} className="rounded-xl bg-white/80 p-3">
+              <p className="truncate font-semibold">{item.fileName}</p>
+              <p className="text-xs text-amber-800">{item.meetingCode} · {item.sizeLabel} · {new Date(item.startedAt).toLocaleString()}</p>
+              <div className="mt-2 flex flex-wrap gap-2">
+                <button type="button" disabled={recorder.recoveryBusy === item.id} onClick={() => void resumeRecovery(item.id)} className="rounded-lg bg-amber-600 px-3 py-1.5 text-xs font-bold text-white hover:bg-amber-500 disabled:opacity-50">
+                  {recorder.recoveryBusy === item.id ? 'Uploading…' : 'Upload to Drive'}
+                </button>
+                <button type="button" onClick={() => void recorder.downloadRecovery(item.id)} className="rounded-lg border border-amber-400 px-3 py-1.5 text-xs font-semibold hover:bg-amber-100">Download</button>
+                <button type="button" onClick={() => { if (window.confirm('Delete this saved recording from this device?')) void recorder.discardRecovery(item.id); }} className="rounded-lg border border-red-300 px-3 py-1.5 text-xs font-semibold text-red-700 hover:bg-red-50">Discard</button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+      {recoveryError && <div role="alert" className="fixed left-4 top-16 z-[116] w-[min(92vw,420px)] rounded-2xl border border-red-300 bg-red-50 p-3 text-sm text-red-800 shadow-xl">{recoveryError}</div>}
+      {recorder.driveMessage && (isHost || isOwner) && (
+        <div role="status" className="fixed bottom-40 left-4 z-30 max-w-sm rounded-lg border border-blue-300 bg-blue-50 p-3 text-xs text-blue-900 shadow-lg">
+          {recorder.driveMessage}
+        </div>
+      )}
+
       {closingForSummary && <div role="status" className="fixed inset-0 z-[110] bg-black/80 text-white flex items-center justify-center">Finishing speech capture and closing the call...</div>}
       <div className="fixed bottom-24 left-4 z-30 max-w-sm rounded-lg bg-zinc-900/95 p-3 text-xs text-white shadow-lg" role="status">
         {aiStatus.state === 'off' ? <>
           <p>AI transcription is off.</p>
         </> : <>
           <p className="font-semibold">{aiStatus.capturing ? 'AI transcription active. Meeting audio is processed by YLAAM Meet and OpenAI; transcript text is saved in the host’s Meeting History.' : 'AI transcription is enabled. Meeting audio will be processed by YLAAM Meet and OpenAI; transcript text is saved in the host’s Meeting History.'}</p>
+          {'needsResponse' in aiStatus && aiStatus.needsResponse && (
+            <div className="mt-2 flex items-center gap-2">
+              <button type="button" disabled={aiBusy} onClick={() => void respondToAiConsent(true)} className="rounded-lg bg-emerald-600 px-3 py-1.5 font-bold hover:bg-emerald-500 disabled:opacity-50">I agree</button>
+              <button type="button" disabled={aiBusy} onClick={() => void respondToAiConsent(false)} className="rounded-lg border border-white/30 px-3 py-1.5 font-semibold hover:bg-white/10 disabled:opacity-50">Decline</button>
+            </div>
+          )}
+          {'ownDecision' in aiStatus && aiStatus.ownDecision === false && !aiStatus.needsResponse && (
+            <p className="mt-1 text-amber-200">You declined AI transcription. Transcription starts only if you and other participants agree.</p>
+          )}
           {isHost && <button type="button" disabled={aiBusy} onClick={() => void stopAiTranscription()} className="ml-3 mt-2 underline">Stop transcription</button>}
         </>}
         {aiCaptureFault && <p role="alert" className="mt-1 text-amber-200">Capture stopped after a permission check failed. Stop and request transcription again.</p>}
