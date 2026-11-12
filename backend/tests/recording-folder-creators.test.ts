@@ -121,3 +121,10 @@ test('batch creator cannot start, replace, verify, or disconnect the Google inte
   await assert.rejects(caller.verifyRoot({ selectedFolderId: recordingDriveRootId() }), { code: 'FORBIDDEN' });
   await assert.rejects(caller.disconnect(), { code: 'FORBIDDEN' });
 });
+
+test('non-administrators cannot see company connection details and status is not cached', async () => {
+  const headers: Record<string, string> = {};
+  const caller = googleDriveIntegrationRouter.createCaller({ isAuthenticated: true, user: { id: managerId }, res: { setHeader: (name: string, value: string) => { headers[name] = value; } } } as never);
+  assert.deepEqual(await caller.status(), { isAdministrator: false, connected: false, pending: false, connectionState: 'not_connected', accountEmail: null });
+  assert.equal(headers['Cache-Control'], 'no-store');
+});

@@ -77,7 +77,8 @@ test('inline history copies saved content and retains participant sharing', asyn
     meeting: room, sessions: [], recordings: [], items: [
       { id: 't', occurrenceId: null, kind: 'transcript', label: 'reviewed-complete', content: 'Actual saved transcript.' },
       { id: 's', occurrenceId: null, kind: 'summary', content: 'Actual saved summary.' },
-      { id: 'd', occurrenceId: null, kind: 'drive', content: 'https://drive.google.com/file/d/saved123/view?usp=sharing' },
+      { id: 'd', occurrenceId: null, kind: 'drive', content: 'https://drive.google.com/file/d/saved123/view?usp=sharing', independentlyVerified: false },
+      { id: 'verified', occurrenceId: null, kind: 'drive', content: 'https://drive.google.com/file/d/verified123/view', independentlyVerified: true },
     ],
   } : [room, { ...room, id: sessionId, title: 'Other meeting', status: 'ended' }] } } }));
   await page.route('**/api/meetings.summaryRecipients*', route => route.fulfill({ json: { result: { data: [{ id: sessionId, name: 'Attendee', email: 'attendee@example.invalid' }] } } }));
@@ -99,7 +100,14 @@ test('inline history copies saved content and retains participant sharing', asyn
     await card.getByRole('button', { name: 'Copy ' + kind, exact: true }).click();
     await expect.poll(() => page.evaluate(() => (window as any).copiedHistoryText)).toBe('Actual saved ' + kind + '.');
   }
-  await expect(card.getByRole('link', { name: 'Open in Drive' })).toHaveAttribute('href', 'https://drive.google.com/file/d/saved123/view?usp=sharing');
+  await expect(card.getByText('File verification unavailable (legacy or unverified link)')).toBeVisible();
+  await expect(card.getByText('File independently verified at upload')).toBeVisible();
+  await expect(card.getByRole('link', { name: 'Open in Drive' })).toHaveCount(2);
+  await expect(card.getByRole('link', { name: 'Open in Drive' }).first()).toHaveAttribute('href', 'https://drive.google.com/file/d/saved123/view?usp=sharing');
+  await card.getByRole('button', { name: 'Copy Link' }).first().click();
+  await expect.poll(() => page.evaluate(() => (window as any).copiedHistoryText)).toBe('https://drive.google.com/file/d/saved123/view?usp=sharing');
+  await card.getByRole('button', { name: 'Copy Link' }).last().click();
+  await expect.poll(() => page.evaluate(() => (window as any).copiedHistoryText)).toBe('https://drive.google.com/file/d/verified123/view');
   await card.getByRole('button', { name: 'Email transcript to participants' }).click();
   await card.getByRole('checkbox', { name: 'Attendee' }).check();
   await card.getByRole('button', { name: 'Send transcript', exact: true }).click();

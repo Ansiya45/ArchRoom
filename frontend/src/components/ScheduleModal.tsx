@@ -7,6 +7,7 @@ import { trpc } from '../lib/trpc';
 import { localScheduleFields, type MeetingRecord } from '../lib/meetingSchedule';
 
 import { RecurrenceControls, type Rule } from './RecurrenceControls';
+import BatchStudents from './BatchStudents';
 
 interface ScheduleModalProps {
   isOpen: boolean;
@@ -40,9 +41,6 @@ export const ScheduleModal: React.FC<ScheduleModalProps> = ({
   const [copied, setCopied] = useState(false);
   const [meetingMode, setMeetingMode] = useState<'instant' | 'scheduled'>('instant');
   const [recordingSettingsOpen, setRecordingSettingsOpen] = useState(false);
-  const [previewAccess, setPreviewAccess] = useState<'private' | 'restricted' | 'public'>('private');
-  const [savingRecordingSettings, setSavingRecordingSettings] = useState(false);
-  const [recordingSettingsMessage, setRecordingSettingsMessage] = useState('');
   const [selectedFolderId, setSelectedFolderId] = useState<string | null>(null);
   const [folderState, setFolderState] = useState<{ connected: boolean; canCreate: boolean; folders: { id: string; name: string }[] } | null>(null);
   const [folderLoading, setFolderLoading] = useState(false);
@@ -73,8 +71,6 @@ export const ScheduleModal: React.FC<ScheduleModalProps> = ({
       setError('');
       setCopied(false);
       setRecordingSettingsOpen(false);
-      setPreviewAccess(editingMeeting?.recordingAccessPolicy === 'anyone_with_link' ? 'public' : editingMeeting?.recordingAccessPolicy ?? 'private');
-      setRecordingSettingsMessage('');
       setSelectedFolderId(editingMeeting?.recordingFolderId ?? null);
       setFolderState(null);
       setFolderError('');
@@ -130,7 +126,11 @@ export const ScheduleModal: React.FC<ScheduleModalProps> = ({
       const schedule = { localDateTime: `${date}T${time}`, timeZone };
       if (editingMeeting) {
         const payload = await trpc.meetings.reschedule.mutate({ meetingId: editingMeeting.id, schedule });
-        onUpdated(payload.meeting, 'reschedule');
+        if (selectedFolderId !== editingMeeting.recordingFolderId) {
+          const settings = await trpc.meetings.updateRecordingSettings.mutate({ meetingId: editingMeeting.id,
+            recordingFolderId: selectedFolderId, recordingAccessPolicy: editingMeeting.recordingAccessPolicy });
+          onUpdated(settings.meeting, 'recordingSettings');
+        } else onUpdated(payload.meeting, 'reschedule');
         onClose();
       } else {
         const payload = await trpc.meetings.create.mutate({
@@ -139,7 +139,7 @@ export const ScheduleModal: React.FC<ScheduleModalProps> = ({
           startNow: false,
           reusable: meetingMode === 'instant',
           recordingFolderId: selectedFolderId,
-          recordingAccessPolicy: previewAccess === 'public' ? 'anyone_with_link' : previewAccess,
+          recordingAccessPolicy: 'private',
         });
         onCreated(payload.meeting);
         onClose();
@@ -155,21 +155,6 @@ export const ScheduleModal: React.FC<ScheduleModalProps> = ({
     }
   };
 
-  const saveRecordingSettings = async () => {
-    if (!editingMeeting) return;
-    setSavingRecordingSettings(true);
-    setRecordingSettingsMessage('');
-    try {
-      const result = await trpc.meetings.updateRecordingSettings.mutate({
-        meetingId: editingMeeting.id, recordingFolderId: selectedFolderId,
-        recordingAccessPolicy: previewAccess === 'public' ? 'anyone_with_link' : previewAccess,
-      });
-      onUpdated(result.meeting, 'recordingSettings');
-      setRecordingSettingsMessage('Preference saved. Drive sharing and automatic uploads are not active.');
-    } catch (error) {
-      setRecordingSettingsMessage(error instanceof Error ? error.message : 'Unable to save recording preference.');
-    } finally { setSavingRecordingSettings(false); }
-  };
 
 
   return (
@@ -284,15 +269,14 @@ export const ScheduleModal: React.FC<ScheduleModalProps> = ({
             {recordingSettingsOpen && <section id="recording-settings-preview" aria-label="Recording Settings" className="mt-3 space-y-4 border-t border-slate-200 pt-3 text-sm">
               <div>
                 <h4 className="font-semibold text-slate-900">Recording Settings</h4>
-                <p className="mt-1 rounded-lg border border-blue-500/20 bg-blue-500/10 p-2 text-xs text-blue-200">Folder choice and access preferences are saved with the meeting. Drive sharing and automatic recording uploads are not active.</p>
+                <p className="mt-1 rounded-lg border border-blue-500/20 bg-blue-500/10 p-2 text-xs text-blue-200">Optionally choose an authorized company folder. Finalized recordings will upload there automatically; otherwise you can choose a folder after recording.</p>
               </div>
               <div className="space-y-2">
-                <p className="font-semibold text-white">Save recordings to</p>
-                <p className="text-slate-600">Recording Sessions (central root is the default)</p>
-                <label htmlFor="recording-folder-preview" className="block text-xs text-slate-500">Select batch/course folder</label>
+                <p className="font-semibold text-white">Recording destination</p>
+                <label htmlFor="recording-folder-preview" className="block text-xs text-slate-500">Optional company Drive folder for this meeting or recurring series</label>
                 <select id="recording-folder-preview" value={selectedFolderId ?? ''} onChange={event => setSelectedFolderId(event.target.value || null)}
                   disabled={folderLoading || !folderState?.connected} className="w-full rounded-xl border border-slate-200 bg-slate-50 p-2 text-slate-700 disabled:opacity-60">
-                  <option value="">Central Recording Sessions root</option>
+                  <option value="">Choose after recording</option>
                   {folderState?.folders.map(folder => <option key={folder.id} value={folder.id}>{folder.name}</option>)}
                 </select>
                 {!folderState?.connected && !folderLoading && <p className="text-xs text-slate-500">Google Drive is not connected or the recording root is not verified. Batch folders are unavailable.</p>}
@@ -304,22 +288,9 @@ export const ScheduleModal: React.FC<ScheduleModalProps> = ({
                     <button type="button" disabled={folderLoading || !newFolderName.trim()} onClick={() => void createFolder()} className="rounded-lg border border-slate-200 bg-slate-100 px-3 py-2 text-xs hover:bg-slate-200 transition-colors disabled:opacity-50">Create New Batch Folder</button></>}
                 </div>
               </div>
-              <fieldset className="space-y-2">
-                <legend className="font-semibold text-white">Recording access preference</legend>
-                {([
-                  ['private', 'Private — Host/Manager only', 'Recordings are not shared with students.'],
-                  ['restricted', 'Restricted — Approved batch students', 'Only Google accounts granted access can view recordings.'],
-                  ['public', 'Anyone with the link — Viewer', 'Anyone receiving the link can view, including people outside the batch.'],
-                ] as const).map(([value, label, description]) => <label key={value} className="flex gap-2 rounded-lg border border-slate-200 p-2">
-                  <input type="radio" name="recording-access-preview" checked={previewAccess === value} onChange={() => setPreviewAccess(value)} className="mt-1" />
-                  <span><span className="block font-medium text-slate-800">{label}</span><span className="text-xs text-slate-500">{description}</span></span>
-                </label>)}
-                {previewAccess === 'public' && <p role="alert" className="rounded-lg border border-blue-500/20 bg-blue-500/10 p-2 text-xs text-blue-200">Public links can be forwarded outside the intended audience. Saving a public video inside a private batch folder will require a separate permission check and confirmation.</p>}
-              </fieldset>
-              {editingMeeting && <button type="button" disabled={savingRecordingSettings} onClick={() => void saveRecordingSettings()}
-                className="rounded-lg bg-blue-600 px-3 py-2 text-xs font-semibold text-white disabled:opacity-50">{savingRecordingSettings ? 'Saving...' : 'Save Recording Settings'}</button>}
-              {recordingSettingsMessage && <p role="status" className="text-xs text-slate-700">{recordingSettingsMessage}</p>}
-              <p className="text-xs text-slate-500">Viewer download, copy, and print restrictions will be applied where supported after automatic Drive integration. They cannot prevent screen recording.</p>
+              {selectedFolderId && !folderLoading && folderState?.connected && folderState.folders.some(folder => folder.id === selectedFolderId) &&
+                <BatchStudents key={selectedFolderId} folderId={selectedFolderId} folderName={folderState.folders.find(folder => folder.id === selectedFolderId)!.name} />}
+              <p className="text-xs text-slate-500">Manage recording access in Google Drive.</p>
             </section>}
           </div>
           {error && <p role="alert" className="rounded-xl bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}

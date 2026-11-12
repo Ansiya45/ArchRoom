@@ -131,3 +131,25 @@ test('integration administrator starts OAuth through a top-level authenticated b
   await expect(page.getByText('Mocked Google setup navigation')).toBeVisible();
   expect(authMock.oauthStartForms).toEqual([{ method: 'POST', origin: new URL(page.url()).origin, token: authMock.token }]);
 });
+
+test('administrator sees the company account and accurate recoverable connection states', async ({ page, authMock }) => {
+  authMock.driveAdmin = true; authMock.driveConnected = true;
+  await login(page, authMock);
+  await page.getByRole('complementary').getByRole('button', { name: 'Settings' }).click();
+  const panel = page.getByRole('region', { name: 'Google Drive integration' });
+  await expect(panel.getByRole('status')).toHaveText('Connected and verified');
+  await expect(panel).toContainText('Connected account: company@example.invalid');
+  authMock.driveState = 'authorization_unavailable';
+  await panel.getByRole('button', { name: 'Refresh status' }).click();
+  await expect(panel.getByRole('status')).toContainText('could not be refreshed');
+  await expect(panel).toContainText('Saved account: company@example.invalid');
+  await expect(panel.getByRole('button', { name: 'Select recording root' })).toHaveCount(0);
+  authMock.driveState = 'root_unverified';
+  await panel.getByRole('button', { name: 'Refresh status' }).click();
+  await expect(panel.getByRole('status')).toContainText('Recording Sessions root could not be verified');
+  await expect(panel.getByRole('button', { name: 'Select recording root' })).toBeVisible();
+  authMock.driveState = 'status_unavailable';
+  await panel.getByRole('button', { name: 'Refresh status' }).click();
+  await expect(panel.getByRole('status')).toContainText('Connection status is unavailable');
+  await expect(panel).not.toContainText('company@example.invalid');
+});

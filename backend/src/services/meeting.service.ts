@@ -31,6 +31,8 @@ export type JoinMeetingIdentity = {
 };
 
 export class MeetingService {
+  constructor(private readonly validateDestination = validateRecordingDestination) {}
+
   async createMeeting(input: CreateMeetingInput, hostUserId: string) {
     if (input.reusable && (input.schedule || input.scheduledAt || input.startNow)) {
       throw new TRPCError({ code: 'BAD_REQUEST', message: 'Reusable rooms have no scheduled time. Create the room, then open it when needed.' });
@@ -45,7 +47,7 @@ export class MeetingService {
     if (!title) {
       throw new TRPCError({ code: 'BAD_REQUEST', message: 'Meeting title is required' });
     }
-    const recordingFolderId = await validateRecordingDestination(hostUserId, input.recordingFolderId ?? null);
+    const recordingFolderId = await this.validateDestination(hostUserId, input.recordingFolderId ?? null);
 
     const code = input.meetingCode
       ? await this.validateAvailableMeetingCode(input.meetingCode)
@@ -109,7 +111,7 @@ export class MeetingService {
     const meeting = await db.query.meetings.findFirst({ where: eq(meetings.id, meetingId) });
     if (!meeting) throw new TRPCError({ code: 'NOT_FOUND', message: 'Meeting not found' });
     if (meeting.hostUserId !== userId) throw new TRPCError({ code: 'FORBIDDEN', message: 'Only the meeting creator can change recording settings.' });
-    const recordingFolderId = await validateRecordingDestination(userId, input.recordingFolderId ?? null);
+    const recordingFolderId = await this.validateDestination(userId, input.recordingFolderId ?? null);
     const [updated] = await db.update(meetings).set({ recordingFolderId, recordingAccessPolicy: input.recordingAccessPolicy })
       .where(and(eq(meetings.id, meetingId), eq(meetings.hostUserId, userId))).returning();
     if (!updated) throw new TRPCError({ code: 'CONFLICT', message: 'Meeting settings could not be updated.' });

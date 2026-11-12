@@ -8,6 +8,8 @@ import { assertDatabaseReady } from './db/readiness.js';
 import { client } from './db/index.js';
 import { googleDriveOAuth } from './services/google-drive-integration.runtime.js';
 import { oauthStateCookie, startGoogleOAuthFromNavigation } from './services/google-drive-oauth-start.service.js';
+import { localIngestionHandler } from './services/local-recording-ingestion.runtime.js';
+import { startCompanyRecordingUploadOrchestration } from './services/company-recording-upload-orchestrator.runtime.js';
 
 try {
   await assertDatabaseReady();
@@ -26,6 +28,7 @@ const allowedOrigins = new Set(
     .filter(Boolean)
 );
 
+const handleLocalIngestion = localIngestionHandler(allowedOrigins);
 const server = createHTTPServer({
   router: appRouter,
   createContext,
@@ -36,6 +39,10 @@ const server = createHTTPServer({
     }
   },
   middleware(req, res, next) {
+    if (req.url?.startsWith('/recording-staging/')) {
+      void handleLocalIngestion(req, res);
+      return;
+    }
     if (req.method === 'POST' && req.url === '/google-drive/oauth/start') {
       void (async () => {
         if (!env.GOOGLE_OAUTH_CALLBACK_URL || !req.headers['content-type']?.startsWith('application/x-www-form-urlencoded'))
@@ -104,6 +111,7 @@ const server = createHTTPServer({
 });
 
 attachWhiteboardServer(server);
+startCompanyRecordingUploadOrchestration();
 
 server.listen(env.PORT, () => {
   console.log(`YLAAM-MEET tRPC backend listening on http://localhost:${env.PORT}`);

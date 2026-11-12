@@ -19,7 +19,8 @@ const schedule = { localDateTime: '2026-09-20T23:30', timeZone: 'Asia/Kolkata' }
 const base = () => ({ id: meetingId, meetingCode: code, hostUserId: hostId, title: 'Product Discussion',
   scheduledAt: new Date('2026-09-20T18:00:00Z'), timeZone: schedule.timeZone,
   scheduleType: 'one_time', status: 'scheduled', createdAt: new Date(), updatedAt: new Date() });
-async function withStore(initial: any, run: (store: any, service: InstanceType<typeof MeetingService>) => Promise<void>) {
+async function withStore(initial: any, run: (store: any, service: InstanceType<typeof MeetingService>) => Promise<void>,
+  service: InstanceType<typeof MeetingService> = new MeetingService()) {
   const original = { find: db.query.meetings.findFirst, transaction: db.transaction, update: db.update };
   const store = { meeting: initial, inserts: 0, participants: [] as any[], writes: 0, patch: null as any, condition: null as any, rejectUpdate: false };
   db.query.meetings.findFirst = (async () => store.meeting) as any;
@@ -40,7 +41,7 @@ async function withStore(initial: any, run: (store: any, service: InstanceType<t
       if (table === meetings) store.meeting = { ...store.meeting, ...patch };
     } }) }),
   })) as any;
-  try { await run(store, new MeetingService()); }
+  try { await run(store, service); }
   finally { db.query.meetings.findFirst = original.find; db.transaction = original.transaction; db.update = original.update; }
 }
 
@@ -98,6 +99,22 @@ test('recording policy persists on create, including recurring parents; invalid 
     await assert.rejects(caller.create({ title: 'Bad', recordingAccessPolicy: 'invalid' as never }), { code: 'BAD_REQUEST' });
     await assert.rejects(caller.create({ title: 'Bad', recordingFolderId: 'unverified' as never }), { code: 'BAD_REQUEST' });
   });
+});
+
+test('a recurring series persists one authoritative recording folder for every occurrence', async () => {
+  const folderId = 'authorizedFolder123';
+  const service = new MeetingService(async (userId, requested) => {
+    assert.equal(userId, hostId); assert.equal(requested, folderId); return folderId;
+  });
+  await withStore(null, async (store, current) => {
+    const created = await current.createMeeting({ title: 'Weekday class', meetingCode: code,
+      schedule: { ...schedule, localDateTime: '2026-09-21T14:00' },
+      recurrence: { frequency: 'weekly', interval: 1, weekdays: [1, 2, 3, 4, 5], ends: { type: 'never' } },
+      recordingFolderId: folderId }, hostId);
+    assert.equal(created.meeting.scheduleType, 'recurring');
+    assert.equal(created.meeting.recordingFolderId, folderId);
+    assert.equal(store.meeting.recordingFolderId, folderId);
+  }, service);
 });
 
 test('only meeting creator can update recording settings without changing schedule', async () => {

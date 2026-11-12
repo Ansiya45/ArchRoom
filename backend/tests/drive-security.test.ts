@@ -1,3 +1,4 @@
+import { memoryCredentialRepository } from './drive-credential-memory.js';
 import assert from 'node:assert/strict';
 import { randomBytes } from 'node:crypto';
 import { test } from 'node:test';
@@ -8,27 +9,25 @@ const adminId = '11111111-1111-4111-8111-111111111111';
 const ordinaryId = '22222222-2222-4222-8222-222222222222';
 
 test('integration credential replacement is limited to the configured administrator', async () => {
-  let saved: Awaited<ReturnType<IntegrationCredentialRepository['load']>> = null;
-  let writes = 0;
-  const repository: IntegrationCredentialRepository = {
-    save: async value => { writes++; saved = value; },
-    load: async () => saved,
-    remove: async () => { saved = null; },
-  };
+  const memory = memoryCredentialRepository();
+  const { repository } = memory;
   const key = randomBytes(32);
   const service = new IntegrationCredentialService(repository, adminId, key);
   for (const userId of [undefined, ordinaryId]) {
-    await assert.rejects(service.replace(userId, 'integration@example.invalid', 'sensitive-refresh-token'), (error: unknown) => error instanceof TRPCError && error.code === 'FORBIDDEN');
+    await assert.rejects(service.replace(userId, 'integration@example.invalid', 'sensitive-refresh-token', await service.generation()), (error: unknown) => error instanceof TRPCError && error.code === 'FORBIDDEN');
   }
   const unconfigured = new IntegrationCredentialService(repository, undefined, key);
-  await assert.rejects(unconfigured.replace(adminId, 'integration@example.invalid', 'sensitive-refresh-token'));
-  assert.equal(writes, 0);
-  await service.replace(adminId, 'integration@example.invalid', 'sensitive-refresh-token');
-  assert.equal(writes, 1);
+  await assert.rejects(unconfigured.replace(adminId, 'integration@example.invalid', 'sensitive-refresh-token', await unconfigured.generation()));
+  assert.equal(memory.writes(), 0);
+  await service.replace(adminId, 'integration@example.invalid', 'sensitive-refresh-token', await service.generation());
+  assert.equal(memory.writes(), 1);
+  const saved = memory.stored();
   assert.ok(saved);
   assert.equal(saved!.googleAccountEmail, 'integration@example.invalid');
-  assert.ok(!JSON.stringify(saved).includes('sensitive-refresh-token'));
-  assert.deepEqual(await service.loadForBackend(), { googleAccountEmail: 'integration@example.invalid', refreshToken: 'sensitive-refresh-token' });
+  assert.ok(!JSON.stringify(saved).includes('sensitive-refresh-token', await unconfigured.generation()));
+  const loaded = await service.loadForBackend();
+  assert.equal(loaded?.googleAccountEmail, 'integration@example.invalid');
+  assert.equal(loaded?.refreshToken, 'sensitive-refresh-token');
 });
 
 test('refresh tokens are encrypted with an authenticated random nonce and tampering is rejected', () => {

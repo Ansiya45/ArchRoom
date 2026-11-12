@@ -17,6 +17,7 @@ export const test = base.extend<{ authMock: AuthMock }>({
       instantCreateCalls: [] as any[],
       editableMeeting: null as any, recordingSettingsCalls: [] as any[], rescheduleCalls: [] as any[],
       driveAdmin: false, driveCanCreate: false, driveConnected: false, drivePending: false,
+      driveState: '' as '' | 'authorization_unavailable' | 'root_unverified' | 'status_unavailable',
       recordingFolders: [] as Array<{ id: string; name: string }>, folderCreateCalls: [] as string[],
       oauthStartForms: [] as Array<{ method: string; origin: string | undefined; token: string | null }>,
     };
@@ -58,8 +59,11 @@ export const test = base.extend<{ authMock: AuthMock }>({
             auth.refreshToken = undefined;
             return ok({ ok: true });
           }
-          if (path === 'googleDriveIntegration.status' && request.method() === 'GET')
-            return ok({ isAdministrator: auth.driveAdmin, connected: auth.driveAdmin && auth.driveConnected, pending: auth.driveAdmin && auth.drivePending });
+          if (path === 'googleDriveIntegration.status' && request.method() === 'GET') {
+            const connectionState = !auth.driveAdmin ? 'not_connected' : auth.driveState || (auth.drivePending ? 'pending' : auth.driveConnected ? 'connected' : 'not_connected');
+            return ok({ isAdministrator: auth.driveAdmin, connected: connectionState === 'connected', pending: connectionState === 'pending', connectionState,
+              accountEmail: ['connected', 'pending', 'authorization_unavailable', 'root_unverified'].includes(connectionState) ? 'company@example.invalid' : null });
+          }
           if (path === 'googleDriveIntegration.start' && request.method() === 'POST') {
             if (!auth.driveAdmin) return error('Integration administrator access is required.', 'FORBIDDEN', 403, path);
             return ok({ startUrl: `${origin}/google-drive/oauth/start` });
@@ -76,6 +80,9 @@ export const test = base.extend<{ authMock: AuthMock }>({
           if (path === 'recordingFolders.list' || path === 'recordingFolders.refresh')
             return ok({ connected: auth.driveConnected, canCreate: auth.driveConnected && (auth.driveAdmin || auth.driveCanCreate),
               folders: auth.driveConnected ? auth.recordingFolders : [] });
+          if (path === 'recordingFolders.listStudents')
+            return error('Batch management access is required.', 'FORBIDDEN', 403, path);
+          if (path === 'batchRegistration.linkStatus') return ok({ active: false, expiresAt: null });
           if (path === 'recordingFolders.create' && request.method() === 'POST') {
             if (!auth.driveConnected || !(auth.driveAdmin || auth.driveCanCreate)) return error('Folder creation unavailable.', 'FORBIDDEN', 403, path);
             auth.folderCreateCalls.push(value.name);
@@ -177,6 +184,7 @@ export type AuthMock = {
   instantCreationEnabled: boolean; instantCreateError: boolean; instantCreateCalls: any[];
   editableMeeting: any; recordingSettingsCalls: any[]; rescheduleCalls: any[];
   driveAdmin: boolean; driveCanCreate: boolean; driveConnected: boolean; drivePending: boolean;
+  driveState: '' | 'authorization_unavailable' | 'root_unverified' | 'status_unavailable';
   recordingFolders: Array<{ id: string; name: string }>; folderCreateCalls: string[];
   oauthStartForms: Array<{ method: string; origin: string | undefined; token: string | null }>;
 };

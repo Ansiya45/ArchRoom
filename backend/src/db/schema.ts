@@ -55,12 +55,66 @@ export const recordingBatchFolderPermissions = pgTable('recording_batch_folder_p
   role: varchar('role', { length: 20 }).$type<'manager' | 'trainer' | 'viewer'>().notNull(),
 }, table => [primaryKey({ columns: [table.folderId, table.userId] }), index('recording_batch_folder_permissions_user_idx').on(table.userId)]);
 
+export const batchStudentEnrollments = pgTable('batch_student_enrollments', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  folderId: text('folder_id').notNull().references(() => recordingBatchFolders.folderId, { onDelete: 'cascade' }),
+  studentName: varchar('student_name', { length: 120 }).notNull(),
+  studentEmail: varchar('student_email', { length: 255 }).notNull(),
+  source: text('source').$type<'manual' | 'registration'>().notNull().default('manual'),
+  emailVerifiedAt: timestamp('email_verified_at', { withTimezone: true }),
+  status: text('status').$type<'pending' | 'approved' | 'removed'>().notNull().default('pending'),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  approvedBy: uuid('approved_by'), removedAt: timestamp('removed_at', { withTimezone: true }), removedBy: uuid('removed_by'),
+}, table => [uniqueIndex('batch_student_enrollments_folder_email_idx').on(table.folderId, table.studentEmail)]);
+
+export const batchStudentEnrollmentEvents = pgTable('batch_student_enrollment_events', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  enrollmentId: uuid('enrollment_id').notNull().references(() => batchStudentEnrollments.id, { onDelete: 'cascade' }),
+  action: text('action').$type<'added' | 'approved' | 'removed' | 'reapproved' | 'registered' | 'email_verified'>().notNull(),
+  actorUserId: uuid('actor_user_id'),
+  occurredAt: timestamp('occurred_at', { withTimezone: true }).notNull().defaultNow(),
+}, table => [index('batch_student_enrollment_events_enrollment_idx').on(table.enrollmentId, table.occurredAt, table.id)]);
+
+export const batchEnrollmentAccountBindings = pgTable('batch_enrollment_account_bindings', {
+  enrollmentId: uuid('enrollment_id').primaryKey().references(() => batchStudentEnrollments.id, { onDelete: 'cascade' }),
+  userId: uuid('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  boundAt: timestamp('bound_at', { withTimezone: true }).notNull().defaultNow(),
+}, table => [index('batch_enrollment_account_bindings_user_idx').on(table.userId, table.enrollmentId)]);
+
+export const batchRegistrationLinks = pgTable('batch_registration_links', {
+  folderId: text('folder_id').primaryKey().references(() => recordingBatchFolders.folderId, { onDelete: 'cascade' }),
+  tokenHash: text('token_hash').notNull().unique(), expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+  disabledAt: timestamp('disabled_at', { withTimezone: true }), createdBy: uuid('created_by').notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+});
+export const batchRegistrationVerifications = pgTable('batch_registration_verifications', {
+  tokenHash: text('token_hash').primaryKey(),
+  enrollmentId: uuid('enrollment_id').notNull().references(() => batchStudentEnrollments.id, { onDelete: 'cascade' }),
+  linkHash: text('link_hash').notNull(), requestedName: varchar('requested_name', { length: 120 }).notNull(),
+  expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(), consumedAt: timestamp('consumed_at', { withTimezone: true }),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+}, table => [index('batch_registration_verifications_enrollment_idx').on(table.enrollmentId)]);
+export const batchRegistrationLimits = pgTable('batch_registration_limits', {
+  keyHash: text('key_hash').primaryKey(), windowStartedAt: timestamp('window_started_at', { withTimezone: true }).notNull().defaultNow(), attempts: integer('attempts').notNull(),
+});
+export const studentGoogleIdentities = pgTable('student_google_identities', {
+  userId: uuid('user_id').primaryKey().references(() => users.id, { onDelete: 'cascade' }),
+  googleSubject: text('google_subject').unique(), googleEmail: text('google_email'), verifiedAt: timestamp('verified_at', { withTimezone: true }),
+});
+
 // Global permission to create a new direct child of the configured root.
 // A manager assignment on an existing folder does not imply this grant.
 export const recordingFolderCreators = pgTable('recording_folder_creators', {
   userId: uuid('user_id').primaryKey().references(() => users.id, { onDelete: 'cascade' }),
   grantedByUserId: uuid('granted_by_user_id').notNull().references(() => users.id),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+});
+
+// A durable singleton serializes disconnects and credential writes across instances.
+export const driveIntegrationGeneration = pgTable('drive_integration_generation', {
+  id: integer('id').primaryKey(),
+  generation: uuid('generation').notNull(),
 });
 
 // Only ciphertext is persisted. The encryption key is provided separately at runtime.
@@ -267,3 +321,55 @@ export const meetingDeliveries = pgTable('meeting_deliveries', {
   payload: jsonb('payload').$type<{ from: string; to: string; subject: string; html: string }>(),
   sentAt: timestamp('sent_at', { withTimezone: true }),
 }, table => [index('meeting_deliveries_due_idx').on(table.status, table.dueAt)]);
+
+// Company Drive job metadata only; media and Google credentials are never stored here.
+export const companyRecordingUploadJobs = pgTable('company_recording_upload_jobs', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  recordingId: uuid('recording_id').notNull().unique(),
+  ownerUserId: uuid('owner_user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  meetingId: uuid('meeting_id').notNull().references(() => meetings.id, { onDelete: 'cascade' }),
+  occurrenceId: uuid('occurrence_id').references(() => meetingOccurrences.id, { onDelete: 'cascade' }),
+  destinationFolderId: text('destination_folder_id').notNull(),
+  accessPolicy: text('access_policy').$type<'private' | 'restricted' | 'anyone_with_link'>().notNull(),
+  mimeType: text('mime_type').notNull(),
+  byteLength: bigint('byte_length', { mode: 'number' }).notNull(),
+  sha256: varchar('sha256', { length: 64 }).notNull(),
+  recordingStartedAt: timestamp('recording_started_at', { withTimezone: true }),
+  recordingTitle: varchar('recording_title', { length: 255 }),
+  recordingTimeZone: varchar('recording_time_zone', { length: 100 }),
+  recordingFilename: text('recording_filename'),
+  driveFileId: text('drive_file_id').unique(),
+  encryptedSession: text('encrypted_session'),
+  state: text('state').$type<'pending' | 'uploading' | 'retryable' | 'verifying' | 'completed' | 'failed'>().notNull().default('pending'),
+  confirmedOffset: bigint('confirmed_offset', { mode: 'number' }).notNull().default(0),
+  retryCount: integer('retry_count').notNull().default(0),
+  errorCode: text('error_code'),
+  verifiedDriveFileId: text('verified_drive_file_id'),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  completedAt: timestamp('completed_at', { withTimezone: true }),
+}, table => [index('company_recording_upload_jobs_owner_idx').on(table.ownerUserId, table.createdAt), index('company_recording_upload_jobs_meeting_idx').on(table.meetingId)]);
+
+export const companyRecordingPrivatePolicies = pgTable('company_recording_private_policies', {
+  id: uuid('id').primaryKey().defaultRandom(), jobId: uuid('job_id').notNull().references(() => companyRecordingUploadJobs.id),
+  recordingId: uuid('recording_id').notNull(), driveFileId: text('drive_file_id').notNull(), destinationFolderId: text('destination_folder_id').notNull(),
+  companyAccountEmail: varchar('company_account_email', { length: 255 }).notNull(), credentialGeneration: uuid('credential_generation').notNull(),
+  policyMode: text('policy_mode').$type<'private'|'restricted'|'anyone_with_link'>().notNull().default('private'), policyVersion: integer('policy_version').notNull(), hostConfirmed: boolean('host_confirmed').notNull().default(false), publicPermissionId: text('public_permission_id'), sharingVersion: integer('sharing_version').notNull().default(1),
+  status: text('status').$type<'pending'|'applying'|'verified'|'blocked'|'reconciliation_required'>().notNull().default('pending'),
+  leaseToken: uuid('lease_token'), leaseEpoch: bigint('lease_epoch', { mode: 'number' }).notNull().default(0), leaseUntil: timestamp('lease_until', { withTimezone: true }),
+  reconciliationStatus: text('reconciliation_status').$type<'not_required'|'required'|'resolved'>().notNull().default('not_required'),
+  isActive: boolean('is_active').notNull().default(true), supersededAt: timestamp('superseded_at', { withTimezone: true }), supersededBy: uuid('superseded_by'),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(), updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+}, table => [index('company_recording_private_policies_lease_idx').on(table.status, table.leaseUntil)]);
+export const companyRecordingAnyoneConfirmations = pgTable('company_recording_anyone_confirmations', {
+  id: uuid('id').primaryKey().defaultRandom(), jobId: uuid('job_id').notNull().references(() => companyRecordingUploadJobs.id, { onDelete: 'cascade' }), recordingId: uuid('recording_id').notNull(), hostUserId: uuid('host_user_id').notNull().references(() => users.id), policyVersion: integer('policy_version').notNull(), confirmedAt: timestamp('confirmed_at', { withTimezone: true }).notNull().defaultNow(), consumedAt: timestamp('consumed_at', { withTimezone: true }),
+}, table => [uniqueIndex('company_recording_anyone_confirmations_version_uidx').on(table.jobId, table.policyVersion)]);
+export const companyRecordingPrivateReaders = pgTable('company_recording_private_readers', {
+  policyId: uuid('policy_id').notNull().references(() => companyRecordingPrivatePolicies.id, { onDelete: 'cascade' }), userId: uuid('user_id').notNull(), googleSubject: text('google_subject').notNull(), googleEmail: varchar('google_email', { length: 255 }).notNull(), role: text('role').$type<'reader'>().notNull().default('reader'), createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+}, table => [primaryKey({ columns: [table.policyId, table.userId] }), uniqueIndex('company_recording_private_readers_subject_uidx').on(table.policyId, table.googleSubject), uniqueIndex('company_recording_private_readers_email_uidx').on(table.policyId, table.googleEmail)]);
+export const companyRecordingPrivateAclOperations = pgTable('company_recording_private_acl_operations', {
+  id: uuid('id').primaryKey().defaultRandom(), policyId: uuid('policy_id').notNull().references(() => companyRecordingPrivatePolicies.id, { onDelete: 'cascade' }), userId: uuid('user_id'), googleSubject: text('google_subject'), googleEmail: varchar('google_email', { length: 255 }), desiredRole: text('desired_role').$type<'reader'>().notNull().default('reader'), operationKind: text('operation_kind').$type<'direct_reader'|'anyone_reader'>().notNull().default('direct_reader'), permissionId: text('permission_id'), state: text('state').$type<'pending'|'in_progress'|'applied'|'retryable'|'reconciliation_required'|'revoked'>().notNull().default('pending'), fencingEpoch: bigint('fencing_epoch', { mode: 'number' }).notNull().default(0), leaseToken: uuid('lease_token'), leaseUntil: timestamp('lease_until', { withTimezone: true }), providerResult: text('provider_result'), failureCode: text('failure_code'), updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+}, table => [uniqueIndex('company_recording_private_acl_operations_uidx').on(table.policyId, table.userId)]);
+export const companyRecordingPrivateAclAudit = pgTable('company_recording_private_acl_audit', {
+  id: uuid('id').primaryKey().defaultRandom(), operationId: uuid('operation_id').notNull().references(() => companyRecordingPrivateAclOperations.id, { onDelete: 'cascade' }), policyId: uuid('policy_id').notNull().references(() => companyRecordingPrivatePolicies.id, { onDelete: 'cascade' }), action: text('action').notNull(), permissionId: text('permission_id'), fencingEpoch: bigint('fencing_epoch', { mode: 'number' }).notNull(), detail: text('detail'), createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+}, table => [index('company_recording_private_acl_audit_policy_idx').on(table.policyId, table.createdAt)]);

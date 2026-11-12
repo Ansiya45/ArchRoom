@@ -1,3 +1,4 @@
+import { memoryCredentialRepository } from './drive-credential-memory.js';
 import assert from 'node:assert/strict';
 import { randomBytes } from 'node:crypto';
 import { test } from 'node:test';
@@ -12,10 +13,9 @@ const config: OAuthConfig = { clientId: 'mock', clientSecret: 'mock', callbackUr
 const folderMimeType = 'application/vnd.google-apps.folder';
 
 test('backend Drive client requests only root metadata and direct children', async () => {
-  let saved: { googleAccountEmail: string; encryptedRefreshToken: string } | null = null;
-  const repository: IntegrationCredentialRepository = { save: async value => { saved = value; }, load: async () => saved, remove: async () => { saved = null; } };
+  const { repository } = memoryCredentialRepository();
   const credentials = new IntegrationCredentialService(repository, administratorId, randomBytes(32));
-  await credentials.replace(administratorId, 'owner@example.invalid', 'mock-refresh');
+  await credentials.replace(administratorId, 'owner@example.invalid', 'mock-refresh', await credentials.generation());
   const calls: Array<{ url: URL; method: string; body?: string }> = [];
   const transport: OAuthTransport = {
     exchangeCode: async () => { throw new Error('unused'); },
@@ -43,10 +43,9 @@ test('backend Drive client requests only root metadata and direct children', asy
 });
 
 test('backend Drive client refuses operations when root authorization is missing', async () => {
-  let saved: { googleAccountEmail: string; encryptedRefreshToken: string } | null = null;
-  const repository: IntegrationCredentialRepository = { save: async value => { saved = value; }, load: async () => saved, remove: async () => { saved = null; } };
+  const { repository } = memoryCredentialRepository();
   const credentials = new IntegrationCredentialService(repository, administratorId, randomBytes(32));
-  await credentials.replace(administratorId, 'owner@example.invalid', 'mock-refresh');
+  await credentials.replace(administratorId, 'owner@example.invalid', 'mock-refresh', await credentials.generation());
   const transport: OAuthTransport = { exchangeCode: async () => ({}), refresh: async () => ({ access_token: 'mock-access' }), accountEmail: async () => '', rootMetadata: async () => ({ id: rootId, mimeType: folderMimeType, isAppAuthorized: false }) };
   const client = new BackendRecordingDriveClient(config, transport, credentials, async () => { throw new Error('Drive request must not occur'); });
   await assert.rejects(client.listChildren(rootId));

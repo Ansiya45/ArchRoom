@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Room, RoomEvent, Track, type Participant } from 'livekit-client';
 import { getMeetingSession, type MeetingSession } from '@/lib/meetingSession';
 import { trpc } from '@/lib/trpc';
@@ -6,6 +6,7 @@ import { updateMediaStream } from '@/lib/mediaStream';
 import { createBackgroundVideoProcessor } from '@/lib/backgroundVideoProcessor';
 import type { BackgroundChoice, ChatMessage } from '@/types/meeting';
 import type { TranscriptSegment } from '@/components/meeting/TranscriptModal';
+import { acceptRecordingNotice, type RecordingNotice, type RecordingNoticeState } from '@/lib/recordingNotice';
 
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
@@ -55,6 +56,8 @@ export function useWebRtcMeeting(
   const [transcriptSegments, setTranscriptSegments] = useState<TranscriptSegment[]>([]);
   const [transcriptAccessAllowed, setTranscriptAccessAllowed] = useState(false);
   const [connectionError, setConnectionError] = useState<string | null>(null);
+  const [recordingNotices, setRecordingNotices] = useState<Record<string, RecordingNotice>>({});
+  const lastRecordingNotice = useRef(0);
   const [microphoneError, setMicrophoneError] = useState<string | null>(null);
   const [audioInputDevices, setAudioInputDevices] = useState<MediaDeviceInfo[]>([]);
   const [remoteMicMuted, setRemoteMicMuted] = useState<Record<string, boolean>>({});
@@ -305,11 +308,22 @@ export function useWebRtcMeeting(
     });
     room.on(RoomEvent.Reconnecting, () => setIsConnected(false));
     room.on(RoomEvent.Reconnected, () => setIsConnected(true));
-    room.on(RoomEvent.Disconnected, () => setIsConnected(false));
+    room.on(RoomEvent.Disconnected, () => { setIsConnected(false); setRecordingNotices({}); });
+    room.on(RoomEvent.ParticipantDisconnected, participant => {
+      setRecordingNotices(current => { const next = { ...current }; delete next[participant.identity]; return next; });
+    });
 
     room.on(RoomEvent.DataReceived, (payload, participant, _kind, topic) => {
       if (!participant) return;
       try {
+        if (topic === 'meeting-recording-notice') {
+          const data: unknown = JSON.parse(decoder.decode(payload));
+          setRecordingNotices(current => {
+            const notice = acceptRecordingNotice(data, current[participant.identity], Date.now());
+            return notice ? { ...current, [participant.identity]: notice } : current;
+          });
+          return;
+        }
         if (topic === 'meeting-transcript') {
           const data = JSON.parse(decoder.decode(payload)) as { id: string; text: string; sentAt: string };
           if (!data.id || !data.text) return;
@@ -471,6 +485,17 @@ export function useWebRtcMeeting(
     refreshMedia(room);
   };
 
+  const publishRecordingNotice = useCallback((state: RecordingNoticeState) => {
+    const room = roomRef.current;
+    if (!room || room.state !== 'connected') return;
+    const sentAt = Math.max(Date.now(), lastRecordingNotice.current + 1);
+    lastRecordingNotice.current = sentAt;
+    const encoded = encoder.encode(JSON.stringify({ state, sentAt }));
+    const payload = new Uint8Array(encoded.byteLength);
+    payload.set(encoded);
+    void room.localParticipant.publishData(payload, { reliable: true, topic: 'meeting-recording-notice' }).catch(() => undefined);
+  }, []);
+
   return {
     isConnected,
     localStream,
@@ -495,6 +520,8 @@ export function useWebRtcMeeting(
     transcriptAccessAllowed,
     publishTranscript,
     setTranscriptAccess,
+    recordingNotices,
+    publishRecordingNotice,
     connectionError,
   };
 }

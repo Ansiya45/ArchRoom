@@ -7,6 +7,7 @@ export interface AuthUser {
   id: string;
   email: string;
   name?: string;
+  sessionId?: string;
 }
 
 export interface Context {
@@ -34,6 +35,7 @@ export async function createContext(opts: CreateHTTPContextOptions): Promise<Con
         id: payload.sub,
         email: payload.email,
         name: payload.name,
+        sessionId: payload.sid,
       };
       isAuthenticated = true;
     }

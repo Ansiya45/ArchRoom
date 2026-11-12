@@ -14,12 +14,13 @@ function configuredService() {
 
 export const googleDriveIntegrationRouter = t.router({
   status: protectedProcedure.query(async ({ ctx }) => {
+    ctx.res?.setHeader('Cache-Control', 'no-store');
     if (!env.GOOGLE_INTEGRATION_ADMIN_USER_ID || ctx.user!.id !== env.GOOGLE_INTEGRATION_ADMIN_USER_ID)
-      return { isAdministrator: false, connected: false, pending: false };
+      return { isAdministrator: false, connected: false, pending: false, connectionState: 'not_connected' as const, accountEmail: null };
     try {
       return { isAdministrator: true, ...await configuredService().status(ctx.user!.id) };
     } catch {
-      return { isAdministrator: true, connected: false, pending: false };
+      return { isAdministrator: true, connected: false, pending: false, connectionState: 'status_unavailable' as const, accountEmail: null };
     }
   }),
   start: protectedProcedure.mutation(({ ctx }) => {

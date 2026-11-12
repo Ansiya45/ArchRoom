@@ -8,9 +8,11 @@ const flowLifetimeMs = 5 * 60 * 1000;
 const digest = (value: string) => createHash('sha256').update(value).digest('hex');
 
 export type OAuthConfig = { clientId: string; clientSecret: string; callbackUrl: string; administratorId: string; };
-export type OAuthFlow = { administratorId: string; sessionId: string; cookieHash: string; verifier: string; expiresAt: number };
+export type OAuthFlow = { administratorId: string; sessionId: string; generation: string; cookieHash: string; verifier: string; expiresAt: number };
 export type GoogleTokens = { access_token?: string; refresh_token?: string; scope?: string; expires_in?: number; error?: string };
 export type RootMetadata = { id?: string; mimeType?: string; trashed?: boolean; isAppAuthorized?: boolean; capabilities?: { canListChildren?: boolean; canAddChildren?: boolean } };
+export type DriveConnectionState = 'not_connected' | 'pending' | 'connected' | 'authorization_unavailable' | 'root_unverified' | 'status_unavailable';
+export type DriveConnectionStatus = { connected: boolean; pending: boolean; connectionState: DriveConnectionState; accountEmail: string | null };
 
 export interface OAuthTransport {
   exchangeCode(config: OAuthConfig, code: string, verifier: string): Promise<GoogleTokens>;
@@ -64,7 +66,7 @@ export function assertVerifiedRoot(root: RootMetadata, selectedId: string): void
 }
 
 export class GoogleDriveOAuthService {
-  private pending: { googleAccountEmail: string; refreshToken: string; accessToken: string; expiresAt: number } | null = null;
+  private pending: { googleAccountEmail: string; refreshToken: string; accessToken: string; expiresAt: number; generation: string } | null = null;
   constructor(
     private readonly config: OAuthConfig,
     private readonly flows: OAuthFlowStore,
@@ -73,27 +75,51 @@ export class GoogleDriveOAuthService {
     private readonly sessionActive: (userId: string, sessionId: string) => Promise<boolean>,
   ) {}
 
-  async status(userId: string | undefined): Promise<{ connected: boolean; pending: boolean }> {
+  async status(userId: string | undefined): Promise<DriveConnectionStatus> {
     assertIntegrationAdministrator(userId, this.config.administratorId);
     if (this.pending && this.pending.expiresAt <= Date.now()) this.pending = null;
-    if (this.pending) return { connected: false, pending: true };
-    const stored = await this.credentials.loadForBackend();
-    if (!stored) return { connected: false, pending: false };
+    if (this.pending) {
+      const pending = this.pending;
+      try {
+        if (await this.credentials.generation() !== pending.generation) {
+          if (this.pending === pending) this.pending = null;
+        } else if (this.pending === pending) {
+          return { connected: false, pending: true, connectionState: 'pending', accountEmail: pending.googleAccountEmail };
+        }
+      } catch { return { connected: false, pending: false, connectionState: 'status_unavailable', accountEmail: null }; }
+    }
+    let stored: Awaited<ReturnType<IntegrationCredentialService['loadForBackend']>>;
+    try { stored = await this.credentials.loadForBackend(); }
+    catch { return { connected: false, pending: false, connectionState: 'status_unavailable', accountEmail: null }; }
+    if (!stored) return { connected: false, pending: false, connectionState: 'not_connected', accountEmail: null };
+    let tokens: GoogleTokens;
     try {
-      const tokens = await this.transport.refresh(this.config, stored.refreshToken);
-      if (!tokens.access_token) return { connected: false, pending: false };
+      tokens = await this.transport.refresh(this.config, stored.refreshToken);
+      if (!tokens.access_token) throw new Error('Google authorization unavailable.');
+    } catch {
+      return { connected: false, pending: false, connectionState: 'authorization_unavailable', accountEmail: stored.googleAccountEmail };
+    }
+    try {
       assertVerifiedRoot(await this.transport.rootMetadata(tokens.access_token, recordingDriveRootId()), recordingDriveRootId());
-      if (tokens.refresh_token) await this.credentials.replace(userId, stored.googleAccountEmail, tokens.refresh_token);
-      return { connected: true, pending: false };
-    } catch { return { connected: false, pending: false }; }
+    } catch {
+      return { connected: false, pending: false, connectionState: 'root_unverified', accountEmail: stored.googleAccountEmail };
+    }
+    try {
+      if (tokens.refresh_token) await this.credentials.replace(userId, stored.googleAccountEmail, tokens.refresh_token, stored.generation, stored.ciphertext);
+      else await this.credentials.assertGeneration(stored.generation);
+    } catch {
+      return { connected: false, pending: false, connectionState: 'status_unavailable', accountEmail: null };
+    }
+    return { connected: true, pending: false, connectionState: 'connected', accountEmail: stored.googleAccountEmail };
   }
 
-  start(userId: string | undefined, sessionId: string | undefined): { authorizationUrl: string; cookie: string } {
+  async start(userId: string | undefined, sessionId: string | undefined): Promise<{ authorizationUrl: string; cookie: string }> {
     assertIntegrationAdministrator(userId, this.config.administratorId);
     if (!sessionId) throw new Error('A persistent administrator session is required.');
     this.pending = null;
+    const generation = await this.credentials.generation();
     const verifier = randomBytes(32).toString('base64url');
-    const { state, cookie } = this.flows.create({ administratorId: userId!, sessionId, cookieHash: '', verifier, expiresAt: Date.now() + flowLifetimeMs });
+    const { state, cookie } = this.flows.create({ administratorId: userId!, sessionId, generation, cookieHash: '', verifier, expiresAt: Date.now() + flowLifetimeMs });
     const url = new URL('https://accounts.google.com/o/oauth2/v2/auth');
     url.search = new URLSearchParams({ client_id: this.config.clientId, redirect_uri: this.config.callbackUrl,
       response_type: 'code', scope: driveScope, access_type: 'offline', prompt: 'consent select_account',
@@ -106,44 +132,54 @@ export class GoogleDriveOAuthService {
     const flow = this.flows.consume(input.state, input.cookie);
     assertIntegrationAdministrator(flow.administratorId, this.config.administratorId);
     if (!await this.sessionActive(flow.administratorId, flow.sessionId)) throw new Error('Administrator session is no longer active.');
+    await this.credentials.assertGeneration(flow.generation);
     if (input.error || !input.code) throw new Error('Google authorization was denied or incomplete.');
     const tokens = await this.transport.exchangeCode(this.config, input.code, flow.verifier);
     if (!tokens.access_token || !tokens.refresh_token || !tokens.scope?.split(' ').includes(driveScope)) {
       throw new Error('Google did not grant the required offline Drive access.');
     }
     const email = await this.transport.accountEmail(tokens.access_token);
+    await this.credentials.assertGeneration(flow.generation);
     // Keep a replacement pending until the configured root has been explicitly
     // opened for this app and verified. A failed replacement leaves the old
     // encrypted connection untouched. A restart discards pending consent.
     this.pending = { googleAccountEmail: email, refreshToken: tokens.refresh_token, accessToken: tokens.access_token,
-      expiresAt: Date.now() + 5 * 60 * 1000 };
+      expiresAt: Date.now() + 5 * 60 * 1000, generation: flow.generation };
   }
 
   async verifySelectedRoot(userId: string | undefined, selectedId: string): Promise<void> {
     assertIntegrationAdministrator(userId, this.config.administratorId);
     if (selectedId !== recordingDriveRootId()) throw new Error('Selected folder is not the configured recording root.');
     if (this.pending && this.pending.expiresAt <= Date.now()) this.pending = null;
-    const stored = this.pending ?? await this.credentials.loadForBackend();
+    const pending = this.pending;
+    const stored = pending ?? await this.credentials.loadForBackend();
     if (!stored) throw new Error('Google Drive is not connected.');
+    await this.credentials.assertGeneration(stored.generation);
     const tokens = await this.transport.refresh(this.config, stored.refreshToken);
     if (!tokens.access_token) throw new Error('Google Drive authorization expired. Reconnect the integration.');
-    const root = await this.transport.rootMetadata(tokens.access_token, selectedId);
-    assertVerifiedRoot(root, selectedId);
-    if (this.pending) {
-      await this.credentials.replace(userId, stored.googleAccountEmail, tokens.refresh_token ?? stored.refreshToken);
-      this.pending = null;
-    } else if (tokens.refresh_token) await this.credentials.replace(userId, stored.googleAccountEmail, tokens.refresh_token);
+    assertVerifiedRoot(await this.transport.rootMetadata(tokens.access_token, selectedId), selectedId);
+    if (pending) {
+      await this.credentials.replace(userId, stored.googleAccountEmail, tokens.refresh_token ?? stored.refreshToken, stored.generation);
+      if (this.pending === pending) this.pending = null;
+    } else if (tokens.refresh_token && 'ciphertext' in stored) {
+      await this.credentials.replace(userId, stored.googleAccountEmail, tokens.refresh_token, stored.generation, stored.ciphertext);
+    } else await this.credentials.assertGeneration(stored.generation);
   }
 
   async pickerAccess(userId: string | undefined): Promise<{ accessToken: string; expiresIn: number }> {
     assertIntegrationAdministrator(userId, this.config.administratorId);
     if (this.pending && this.pending.expiresAt <= Date.now()) this.pending = null;
-    if (this.pending) return { accessToken: this.pending.accessToken, expiresIn: Math.max(0, Math.floor((this.pending.expiresAt - Date.now()) / 1000)) };
+    if (this.pending) {
+      const pending = this.pending;
+      await this.credentials.assertGeneration(pending.generation);
+      return { accessToken: pending.accessToken, expiresIn: Math.max(0, Math.floor((pending.expiresAt - Date.now()) / 1000)) };
+    }
     const stored = await this.credentials.loadForBackend();
     if (!stored) throw new Error('Google Drive is not connected.');
     const tokens = await this.transport.refresh(this.config, stored.refreshToken);
     if (!tokens.access_token) throw new Error('Google Drive authorization expired. Reconnect the integration.');
-    if (tokens.refresh_token) await this.credentials.replace(userId, stored.googleAccountEmail, tokens.refresh_token);
+    if (tokens.refresh_token) await this.credentials.replace(userId, stored.googleAccountEmail, tokens.refresh_token, stored.generation, stored.ciphertext);
+    else await this.credentials.assertGeneration(stored.generation);
     return { accessToken: tokens.access_token, expiresIn: Math.min(300, Math.max(0, Number(tokens.expires_in ?? 300))) };
   }
 

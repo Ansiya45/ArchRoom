@@ -1,3 +1,4 @@
+import { memoryCredentialRepository } from './drive-credential-memory.js';
 import assert from 'node:assert/strict';
 import { createHash, randomBytes } from 'node:crypto';
 import { test } from 'node:test';
@@ -12,13 +13,8 @@ const validRoot = (): RootMetadata => ({ id: recordingDriveRootId(), mimeType: '
   isAppAuthorized: true, capabilities: { canListChildren: true, canAddChildren: true } });
 
 function setup(overrides: Partial<OAuthTransport> = {}) {
-  let stored: { googleAccountEmail: string; encryptedRefreshToken: string } | null = null;
-  let writes = 0;
-  const repository: IntegrationCredentialRepository = {
-    save: async value => { writes++; stored = value; },
-    load: async () => stored,
-    remove: async () => { stored = null; },
-  };
+  const memory = memoryCredentialRepository();
+  const { repository } = memory;
   const credentials = new IntegrationCredentialService(repository, administratorId, randomBytes(32));
   const transport: OAuthTransport = {
     exchangeCode: async () => ({ access_token: 'access-secret', refresh_token: 'refresh-secret', scope: driveScope }),
@@ -30,16 +26,16 @@ function setup(overrides: Partial<OAuthTransport> = {}) {
   let active = true;
   const service = new GoogleDriveOAuthService(config, new OAuthFlowStore(), transport, credentials,
     async (userId, sessionId) => active && userId === administratorId && sessionId === 'active-session');
-  return { service, credentials, stored: () => stored, writes: () => writes, deactivate: () => { active = false; } };
+  return { service, credentials, stored: memory.stored, writes: memory.writes, deactivate: () => { active = false; } };
 }
 
 function stateFrom(authorizationUrl: string) { return new URL(authorizationUrl).searchParams.get('state')!; }
 
-test('only administrator starts OAuth; URL requests offline drive.file with S256 PKCE', () => {
+test('only administrator starts OAuth; URL requests offline drive.file with S256 PKCE', async () => {
   const { service } = setup();
-  assert.throws(() => service.start(ordinaryId, 'active-session'));
-  assert.throws(() => service.start(administratorId, undefined));
-  const result = service.start(administratorId, 'active-session');
+  await assert.rejects(service.start(ordinaryId, 'active-session'));
+  await assert.rejects(service.start(administratorId, undefined));
+  const result = await service.start(administratorId, 'active-session');
   const url = new URL(result.authorizationUrl);
   assert.equal(url.origin, 'https://accounts.google.com');
   assert.equal(url.searchParams.get('scope'), driveScope);
@@ -53,15 +49,33 @@ test('only administrator starts OAuth; URL requests offline drive.file with S256
 test('connection status stays disconnected until backend root verification and fails closed on lost capabilities', async () => {
   let root = validRoot();
   const { service } = setup({ rootMetadata: async () => root });
-  assert.deepEqual(await service.status(administratorId), { connected: false, pending: false });
+  assert.deepEqual(await service.status(administratorId), { connected: false, pending: false, connectionState: 'not_connected', accountEmail: null });
   await assert.rejects(service.status(ordinaryId));
-  const flow = service.start(administratorId, 'active-session');
+  const flow = await service.start(administratorId, 'active-session');
   await service.complete({ state: stateFrom(flow.authorizationUrl), cookie: flow.cookie, code: 'mock-code' });
-  assert.deepEqual(await service.status(administratorId), { connected: false, pending: true });
+  assert.deepEqual(await service.status(administratorId), { connected: false, pending: true, connectionState: 'pending', accountEmail: 'owner@example.invalid' });
   await service.verifySelectedRoot(administratorId, recordingDriveRootId());
-  assert.deepEqual(await service.status(administratorId), { connected: true, pending: false });
+  assert.deepEqual(await service.status(administratorId), { connected: true, pending: false, connectionState: 'connected', accountEmail: 'owner@example.invalid' });
   root = { ...root, capabilities: { canListChildren: false, canAddChildren: true } };
-  assert.deepEqual(await service.status(administratorId), { connected: false, pending: false });
+  assert.deepEqual(await service.status(administratorId), { connected: false, pending: false, connectionState: 'root_unverified', accountEmail: 'owner@example.invalid' });
+});
+
+test('status separates unavailable authorization, unverified root, and storage errors without returning tokens', async () => {
+  const expired = setup({ refresh: async () => { throw new Error('provider private detail'); } });
+  await expired.credentials.replace(administratorId, 'owner@example.invalid', 'synthetic-refresh', await expired.credentials.generation());
+  const authorization = await expired.service.status(administratorId);
+  assert.deepEqual(authorization, { connected: false, pending: false, connectionState: 'authorization_unavailable', accountEmail: 'owner@example.invalid' });
+  assert.ok(!JSON.stringify(authorization).includes('synthetic-refresh'));
+  assert.ok(!JSON.stringify(authorization).includes('provider private detail'));
+  const missingRoot = setup({ rootMetadata: async () => { throw new Error('provider private detail'); } });
+  await missingRoot.credentials.replace(administratorId, 'owner@example.invalid', 'synthetic-refresh', await missingRoot.credentials.generation());
+  assert.deepEqual(await missingRoot.service.status(administratorId), { connected: false, pending: false, connectionState: 'root_unverified', accountEmail: 'owner@example.invalid' });
+  const brokenRepository: IntegrationCredentialRepository = { ...memoryCredentialRepository().repository, load: async () => { throw new Error('database private detail'); } };
+  const credentials = new IntegrationCredentialService(brokenRepository, administratorId, randomBytes(32));
+  const transport: OAuthTransport = { refresh: async () => ({}), exchangeCode: async () => ({}), accountEmail: async () => '', rootMetadata: async () => ({}) };
+  const service = new GoogleDriveOAuthService(config, new OAuthFlowStore(), transport, credentials, async () => true);
+  assert.deepEqual(await service.status(administratorId), { connected: false, pending: false, connectionState: 'status_unavailable', accountEmail: null });
+  await assert.rejects(service.status(ordinaryId));
 });
 
 test('the callback exchanges the code with the verifier matching its S256 challenge', async () => {
@@ -70,7 +84,7 @@ test('the callback exchanges the code with the verifier matching its S256 challe
     exchangedVerifier = verifier;
     return { access_token: 'access-secret', refresh_token: 'refresh-secret', scope: driveScope };
   } });
-  const started = service.start(administratorId, 'active-session');
+  const started = await service.start(administratorId, 'active-session');
   const url = new URL(started.authorizationUrl);
   await service.complete({ state: stateFrom(started.authorizationUrl), cookie: started.cookie, code: 'mock-code' });
   assert.equal(createHash('sha256').update(exchangedVerifier).digest('base64url'), url.searchParams.get('code_challenge'));
@@ -91,15 +105,15 @@ test('missing OAuth setup fails closed and provider errors do not reveal secrets
 
 test('callback requires matching browser cookie and active administrator session; replay fails', async () => {
   const { service, writes } = setup();
-  const first = service.start(administratorId, 'active-session');
+  const first = await service.start(administratorId, 'active-session');
   await assert.rejects(service.complete({ state: stateFrom(first.authorizationUrl), cookie: 'wrong', code: 'mock-code' }));
   await assert.rejects(service.complete({ state: stateFrom(first.authorizationUrl), cookie: first.cookie, code: 'mock-code' }));
-  const second = service.start(administratorId, 'active-session');
+  const second = await service.start(administratorId, 'active-session');
   await service.complete({ state: stateFrom(second.authorizationUrl), cookie: second.cookie, code: 'mock-code' });
   await assert.rejects(service.complete({ state: stateFrom(second.authorizationUrl), cookie: second.cookie, code: 'mock-code' }));
   assert.equal(writes(), 0); // Consent is pending root verification.
   const expired = setup();
-  const third = expired.service.start(administratorId, 'active-session');
+  const third = await expired.service.start(administratorId, 'active-session');
   expired.deactivate();
   await assert.rejects(expired.service.complete({ state: stateFrom(third.authorizationUrl), cookie: third.cookie, code: 'mock-code' }));
   assert.equal(expired.writes(), 0);
@@ -107,11 +121,11 @@ test('callback requires matching browser cookie and active administrator session
 
 test('OAuth denial or missing offline refresh token does not persist a credential', async () => {
   const denied = setup();
-  const first = denied.service.start(administratorId, 'active-session');
+  const first = await denied.service.start(administratorId, 'active-session');
   await assert.rejects(denied.service.complete({ state: stateFrom(first.authorizationUrl), cookie: first.cookie, error: 'access_denied' }));
   assert.equal(denied.writes(), 0);
   const missing = setup({ exchangeCode: async () => ({ access_token: 'access-secret', scope: driveScope }) });
-  const second = missing.service.start(administratorId, 'active-session');
+  const second = await missing.service.start(administratorId, 'active-session');
   await assert.rejects(missing.service.complete({ state: stateFrom(second.authorizationUrl), cookie: second.cookie, code: 'mock-code' }));
   assert.equal(missing.writes(), 0);
 });
@@ -134,7 +148,7 @@ test('root verification rejects wrong, trashed, unselected or insufficient-capab
 
 test('credential stays encrypted and refresh rotation is persisted after verified root selection', async () => {
   const result = setup({ refresh: async () => ({ access_token: 'new-access-secret', refresh_token: 'rotated-refresh-secret', expires_in: 3600 }) });
-  const started = result.service.start(administratorId, 'active-session');
+  const started = await result.service.start(administratorId, 'active-session');
   await result.service.complete({ state: stateFrom(started.authorizationUrl), cookie: started.cookie, code: 'mock-code' });
   assert.equal(result.stored(), null);
   assert.equal((await result.service.pickerAccess(administratorId)).accessToken, 'access-secret');
@@ -152,9 +166,11 @@ test('credential stays encrypted and refresh rotation is persisted after verifie
 
 test('failed root verification never replaces an existing encrypted connection', async () => {
   const result = setup({ rootMetadata: async () => ({ ...validRoot(), isAppAuthorized: false }) });
-  await result.credentials.replace(administratorId, 'previous@example.invalid', 'previous-refresh');
-  const started = result.service.start(administratorId, 'active-session');
+  await result.credentials.replace(administratorId, 'previous@example.invalid', 'previous-refresh', await result.credentials.generation());
+  const started = await result.service.start(administratorId, 'active-session');
   await result.service.complete({ state: stateFrom(started.authorizationUrl), cookie: started.cookie, code: 'mock-code' });
   await assert.rejects(result.service.verifySelectedRoot(administratorId, recordingDriveRootId()));
-  assert.deepEqual(await result.credentials.loadForBackend(), { googleAccountEmail: 'previous@example.invalid', refreshToken: 'previous-refresh' });
+  const prior = await result.credentials.loadForBackend();
+  assert.equal(prior?.googleAccountEmail, 'previous@example.invalid');
+  assert.equal(prior?.refreshToken, 'previous-refresh');
 });

@@ -1,0 +1,5 @@
+{
+  "extends": "../tsconfig.json",
+  "compilerOptions": { "outDir": "../.disposable-compiled", "rootDir": "..", "noEmit": false },
+  "include": ["../src/**/*.ts", "disposable/company-recording-private-acl.test.ts"]
+}

@@ -7,6 +7,8 @@ import { recordingsRouter } from '../routers/recordings.js';
 import { chatAttachmentsRouter } from '../routers/chat-attachments.js';
 import { googleDriveIntegrationRouter } from '../routers/google-drive-integration.js';
 import { recordingFoldersRouter } from '../routers/recording-folders.js';
+import { batchRegistrationRouter } from '../routers/batch-registration.js';
+import { studentGoogleIdentityRouter } from '../routers/student-google-identity.js';
 
 import { meetingNotificationsRouter } from '../routers/meeting-notifications.js';
 
@@ -18,6 +20,8 @@ export const appRouter = t.router({
   chatAttachments: chatAttachmentsRouter,
   googleDriveIntegration: googleDriveIntegrationRouter,
   recordingFolders: recordingFoldersRouter,
+  batchRegistration: batchRegistrationRouter,
+  studentGoogleIdentity: studentGoogleIdentityRouter,
   health: t.procedure
     .input(z.object({}).optional())
     .query(() => ({

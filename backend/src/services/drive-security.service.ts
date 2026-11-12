@@ -1,8 +1,8 @@
-import { createCipheriv, createDecipheriv, randomBytes } from 'node:crypto';
+import { createCipheriv, createDecipheriv, randomBytes, randomUUID } from 'node:crypto';
 import { TRPCError } from '@trpc/server';
 import { and, eq } from 'drizzle-orm';
 import { db } from '../db/index.js';
-import { driveIntegrationCredentials, recordingBatchFolderPermissions, recordingBatchFolders, recordingFolderCreators } from '../db/schema.js';
+import { driveIntegrationCredentials, driveIntegrationGeneration, recordingBatchFolderPermissions, recordingBatchFolders, recordingFolderCreators } from '../db/schema.js';
 import { recordingDriveRootId, validateDriveFolderId } from '../config/recordingDrive.js';
 
 export type FolderRole = 'manager' | 'trainer' | 'viewer';
@@ -78,38 +78,71 @@ export function decryptRefreshToken(value: string, key: Buffer): string {
   }
 }
 
+export type StoredIntegrationCredential = { googleAccountEmail: string; encryptedRefreshToken: string; generation: string };
 export interface IntegrationCredentialRepository {
-  save(value: { googleAccountEmail: string; encryptedRefreshToken: string; connectedByUserId: string }): Promise<void>;
-  load(): Promise<{ googleAccountEmail: string; encryptedRefreshToken: string } | null>;
+  generation(): Promise<string>;
+  save(value: { googleAccountEmail: string; encryptedRefreshToken: string; connectedByUserId: string }, generation: string, previousCiphertext?: string): Promise<boolean>;
+  load(): Promise<StoredIntegrationCredential | null>;
   remove(): Promise<void>;
 }
 
 export const databaseIntegrationCredentialRepository: IntegrationCredentialRepository = {
-  async save(value) {
-    await db.insert(driveIntegrationCredentials).values({ id: 1, ...value, updatedAt: new Date() })
-      .onConflictDoUpdate({ target: driveIntegrationCredentials.id, set: { ...value, updatedAt: new Date() } });
+  async generation() {
+    const row = await db.query.driveIntegrationGeneration.findFirst({ where: eq(driveIntegrationGeneration.id, 1) });
+    if (!row) throw new Error('Google integration credential generation is unavailable.');
+    return row.generation;
+  },
+  async save(value, generation, previousCiphertext) {
+    return db.transaction(async tx => {
+      const [epoch] = await tx.select().from(driveIntegrationGeneration).where(eq(driveIntegrationGeneration.id, 1)).for('update');
+      if (!epoch || epoch.generation !== generation) return false;
+      if (previousCiphertext !== undefined) {
+        const [updated] = await tx.update(driveIntegrationCredentials).set({ ...value, updatedAt: new Date() })
+          .where(and(eq(driveIntegrationCredentials.id, 1), eq(driveIntegrationCredentials.encryptedRefreshToken, previousCiphertext)))
+          .returning({ id: driveIntegrationCredentials.id });
+        return Boolean(updated);
+      }
+      await tx.insert(driveIntegrationCredentials).values({ id: 1, ...value, updatedAt: new Date() })
+        .onConflictDoUpdate({ target: driveIntegrationCredentials.id, set: { ...value, updatedAt: new Date() } });
+      return true;
+    });
   },
   async load() {
-    const row = await db.query.driveIntegrationCredentials.findFirst({ where: eq(driveIntegrationCredentials.id, 1) });
-    return row ? { googleAccountEmail: row.googleAccountEmail, encryptedRefreshToken: row.encryptedRefreshToken } : null;
+    return db.transaction(async tx => {
+      const [epoch] = await tx.select().from(driveIntegrationGeneration).where(eq(driveIntegrationGeneration.id, 1)).for('update');
+      if (!epoch) throw new Error('Google integration credential generation is unavailable.');
+      const [row] = await tx.select().from(driveIntegrationCredentials).where(eq(driveIntegrationCredentials.id, 1));
+      return row ? { googleAccountEmail: row.googleAccountEmail, encryptedRefreshToken: row.encryptedRefreshToken, generation: epoch.generation } : null;
+    });
   },
-  async remove() { await db.delete(driveIntegrationCredentials).where(eq(driveIntegrationCredentials.id, 1)); },
+  async remove() {
+    await db.transaction(async tx => {
+      const [epoch] = await tx.update(driveIntegrationGeneration).set({ generation: randomUUID() }).where(eq(driveIntegrationGeneration.id, 1)).returning({ id: driveIntegrationGeneration.id });
+      if (!epoch) throw new Error('Google integration credential generation is unavailable.');
+      await tx.delete(driveIntegrationCredentials).where(eq(driveIntegrationCredentials.id, 1));
+    });
+  },
 };
 
 export class IntegrationCredentialService {
   constructor(private readonly repository: IntegrationCredentialRepository, private readonly administratorId: string | undefined, private readonly key: Buffer) {}
 
-  async replace(userId: string | undefined, googleAccountEmail: string, refreshToken: string): Promise<void> {
+  generation(): Promise<string> { return this.repository.generation(); }
+  async assertGeneration(expected: string): Promise<void> {
+    if (await this.repository.generation() !== expected) throw new Error('Google Drive connection changed. Start a new authorization.');
+  }
+  async replace(userId: string | undefined, googleAccountEmail: string, refreshToken: string, generation: string, previousCiphertext?: string): Promise<void> {
     assertIntegrationAdministrator(userId, this.administratorId);
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(googleAccountEmail)) throw new Error('Invalid Google account email.');
     const encryptedRefreshToken = encryptRefreshToken(refreshToken, this.key);
-    await this.repository.save({ googleAccountEmail, encryptedRefreshToken, connectedByUserId: userId! });
+    if (!await this.repository.save({ googleAccountEmail, encryptedRefreshToken, connectedByUserId: userId! }, generation, previousCiphertext))
+      throw new Error('Google Drive connection changed. Retry the operation.');
   }
 
-  // For a future backend Drive client only. Never return this through an API.
-  async loadForBackend(): Promise<{ googleAccountEmail: string; refreshToken: string } | null> {
+  // For backend use only. Never return this through an API.
+  async loadForBackend(): Promise<{ googleAccountEmail: string; refreshToken: string; generation: string; ciphertext: string } | null> {
     const stored = await this.repository.load();
-    return stored ? { googleAccountEmail: stored.googleAccountEmail, refreshToken: decryptRefreshToken(stored.encryptedRefreshToken, this.key) } : null;
+    return stored ? { googleAccountEmail: stored.googleAccountEmail, refreshToken: decryptRefreshToken(stored.encryptedRefreshToken, this.key), generation: stored.generation, ciphertext: stored.encryptedRefreshToken } : null;
   }
 
   async disconnect(userId: string | undefined): Promise<void> {

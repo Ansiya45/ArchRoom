@@ -1,9 +1,10 @@
-import { DriveRecordingUpload } from './DriveRecordingUpload';
 import { RecordingPlayer } from './RecordingPlayer';
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { CloudUpload, Download, Film, Loader2, X } from 'lucide-react';
 import { trpc } from '@/lib/trpc';
 import type { RecordingPreview } from '@/hooks/useScreenRecorder';
+import type { CompanyUploadStatus } from '@/hooks/useCompanyRecordingUpload';
+import { CompanyRecordingUploadFeedback } from './CompanyRecordingUploadFeedback';
 
 type SavedRecording = Awaited<ReturnType<typeof trpc.recordings.getForMeeting.query>>['recordings'][number];
 
@@ -13,6 +14,12 @@ interface RecordingsModalProps {
   preview: RecordingPreview | null;
   onClose: () => void;
   onDiscardPreview: () => void;
+  allowUpload?: boolean;
+  localRecovery?: boolean;
+  companyUploads?: CompanyUploadStatus[];
+  onCompanyRetry?: (recordingId: string) => void;
+  savedFolderId?: string | null;
+  onCompanyUpload?: (folderId: string | null, saveForFuture: boolean) => void | Promise<void>;
 }
 
 function downloadLocal(preview: RecordingPreview) {
@@ -28,15 +35,20 @@ export const RecordingsModal: React.FC<RecordingsModalProps> = ({
   preview,
   onClose,
   onDiscardPreview,
+  allowUpload = false,
+  localRecovery = false,
+  companyUploads = [],
+  onCompanyRetry,
+  savedFolderId = null,
+  onCompanyUpload,
 }) => {
   const [recordings, setRecordings] = useState<SavedRecording[]>([]);
   const [isLoading, setIsLoading] = useState(false);
-  const [isUploading, setIsUploading] = useState(false);
-  const [driveBusy, setDriveBusy] = useState(false);
-  const [savedPreview, setSavedPreview] = useState('');
-  const uploadLock = useRef(false);
-  const uploadAttempt = useRef<{ previewUrl: string; created: Awaited<ReturnType<typeof trpc.recordings.createUpload.mutate>>; transferred: boolean } | null>(null);
   const [message, setMessage] = useState<string | null>(null);
+  const [companyUploadCapability, setCompanyUploadCapability] = useState<'checking' | 'available' | 'unavailable'>('checking');
+  const [folderState, setFolderState] = useState<{ connected: boolean; folders: { id: string; name: string }[] } | null>(null);
+  const [selectedFolderId, setSelectedFolderId] = useState<string | null>(savedFolderId);
+  const [saveFolder, setSaveFolder] = useState(false);
 
   const loadRecordings = useCallback(async () => {
     setIsLoading(true);
@@ -55,53 +67,30 @@ export const RecordingsModal: React.FC<RecordingsModalProps> = ({
   }, [isOpen, loadRecordings]);
 
   useEffect(() => {
-    if (!isUploading && !driveBusy) return;
-    const protect = (event: BeforeUnloadEvent) => { event.preventDefault(); event.returnValue = ''; };
-    window.addEventListener('beforeunload', protect);
-    return () => window.removeEventListener('beforeunload', protect);
-  }, [isUploading, driveBusy]);
+    if (!isOpen) return;
+    setSelectedFolderId(savedFolderId);
+    setSaveFolder(false);
+    let active = true;
+    void trpc.recordingFolders.list.query()
+      .then(result => { if (active) setFolderState({ connected: result.connected, folders: result.folders }); })
+      .catch(() => { if (active) setFolderState({ connected: false, folders: [] }); });
+    return () => { active = false; };
+  }, [isOpen, savedFolderId]);
 
-  const uploadPreview = async () => {
-    if (!preview || uploadLock.current || driveBusy || savedPreview === preview.url) return;
-    uploadLock.current = true;
-    setIsUploading(true);
-    setMessage(null);
-    try {
-      if (uploadAttempt.current?.previewUrl !== preview.url) {
-        const created = await trpc.recordings.createUpload.mutate({
-          meetingCode,
-          occurrenceId: preview.occurrenceId,
-          fileName: preview.fileName,
-          mimeType: preview.mimeType || 'video/webm',
-          fileSize: preview.blob.size,
-          durationSeconds: preview.durationSeconds,
-        });
-        uploadAttempt.current = { previewUrl: preview.url, created, transferred: false };
-      } else if (!uploadAttempt.current.transferred) {
-        const retry = await trpc.recordings.retryUpload.mutate({ recordingId: uploadAttempt.current.created.recording.id });
-        uploadAttempt.current.transferred = retry.transferred;
-        if (retry.uploadUrl) uploadAttempt.current.created.uploadUrl = retry.uploadUrl;
-      }
-      const attempt = uploadAttempt.current;
-      if (!attempt.transferred) {
-        const body = new FormData();
-        body.append('cacheControl', '3600');
-        body.append('', preview.blob, preview.fileName);
-        const response = await fetch(attempt.created.uploadUrl, { method: 'PUT', headers: { 'x-upsert': 'false' }, body, signal: AbortSignal.timeout(300000) });
-        if (!response.ok) throw new Error(`Supabase upload failed (${response.status}). Keep the recording and retry, or download it.`);
-        attempt.transferred = true;
-      }
-      await trpc.recordings.complete.mutate({ recordingId: attempt.created.recording.id });
-      setSavedPreview(preview.url);
-      setMessage('Recording saved privately to Supabase.');
-      await loadRecordings();
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : 'Unable to upload recording.');
-    } finally {
-      uploadLock.current = false;
-      setIsUploading(false);
+  useEffect(() => {
+    if (!isOpen || !preview || !allowUpload) {
+      setCompanyUploadCapability('unavailable');
+      return;
     }
-  };
+    const controller = new AbortController();
+    setCompanyUploadCapability('checking');
+    void trpc.recordings.companyUploadCapability.query(undefined, { signal: controller.signal })
+      .then(result => setCompanyUploadCapability(result.available ? 'available' : 'unavailable'))
+      .catch(() => {
+        if (!controller.signal.aborted) setCompanyUploadCapability('unavailable');
+      });
+    return () => controller.abort();
+  }, [allowUpload, isOpen, preview?.recordingId]);
 
   const downloadSaved = async (recordingId: string) => {
     try {
@@ -112,6 +101,11 @@ export const RecordingsModal: React.FC<RecordingsModalProps> = ({
     }
   };
 
+  const currentUpload = preview ? companyUploads.find(status => status.recordingId === preview.recordingId) : undefined;
+  const uploadBusy = Boolean(currentUpload && !['retryable_failure', 'unavailable', 'metadata_unavailable', 'manual_reconciliation'].includes(currentUpload.stage));
+  const destinationLocked = Boolean(currentUpload?.jobId);
+  const savedFolderMissing = Boolean(savedFolderId && folderState?.connected && !folderState.folders.some(folder => folder.id === savedFolderId));
+
   return (
     <div className={`${isOpen ? 'flex' : 'hidden'} fixed inset-0 z-[120] items-center justify-center bg-slate-950/65 p-4 backdrop-blur-sm`}>
       <div role="dialog" aria-modal="true" aria-label="Host recordings" className="flex max-h-[90vh] w-full max-w-3xl flex-col overflow-hidden rounded-3xl border border-white/70 bg-white shadow-2xl">
@@ -120,28 +114,50 @@ export const RecordingsModal: React.FC<RecordingsModalProps> = ({
             <h2 className="text-lg font-bold text-slate-900">Meeting recordings</h2>
             <p className="text-xs text-slate-500">Private host access Â· {meetingCode}</p>
           </div>
-          <button disabled={isUploading || driveBusy} onClick={onClose} className="rounded-xl p-2 text-slate-500 hover:bg-slate-100" aria-label="Close recordings">
+          <button onClick={onClose} className="rounded-xl p-2 text-slate-500 hover:bg-slate-100" aria-label="Close recordings">
             <X className="h-5 w-5" />
           </button>
         </div>
 
         <div className="overflow-y-auto p-6">
+          <CompanyRecordingUploadFeedback statuses={companyUploads} onRetry={onCompanyRetry ?? (() => {})} />
           {preview && (
             <section className="mb-6 rounded-2xl border border-blue-200 bg-blue-50/60 p-4">
               <h3 className="mb-3 text-sm font-bold text-slate-900">Recording preview</h3>
-              <p className="mb-3 text-xs text-slate-600">Choose where to save. Nothing uploads automatically. You can use more than one option; keep this page open until finished.</p>
+              {localRecovery && <p className="mb-3 text-xs text-slate-600">{preview.fileName} · {meetingCode}{preview.occurrenceId ? ` · Session ${preview.occurrenceId}` : ''} · {preview.blob.size} bytes</p>}
+              <p className="mb-3 text-xs text-slate-600">{companyUploads.length ? 'Company upload progress is shown above. ' : 'Upload uses the configured company recordings folder. '}Closing this dialog keeps the recording on this page; leaving or refreshing the page can lose it unless local recovery is enabled.</p>
               <RecordingPlayer src={preview.url} durationSeconds={preview.durationSeconds} />
+              {allowUpload && <div className="mt-4 rounded-xl border border-slate-200 bg-white p-3">
+                <label htmlFor="recording-upload-folder" className="block text-xs font-semibold text-slate-700">Company Drive destination</label>
+                <select id="recording-upload-folder" value={selectedFolderId ?? ''} onChange={event => {
+                  setSelectedFolderId(event.target.value || null);
+                  setSaveFolder(false);
+                }} disabled={!folderState?.connected || uploadBusy || destinationLocked}
+                  className="mt-2 w-full rounded-lg border border-slate-300 bg-white p-2 text-sm text-slate-800 disabled:opacity-60">
+                  <option value="">ylaam-meet-recording-sessions</option>
+                  {savedFolderMissing && <option value={savedFolderId!}>Saved folder unavailable</option>}
+                  {folderState?.folders.map(folder => <option key={folder.id} value={folder.id}>{folder.name}</option>)}
+                </select>
+                {!folderState?.connected && <p className="mt-2 text-xs text-amber-700">Authorized company folders could not be loaded. Reconnect or verify Company Drive before uploading.</p>}
+                {savedFolderMissing && selectedFolderId === savedFolderId && <p className="mt-2 text-xs text-red-700">The saved folder is unavailable. Choose another authorized folder; the recording will not be redirected automatically.</p>}
+                {destinationLocked && <p className="mt-2 text-xs text-slate-600">This recording already has an upload job for its original folder. Its destination cannot be changed.</p>}
+                {!savedFolderId && selectedFolderId && <label className="mt-2 flex items-center gap-2 text-xs text-slate-600">
+                  <input type="checkbox" checked={saveFolder} onChange={event => setSaveFolder(event.target.checked)} /> Use this folder for future occurrences
+                </label>}
+              </div>}
               <div className="mt-4 flex flex-wrap gap-2">
-                <button onClick={() => downloadLocal(preview)} className="flex items-center gap-2 rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">
+                {allowUpload && onCompanyUpload && <button type="button" onClick={() => void onCompanyUpload(selectedFolderId, saveFolder || Boolean(savedFolderId && selectedFolderId !== savedFolderId))}
+                  disabled={companyUploadCapability !== 'available' || !folderState?.connected || uploadBusy || destinationLocked || (savedFolderMissing && selectedFolderId === savedFolderId)}
+                  className="flex items-center gap-2 rounded-[8px] bg-violet-600 px-4 py-2 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50"><CloudUpload className="h-4 w-4" /> Upload to Drive</button>}
+                <button onClick={() => { downloadLocal(preview); setMessage('Download requested. Verify the file was saved on your computer before discarding this copy.'); }} className="flex items-center gap-2 rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">
                   <Download className="h-4 w-4" /> Download to computer
                 </button>
-                <button onClick={() => void uploadPreview()} disabled={isUploading || driveBusy || savedPreview === preview.url} className="flex items-center gap-2 rounded-xl bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-500 disabled:opacity-60">
-                  {isUploading ? <Loader2 className="h-4 w-4 animate-spin" /> : <CloudUpload className="h-4 w-4" />}
-                  {isUploading ? 'Uploading...' : savedPreview === preview.url ? 'Uploaded to Supabase' : 'Upload to Supabase'}
-                </button>
-                <DriveRecordingUpload key={preview.url} preview={preview} meetingCode={meetingCode} disabled={isUploading} onBusyChange={setDriveBusy} />
-                <button onClick={onDiscardPreview} disabled={isUploading || driveBusy} className="px-3 py-2 text-sm font-semibold text-slate-500 hover:text-red-600">Discard</button>
+                {!allowUpload && <p className="text-xs text-slate-600">This incomplete recording may not play correctly. Download it for best-effort recovery.</p>}
+                <button onClick={() => {
+                  if (window.confirm('Discard this recording from this page? Download it or finish an upload first. This cannot be undone.')) onDiscardPreview();
+                }} className="px-3 py-2 text-sm font-semibold text-slate-500 hover:text-red-600">Discard</button>
               </div>
+              {allowUpload && companyUploadCapability === 'unavailable' && <p role="status" className="mt-3 text-xs text-slate-600">Company Drive uploads are currently unavailable.</p>}
             </section>
           )}
 

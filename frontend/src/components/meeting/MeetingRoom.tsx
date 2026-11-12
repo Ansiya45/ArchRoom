@@ -32,6 +32,11 @@ import { useSharedWhiteboard } from '@/hooks/useSharedWhiteboard';
 import { clearStoredSession, getAuthToken, getStoredUser, type SessionUser } from '@/lib/auth';
 import { useWebRtcMeeting } from '@/hooks/useWebRtcMeeting';
 import { useScreenRecorder } from '@/hooks/useScreenRecorder';
+import { useCompanyRecordingUpload } from '@/hooks/useCompanyRecordingUpload';
+import { canLeaveRecordingReview, verifiedCompanyRecordingLink } from '@/lib/companyRecordingUpload';
+import { LocalRecoverySetup } from './LocalRecoverySetup';
+import { LocalRecordingWriter } from '@/lib/localRecordingStore';
+import type { RecoverySetup } from '@/hooks/useScreenRecorder';
 import { RecordingsModal } from './RecordingsModal';
 import { TranscriptModal } from './TranscriptModal';
 import { useMeetingSummaryCapture } from '@/hooks/useMeetingSummaryCapture';
@@ -62,6 +67,10 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
     sessionRef.current = null;
   };
   const meeting = useMeeting(meetingCode);
+  const [recordingTimeZone, setRecordingTimeZone] = useState<string | null>(null);
+  const [recordingFolderId, setRecordingFolderId] = useState<string | null>(null);
+  const [recordingMeetingId, setRecordingMeetingId] = useState<string | null>(null);
+  const [recordingAccessPolicy, setRecordingAccessPolicy] = useState<'private' | 'restricted' | 'anyone_with_link'>('private');
   const call = useWebRtcMeeting(
     meetingCode,
     meeting.inMeeting,
@@ -110,7 +119,76 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
   const leavingRef = useRef(false);
   const joiningRef = useRef(false);
   const admissionActionsRef = useRef(new Set<string>());
-  const recorder = useScreenRecorder();
+  const recorder = useScreenRecorder(call.localStream, meeting.isMicOn, meeting.meetingTitle, recordingTimeZone);
+  const companyUpload = useCompanyRecordingUpload();
+  const manualRecordingStop = useRef(false);
+  const priorRecordingNotice = useRef<'started' | 'paused' | 'resumed' | 'stopped'>('stopped');
+  useEffect(() => {
+    if (!meeting.inMeeting || !call.isConnected) return;
+    const previous = priorRecordingNotice.current;
+    const state = !recorder.isRecording ? 'stopped' : recorder.isPaused ? 'paused' : previous === 'paused' ? 'resumed' : 'started';
+    if (state !== 'stopped' || previous !== 'stopped') call.publishRecordingNotice(state);
+    priorRecordingNotice.current = state;
+    if (state === 'stopped') return;
+    const timer = window.setInterval(() => call.publishRecordingNotice(state), 2000);
+    return () => window.clearInterval(timer);
+  }, [meeting.inMeeting, call.isConnected, call.publishRecordingNotice, recorder.isRecording, recorder.isPaused]);
+  const [recordingReview, setRecordingReview] = useState(false);
+  const [verifiedRecordingLinks, setVerifiedRecordingLinks] = useState<Record<string, string>>({});
+  const [recordingLinkNotice, setRecordingLinkNotice] = useState('');
+  useEffect(() => {
+    const completed = companyUpload.statuses.filter(status => status.stage === 'completed');
+    if (!recordingReview || !recordingMeetingId || !user?.id || !completed.length) {
+      setVerifiedRecordingLinks({});
+      return;
+    }
+    let active = true;
+    const ownerId = user.id;
+    void trpc.meetings.historyDetail.query({ meetingId: recordingMeetingId }).then(detail => {
+      if (!active || getStoredUser()?.id !== ownerId) return;
+      const links: Record<string, string> = {};
+      for (const status of completed) {
+        const link = verifiedCompanyRecordingLink(detail.items, status.recordingId, status.occurrenceId);
+        if (link) links[status.recordingId] = link;
+      }
+      setVerifiedRecordingLinks(links);
+    }).catch(() => { if (active) setVerifiedRecordingLinks({}); });
+    return () => { active = false; };
+  }, [recordingReview, recordingMeetingId, user?.id, companyUpload.statuses]);
+  useEffect(() => {
+    if (recordingReview && recorder.preview && canLeaveRecordingReview(recorder.preview.recordingId, companyUpload.statuses))
+      setIsRecordingsOpen(false);
+  }, [recordingReview, recorder.preview, companyUpload.statuses]);
+  const [recoverySetup, setRecoverySetup] = useState<RecoverySetup | null>(null);
+  const recoveryOwner = useRef<string | null>(null);
+  const [recoveryMessage, setRecoveryMessage] = useState('');
+  const [recoveryBusy, setRecoveryBusy] = useState(false);
+  const [recordingLocked, setRecordingLocked] = useState(false);
+  const lockedRecordingOwner = useRef<string | null>(null);
+  const recoveryBusyRef = useRef(false);
+  const retryWriter = useRef<LocalRecordingWriter | null>(null);
+  const configureRecovery = (setup: RecoverySetup | null) => { recoveryOwner.current = setup?.ownerId ?? null; setRecoverySetup(setup); };
+  useEffect(() => {
+    let checking = false;
+    const lock = () => {
+      if (!recoveryOwner.current) return;
+      if (recorder.hasRecording()) { lockedRecordingOwner.current = recoveryOwner.current; setRecordingLocked(true); setIsRecordingsOpen(false); }
+      recoveryOwner.current = null; setRecoverySetup(null);
+      retryWriter.current?.lock(); retryWriter.current = null;
+      recorder.lockLocalRecovery();
+    };
+    const checkAccount = () => { if (recoveryOwner.current && getStoredUser()?.id !== recoveryOwner.current) lock(); };
+    const timer = window.setInterval(checkAccount, 1000);
+    const verify = window.setInterval(() => {
+      if (!recoveryOwner.current || checking) return;
+      const owner = recoveryOwner.current; checking = true;
+      void trpc.auth.me.query().then(result => { if (recoveryOwner.current === owner && result.user.id !== owner) lock(); })
+        .catch(() => { if (recoveryOwner.current === owner) lock(); }).finally(() => { checking = false; });
+    }, 30000);
+    window.addEventListener('storage', checkAccount);
+    window.addEventListener('ylaam-session-removed', lock);
+    return () => { window.clearInterval(timer); window.clearInterval(verify); window.removeEventListener('storage', checkAccount); window.removeEventListener('ylaam-session-removed', lock); retryWriter.current?.lock(); };
+  }, []);
   const aiAgreedIds = aiStatus.state === 'off' ? [] : Object.keys(call.remoteStreams);
   const aiCaptureActive = meeting.inMeeting && isHost && call.isConnected && !aiCaptureFault && aiStatus.state === 'active' && aiStatus.requestedByUserId === user?.id;
   const transcript = useMeetingSummaryCapture(
@@ -259,6 +337,10 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
     void trpc.meetings.getByCode.query({ meetingCode, occurrenceId: sessionRef.current?.occurrenceId }).then(({ meeting: room }) => {
       if (cancelled) return;
       meeting.setMeetingTitle(room.title);
+      setRecordingTimeZone(room.timeZone ?? null);
+      setRecordingFolderId(room.recordingFolderId ?? null);
+      setRecordingMeetingId(room.id);
+      setRecordingAccessPolicy(room.recordingAccessPolicy);
       setIsOwner(getStoredUser()?.id === room.hostUserId);
       setIsHost(getStoredUser()?.id === room.hostUserId);
       if (room.recurrenceCancelledAt) setMeetingError('This meeting series has been cancelled.');
@@ -404,20 +486,32 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
           });
           if (leavingRef.current) return;
           if (status.sessionEnded || status.meeting.status === 'ended' || status.leftAt || status.admission !== 'admitted') {
+            leavingRef.current = true;
+            const preserveRecording = recorder.hasRecording();
+            setClosingForSummary(true);
+            await recorder.stop();
+            setClosingForSummary(false);
             forgetSession(meetingCode);
             stopAllCameraStreams();
             meeting.leaveMeeting();
             alert(status.sessionEnded || status.meeting.status === 'ended' ? 'The host ended the meeting.' : 'The host removed you from the meeting.');
-            navigate('/');
+            if (preserveRecording) { setRecordingReview(true); setIsRecordingsOpen(true); }
+            else navigate('/');
           }
         } else {
           const { meeting: room } = await trpc.meetings.getByCode.query({ meetingCode, occurrenceId: sessionRef.current?.occurrenceId });
           if (leavingRef.current) return;
           if (room.status === 'ended') {
+            leavingRef.current = true;
+            const preserveRecording = recorder.hasRecording();
+            setClosingForSummary(true);
+            await recorder.stop();
+            setClosingForSummary(false);
             stopAllCameraStreams();
             meeting.leaveMeeting();
             alert('The meeting has ended.');
-            navigate('/');
+            if (preserveRecording) { setRecordingReview(true); setIsRecordingsOpen(true); }
+            else navigate('/');
           }
         }
       } catch {
@@ -466,7 +560,11 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
     const session = sessionRef.current;
     const occurrenceId = session?.occurrenceId;
     try {
-      await recorder.stop();
+      const preserveRecording = recorder.hasRecording() || companyUpload.statuses.some(status => status.stage === 'completed');
+      const wasRecording = recorder.isRecording && !manualRecordingStop.current;
+      const finished = await recorder.stop();
+      if (wasRecording && finished?.canonicalBlob && user?.id && recordingFolderId)
+        void companyUpload.start(finished, meetingCode, user.id, false, recordingFolderId);
       const hadTranscription = aiStatus.state !== 'off';
       const speech = await transcript.finish();
       if (hadTranscription && isOwner) {
@@ -480,6 +578,10 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
         await trpc.meetings.leave.mutate({ meetingCode, occurrenceId, participantId: session?.participantId });
       }
       if (hadTranscription || speech.trim()) setSummaryReview({ speech, occurrenceId, warning: transcript.getWarning() });
+      else if (preserveRecording) {
+        setRecordingReview(true);
+        setIsRecordingsOpen(!canLeaveRecordingReview(recorder.preview ? recorder.preview.recordingId : null, companyUpload.statuses));
+      }
       else navigate('/');
       stopAllCameraStreams();
       meeting.leaveMeeting();
@@ -491,7 +593,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
   };
 
   const handleLeave = async () => {
-    if (isHost) { await closeWithSummary(false); return; }
+    if (isHost || recorder.hasRecording()) { await closeWithSummary(false); return; }
     if (leavingRef.current) return;
     const session = sessionRef.current;
     leavingRef.current = true;
@@ -586,17 +688,67 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
   };
 
   const toggleRecording = async () => {
-    if (!isHost) return;
+    if (!isHost || recorder.isFinalizing || leavingRef.current) return;
     if (recorder.isRecording) {
-      await recorder.stop();
+      manualRecordingStop.current = true;
+      const finished = await recorder.stop();
+      if (finished?.canonicalBlob && user?.id && recordingFolderId)
+        void companyUpload.start(finished, meetingCode, user.id, false, recordingFolderId);
       return;
     }
     if (recorder.preview) { setIsRecordingsOpen(true); return; }
     try {
-      await recorder.start(sessionRef.current?.occurrenceId);
+      const setup = recoverySetup && getStoredUser()?.id === recoverySetup.ownerId ? recoverySetup : null;
+      setRecoverySetup(null);
+      manualRecordingStop.current = false;
+      await recorder.start(sessionRef.current?.occurrenceId, setup ?? undefined);
     } catch (error) {
       alert(error instanceof Error ? error.message : 'Unable to start screen recording.');
     }
+  };
+
+  const retryLocalSave = async () => {
+    const preview = recorder.preview, setup = recoverySetup;
+    if (!preview || !setup || recoveryBusyRef.current || recordingLocked) return;
+    recoveryBusyRef.current = true;
+    setRecoveryBusy(true); setRecoveryMessage('Saving encrypted recording on this device...');
+    try {
+      const { user: verified } = await trpc.auth.me.query();
+      if (verified.id !== setup.ownerId || getStoredUser()?.id !== setup.ownerId) throw new Error('Account changed.');
+      const details = { meetingCode, occurrenceId: preview.occurrenceId, fileName: preview.fileName, mimeType: preview.mimeType, durationSeconds: preview.durationSeconds, canonicalEligible: Boolean(preview.canonicalBlob), uploadRecordingId: preview.recordingId, recordingStartedAt:preview.recordingStartedAt };
+      const writer = await LocalRecordingWriter.create(setup.ownerId, setup.passphrase, details, () => setRecoveryMessage('Local save failed. Keep this page open and download the recording.'));
+      retryWriter.current = writer;
+      if (getStoredUser()?.id !== setup.ownerId || recoveryOwner.current !== setup.ownerId) { writer.lock(); throw new Error('Account changed.'); }
+      // Save the same unmodified bytes used for future resumable uploads.
+      writer.append(preview.canonicalBlob ?? preview.blob);
+      if (!await writer.finish(details)) throw new Error('Local save failed.');
+      setRecoveryMessage('Encrypted recording saved on this device.');
+      setRecoverySetup(null);
+    } catch { setRecoveryMessage('Local save failed. Keep this page open and download the recording.'); }
+    finally { retryWriter.current = null; recoveryBusyRef.current = false; setRecoveryBusy(false); }
+  };
+
+  const uploadCompanyRecording = async (folderId: string | null, saveForFuture: boolean) => {
+    const preview = recorder.preview;
+    if (!preview?.canonicalBlob || !user?.id) return;
+    if (saveForFuture) {
+      if (!recordingMeetingId || !folderId) throw new Error('Choose an authorized folder to save for future occurrences.');
+      const updated = await trpc.meetings.updateRecordingSettings.mutate({ meetingId: recordingMeetingId,
+        recordingFolderId: folderId, recordingAccessPolicy });
+      setRecordingFolderId(updated.meeting.recordingFolderId ?? null);
+    }
+    await companyUpload.start(preview, meetingCode, user.id, false, folderId);
+  };
+
+  const unlockRecordingPreview = async () => {
+    try {
+      const owner = lockedRecordingOwner.current;
+      const { user: verified } = await trpc.auth.me.query();
+      if (!owner || verified.id !== owner || getStoredUser()?.id !== owner) throw new Error();
+      recoveryOwner.current = owner; lockedRecordingOwner.current = null; setRecordingLocked(false);
+      if (recorder.preview) setIsRecordingsOpen(true);
+      setRecoveryMessage('');
+    } catch { setRecoveryMessage('Sign in as the recording owner to review this recording.'); }
   };
 
   const uploadChatFile = async (file: File) => {
@@ -781,6 +933,44 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
     }
   };
 
+  const renderScreen = () => {
+  if (recordingReview) return <div className="min-h-screen bg-slate-950 text-white flex items-center justify-center p-6">
+    <section className="max-w-lg space-y-4 rounded-[8px] border border-white/10 bg-slate-900 p-6">
+      <h1 className="text-xl font-semibold">Review your recording</h1>
+      {(recorder.preview && canLeaveRecordingReview(recorder.preview.recordingId, companyUpload.statuses)) ||
+        (!recorder.preview && companyUpload.statuses.some(status => status.stage === 'completed'))
+        ? <p>Recording saved successfully.</p>
+        : <><p>Your meeting has closed. Keep this page open until you have saved or explicitly discarded your recording.</p>
+          <p className="text-sm text-slate-400">Keep this page open until local recovery completes or you download the recording. Company upload depends on availability.</p></>}
+      {!recordingLocked && companyUpload.statuses.filter(status => status.stage === 'completed').map(status =>
+        <div key={status.recordingId} className="space-y-2 rounded-[8px] border border-white/10 p-3 text-sm">
+          <p className="break-words font-semibold">{status.fileName}</p>
+          {verifiedRecordingLinks[status.recordingId]
+            ? <><a className="break-all text-blue-300 underline" href={verifiedRecordingLinks[status.recordingId]} target="_blank" rel="noopener noreferrer">{verifiedRecordingLinks[status.recordingId]}</a>
+              <button className="block rounded-[8px] border border-white/10 px-4 py-2" onClick={() => {
+                void navigator.clipboard.writeText(verifiedRecordingLinks[status.recordingId]).then(
+                  () => setRecordingLinkNotice('Recording link copied.'),
+                  () => setRecordingLinkNotice('Could not copy the link. Select it above to copy manually.'));
+              }}>Copy Link</button></>
+            : <p className="text-slate-400">The verified Drive link is temporarily unavailable. You can leave and find the recording in Meeting History later.</p>}
+        </div>)}
+      {recordingLinkNotice && <p role="status" className="text-sm">{recordingLinkNotice}</p>}
+      {recorder.localStatus && <p role="status" className="text-sm">{recorder.localStatus}</p>}
+      {recoveryMessage && <p role="status" className="text-sm">{recoveryMessage}</p>}
+      {recordingLocked && <><p role="alert" className="text-sm">Recording preview is hidden because the account session changed.</p><button className="rounded-[8px] border border-white/10 px-4 py-2" onClick={() => void unlockRecordingPreview()}>Verify recording owner</button></>}
+      {recorder.preview && !recordingLocked && <LocalRecoverySetup meetingCode={meetingCode} active={Boolean(recoverySetup)} disabled={recoveryBusy} onChange={configureRecovery} />}
+      {recorder.preview && recoverySetup && !recordingLocked && <button disabled={recoveryBusy} className="rounded-[8px] border border-white/10 px-4 py-2" onClick={() => void retryLocalSave()}>Save encrypted copy on this device</button>}
+      {recorder.error && <p role="alert">{recorder.error}</p>}
+      {recorder.preview && !recordingLocked && <button className="rounded-[8px] bg-violet-600 px-4 py-2" onClick={() => setIsRecordingsOpen(true)}>Save / Download Recording</button>}
+      <button className="rounded-[8px] border border-white/10 px-4 py-2" onClick={() => {
+        if (recordingLocked) { if (window.confirm('Leaving will discard the in-page preview. Continue?')) navigate('/'); return; }
+        if (!canLeaveRecordingReview(recorder.preview ? recorder.preview.recordingId : null, companyUpload.statuses)) { setIsRecordingsOpen(true); return; }
+        recorder.clearPreview(); navigate('/');
+      }}>{recordingLocked ? 'Leave review' : recorder.preview
+        ? canLeaveRecordingReview(recorder.preview.recordingId, companyUpload.statuses) ? 'Leave Meeting' : 'Review before leaving'
+        : companyUpload.statuses.some(status => status.stage === 'completed') ? 'Leave Meeting' : 'Return home'}</button>
+    </section>
+  </div>;
   if (admission === 'pending' || admission === 'denied') {
     return (
       <div className="min-h-screen bg-slate-950 text-white flex items-center justify-center p-6">
@@ -805,10 +995,11 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
   // If in waiting room mode, render WaitingRoom
   if (summaryReview) return <>
     <TranscriptModal meetingCode={meetingCode} occurrenceId={summaryReview.occurrenceId}
-      speech={summaryReview.speech} warning={summaryReview.warning} onClose={() => navigate('/')}
+      speech={summaryReview.speech} warning={summaryReview.warning} onClose={() => { if (recorder.hasRecording() || companyUpload.statuses.some(status => status.stage === 'completed')) {
+        setSummaryReview(null); setRecordingReview(true);
+        setIsRecordingsOpen(!canLeaveRecordingReview(recorder.preview ? recorder.preview.recordingId : null, companyUpload.statuses));
+      } else navigate('/'); }}
       onOpenRecordings={recorder.preview ? () => setIsRecordingsOpen(true) : undefined} />
-    <RecordingsModal isOpen={isRecordingsOpen} meetingCode={meetingCode} preview={recorder.preview}
-      onClose={() => setIsRecordingsOpen(false)} onDiscardPreview={recorder.clearPreview} />
   </>;
 
   if (!meeting.inMeeting) {
@@ -840,7 +1031,15 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
   }
 
   return (
-    <div className="w-full h-screen bg-gradient-to-br from-[#070a18] via-[#11162a] to-[#1b1038] text-slate-800 flex flex-col justify-start overflow-hidden relative select-none font-sans">
+    <div className="w-full h-screen bg-[#070a18] text-slate-800 flex flex-col justify-start overflow-hidden relative select-none font-sans">
+      {recorder.error && <p role="alert" className="relative z-50 rounded-[8px] border border-white/10 bg-slate-900 p-3 text-white">{recorder.error}</p>}
+      {recorder.localStatus && <p role="status" className="relative z-40 px-4 text-xs text-slate-300">{recorder.localStatus}</p>}
+      {recordingLocked && <p role="alert" className="relative z-40 px-4 text-xs text-slate-300">Recording preview is hidden because the account session changed. <button className="rounded-[8px] underline" onClick={() => void unlockRecordingPreview()}>Verify recording owner</button>{recoveryMessage && ` ${recoveryMessage}`}</p>}
+      {recorder.isRecording && <p role="status" className="relative z-40 text-xs text-slate-300 px-4">Recording is local to your browser. A notice is sent to connected participants, but consent is not collected. Tell participants before recording. Remote audio depends on the selected tab/screen and shared audio.</p>}
+      {meeting.participants.filter(participant => participant.id !== 'user-self' && participant.role === 'host').map(participant => {
+        const notice = call.recordingNotices[participant.id];
+        return notice && notice.state !== 'stopped' ? <p key={participant.id} role="status" className="relative z-40 px-4 text-xs text-slate-300">{participant.name} reports recording is {notice.state === 'paused' ? 'paused' : 'active'}. This notice does not record consent.</p> : null;
+      })}
       {call.microphoneError && (
         <div role="alert" className="fixed left-1/2 top-4 z-[120] w-[min(92vw,560px)] -translate-x-1/2 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-medium text-red-800 shadow-xl">
           {call.microphoneError}
@@ -895,10 +1094,6 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
           </div>
         </div>
       )}
-      {/* Background ambient lighting orbs */}
-      <div className="absolute top-0 left-1/4 w-[600px] h-[600px] bg-blue-200/40 rounded-full blur-[120px] pointer-events-none" />
-      <div className="absolute bottom-0 right-1/4 w-[500px] h-[500px] bg-sky-200/50 rounded-full blur-[120px] pointer-events-none" />
-
       {chatToast && meeting.activeSidebarTab !== 'chat' && (
         <button
           type="button"
@@ -947,6 +1142,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
         >
           <Menu className="h-5 w-5" aria-hidden="true" />
         </button>
+        {isHost && <LocalRecoverySetup meetingCode={meetingCode} active={Boolean(recoverySetup)} disabled={recorder.isRecording || recorder.isFinalizing} onChange={configureRecovery} />}
         {aiStatus.state !== 'off' && <>
           <span className="rounded-lg bg-slate-900/80 px-2 py-1 text-xs text-white">
             {aiStatus.state === 'pending' ? 'AI transcription awaiting consent' : aiStatus.capturing && !aiCaptureFault && transcript.capturing ? 'AI transcription active' : 'AI transcription preparing'}
@@ -993,15 +1189,9 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
           </div>
         </div>
 
-      <RecordingsModal
-        isOpen={isHost && isRecordingsOpen}
-        meetingCode={meetingCode}
-        preview={recorder.preview}
-        onClose={() => setIsRecordingsOpen(false)}
-        onDiscardPreview={recorder.clearPreview}
-      />
 
-      {closingForSummary && <div role="status" className="fixed inset-0 z-[110] bg-black/80 text-white flex items-center justify-center">Finishing speech capture and closing the call...</div>}
+
+      {(closingForSummary || recorder.isFinalizing) && <div role="status" className="fixed inset-0 z-[110] bg-black/80 text-white flex items-center justify-center">Finalizing recording and finishing meeting audio...</div>}
       {(aiNoticeVisible && aiStatus.state !== 'off' || aiStatus.state !== 'off' && aiStatus.needsResponse || aiError || aiStatusError || aiCaptureFault || transcript.error) &&
       <div className="fixed bottom-24 left-4 z-30 max-w-sm rounded-lg bg-zinc-900/95 p-3 text-xs text-white shadow-lg" role="status">
         {aiNoticeVisible && aiStatus.state !== 'off' &&
@@ -1276,4 +1466,14 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
       )}
     </div>
   );
+  };
+  return <>{renderScreen()}<RecordingsModal
+    isOpen={isRecordingsOpen && !recorder.isFinalizing && !recordingLocked}
+    meetingCode={meetingCode} preview={recordingLocked ? null : recorder.preview}
+    allowUpload={Boolean(recorder.preview?.canonicalBlob)}
+    companyUploads={recordingLocked ? [] : companyUpload.statuses} onCompanyRetry={companyUpload.retry}
+    savedFolderId={recordingFolderId}
+    onCompanyUpload={recorder.preview?.canonicalBlob && user?.id ? uploadCompanyRecording : undefined}
+    onClose={() => setIsRecordingsOpen(false)} onDiscardPreview={recorder.clearPreview}
+  /></>;
 };

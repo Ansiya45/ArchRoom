@@ -15,6 +15,7 @@ import ScheduledMeetingsView from './components/ScheduledMeetingsView';
 import FavoritesView, { MeetingItem } from './components/FavoritesView';
 import SettingsView from './components/SettingsView';
 import DriveIntegrationPanel from './components/DriveIntegrationPanel';
+import StudentGoogleIdentity from './components/StudentGoogleIdentity';
 const MeetingHistoryView = React.lazy(() => import('./components/MeetingHistoryView'));
 import SettingsModal from './components/SettingsModal';
 import AuthModal from './components/AuthModal';
@@ -348,7 +349,7 @@ export default function App() {
             {activeTab === 'history' && user && <React.Suspense fallback={<p role="status">Loading meeting history…</p>}><MeetingHistoryView key={user.email} /></React.Suspense>}
             {/* Tab 5: Settings View */}
             {activeTab === 'settings' && (
-              <><SettingsView onShowToast={(msg) => showToast(msg)} /><DriveIntegrationPanel /></>
+              <><SettingsView onShowToast={(msg) => showToast(msg)} /><DriveIntegrationPanel /><StudentGoogleIdentity /></>
             )}
             </>
           </div>

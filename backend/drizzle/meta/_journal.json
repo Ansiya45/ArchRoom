@@ -113,6 +113,118 @@
       "when": 1793275200000,
       "tag": "0015_recording_folder_creators",
       "breakpoints": true
+    },
+    {
+      "idx": 16,
+      "version": "7",
+      "when": 1793361600000,
+      "tag": "0016_drive_credential_generation",
+      "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "7",
+      "when": 1793448000000,
+      "tag": "0017_company_recording_upload_jobs",
+      "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1793534400000,
+      "tag": "0018_local_recording_staging_retention",
+      "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1793620800000,
+      "tag": "0019_local_recording_ingestion_verification",
+      "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "7",
+      "when": 1793707200000,
+      "tag": "0020_company_recording_transfer_intent",
+      "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "7",
+      "when": 1793793600000,
+      "tag": "0021_company_recording_transfer_coordination",
+      "breakpoints": true
+    },
+    {
+      "idx": 22,
+      "version": "7",
+      "when": 1793880000000,
+      "tag": "0022_company_recording_drive_verifications",
+      "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "7",
+      "when": 1793966400000,
+      "tag": "0023_batch_student_enrollments",
+      "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1794052800000,
+      "tag": "0024_batch_registration",
+      "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "7",
+      "when": 1794139200000,
+      "tag": "0025_batch_enrollment_account_bindings",
+      "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "7",
+      "when": 1794225600000,
+      "tag": "0026_student_google_oidc",
+      "breakpoints": true
+    },
+    {
+      "idx": 27,
+      "version": "7",
+      "when": 1794312000000,
+      "tag": "0027_private_recording_acl_coordination",
+      "breakpoints": true
+    },
+    {
+      "idx": 28,
+      "version": "7",
+      "when": 1794398400000,
+      "tag": "0028_recording_sharing_modes",
+      "breakpoints": true
+    },
+    {
+      "idx": 29,
+      "version": "7",
+      "when": 1794484800000,
+      "tag": "0029_recording_sharing_policy_versions",
+      "breakpoints": true
+    },
+    {
+      "idx": 30,
+      "version": "7",
+      "when": 1794571200000,
+      "tag": "0031_recording_filename_metadata",
+      "breakpoints": true
+    },
+    {
+      "idx": 31,
+      "version": "7",
+      "when": 1794657600000,
+      "tag": "0032_secure_backend_recording_student_tables",
+      "breakpoints": true
     }
   ]
 }

@@ -16,7 +16,8 @@ export class BackendRecordingDriveClient implements RecordingDriveFolderClient {
     if (!stored) throw new Error('Google Drive is not connected.');
     const result = await this.transport.refresh(this.config, stored.refreshToken);
     if (!result.access_token) throw new Error('Google Drive authorization expired. Reconnect the integration.');
-    if (result.refresh_token) await this.credentials.replace(this.config.administratorId, stored.googleAccountEmail, result.refresh_token);
+    if (result.refresh_token) await this.credentials.replace(this.config.administratorId, stored.googleAccountEmail, result.refresh_token, stored.generation, stored.ciphertext);
+    else await this.credentials.assertGeneration(stored.generation);
     return result.access_token;
   }
 

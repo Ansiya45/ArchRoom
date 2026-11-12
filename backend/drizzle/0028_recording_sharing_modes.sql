@@ -1,0 +1,10 @@
+ALTER TABLE company_recording_private_policies DROP CONSTRAINT IF EXISTS company_recording_private_policies_policy_mode_check;
+ALTER TABLE company_recording_private_policies ADD CONSTRAINT company_recording_private_policies_policy_mode_check CHECK (policy_mode IN ('private','restricted','anyone_with_link'));
+ALTER TABLE company_recording_private_policies ADD COLUMN IF NOT EXISTS host_confirmed boolean NOT NULL DEFAULT false;
+ALTER TABLE company_recording_private_policies ADD COLUMN IF NOT EXISTS public_permission_id text;
+ALTER TABLE company_recording_private_policies ADD COLUMN IF NOT EXISTS sharing_version integer NOT NULL DEFAULT 1 CHECK (sharing_version > 0);
+ALTER TABLE company_recording_private_acl_operations ADD COLUMN IF NOT EXISTS operation_kind text NOT NULL DEFAULT 'direct_reader' CHECK (operation_kind IN ('direct_reader','anyone_reader'));
+ALTER TABLE company_recording_private_acl_operations ALTER COLUMN user_id DROP NOT NULL;
+ALTER TABLE company_recording_private_acl_operations ALTER COLUMN google_subject DROP NOT NULL;
+ALTER TABLE company_recording_private_acl_operations ALTER COLUMN google_email DROP NOT NULL;
+CREATE INDEX IF NOT EXISTS company_recording_private_policies_mode_idx ON company_recording_private_policies(policy_mode, status);

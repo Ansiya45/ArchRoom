@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { trpc } from '../lib/trpc';
 import { formatMeetingTime } from '../lib/meetingSchedule';
 import { Video, ChevronDown, Copy, CalendarDays } from 'lucide-react';
+import LocalRecordingsPanel from './LocalRecordingsPanel';
 
 type Detail = Awaited<ReturnType<typeof trpc.meetings.historyDetail.query>>;
 type Row = Awaited<ReturnType<typeof trpc.meetings.history.query>>[number];
@@ -51,15 +52,22 @@ export default function MeetingHistoryView() {
           <p className="my-2 text-xs text-slate-500">Automatically generated; may be incomplete or inaccurate. Review before use.</p>
           <div tabIndex={0} aria-label={kind === 'transcript' ? 'Saved transcript' : 'Saved summary'} className="max-h-96 overflow-auto whitespace-pre-wrap break-words text-sm select-text">{displayTexts.map(item => item.content).join('\n\n')}</div>
           <button className="mt-3 rounded-[8px] border border-slate-200 px-3 py-2 text-sm text-blue-300" onClick={() => void copyText(displayTexts.map(item => item.content).join('\n\n'), kind === 'transcript' ? 'Transcript' : 'Summary')}>Copy {kind}</button>
+          {kind === 'transcript' && <button className="ml-2 mt-3 rounded-[8px] border border-slate-200 px-3 py-2 text-sm text-blue-300" onClick={() => {
+            const url = URL.createObjectURL(new Blob([displayTexts.map(item => item.content).join('\n\n')], { type: 'text/plain;charset=utf-8' }));
+            const link = document.createElement('a'); link.href = url; link.download = 'meeting-transcript.txt'; link.click();
+            window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+          }}>Download transcript</button>}
         </details>;
       })}
       {(items.some(item => item.kind === 'drive') || recordings.length > 0) && <section aria-label="Recording" className="space-y-3 rounded-[8px] border border-slate-200 p-3">
         <h3 className="font-semibold">Recording</h3>
         {items.filter(item => item.kind === 'drive').map(item => <div key={item.id} className="flex flex-wrap items-center justify-between gap-2 text-sm">
           <span className="break-all">{item.label || 'Saved recording'}</span>
+          <span className="text-xs text-slate-500">{item.independentlyVerified === true ? 'File independently verified at upload' : 'File verification unavailable (legacy or unverified link)'}</span>
           {/^https:\/\/drive\.google\.com\/file\/d\/[A-Za-z0-9_-]+\/view(?:\?[^#]*)?$/.test(item.content)
             ? <a className="inline-flex rounded-[8px] border border-slate-200 px-3 py-2 font-semibold text-blue-300" href={item.content} target="_blank" rel="noopener noreferrer">Open in Drive</a>
             : <p className="text-slate-500">No usable Google Drive link is available.</p>}
+          <button className="rounded-[8px] border border-slate-200 px-3 py-2 text-blue-300" onClick={() => void copyText(item.content, 'Recording link')}>Copy Link</button>
         </div>)}
         {items.some(item => item.kind === 'drive') && <p className="text-xs text-slate-500">Drive permissions still apply. A saved link does not guarantee that the file is available.</p>}
         {recordings.map(recording => <div key={recording.id} className="break-words text-sm">
@@ -99,6 +107,7 @@ export default function MeetingHistoryView() {
   return <section className="mx-auto w-full max-w-6xl space-y-5 px-4 py-8 text-slate-900 [&_button:focus-visible]:outline-2 [&_button:focus-visible]:outline-offset-2 [&_button:focus-visible]:outline-blue-400 [&_summary:focus-visible]:outline-2 [&_summary:focus-visible]:outline-blue-400 [&_a:focus-visible]:outline-2 [&_a:focus-visible]:outline-blue-400">
     <h1 className="text-2xl font-bold">Meeting History</h1>
     <p className="text-sm text-slate-500">Meetings you created, with saved session details. Times below use your device's timezone unless specified.</p>
+    <LocalRecordingsPanel />
     {!selected && loading && <p role="status">Loading meeting history...</p>}
     {!selected && error && <div role="alert">{error} <button className="rounded-[8px] underline" onClick={() => setRetry(value => value + 1)}>Retry</button></div>}
     {!selected && !loading && !error && !rows.length && <p>No meetings on this page.</p>}
