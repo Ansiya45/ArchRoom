@@ -4,6 +4,7 @@ import { db } from '../db/index.js';
 import { meetings, meetingOccurrences } from '../db/schema.js';
 import { localDateTime, resolveMeetingSchedule, type MeetingSchedule } from './meeting-schedule.service.js';
 import { validateRecurrence, type RecurrenceRule } from './recurrence.service.js';
+import { normalizeMeetingCode } from './meeting-code.js';
 export type RecurrenceSegment = { revision: number; scheduledAt: string; timeZone: string; rule: RecurrenceRule; untilExclusive: string };
 export type RecurrenceChange = {
   meetingCode: string; expectedUpdatedAt: string; occurrenceId?: string;
@@ -17,7 +18,7 @@ const conflict = (message: string): never => { throw new TRPCError({ code: 'CONF
 export class RecurrenceSeriesService {
   async change(input: RecurrenceChange, hostUserId: string, now = new Date()) {
     return db.transaction(async tx => {
-      const [meeting] = await tx.select().from(meetings).where(eq(meetings.meetingCode, input.meetingCode.trim().toUpperCase())).for('update');
+      const [meeting] = await tx.select().from(meetings).where(eq(meetings.meetingCode, normalizeMeetingCode(input.meetingCode))).for('update');
       if (!meeting || meeting.hostUserId !== hostUserId) throw new TRPCError({ code: 'FORBIDDEN', message: 'Only the host can change this series.' });
       if (meeting.scheduleType !== 'recurring' || !meeting.scheduledAt || !meeting.timeZone || !meeting.recurrenceRule) throw new TRPCError({ code: 'BAD_REQUEST', message: 'A recurring meeting is required.' });
       if (meeting.recurrenceCancelledAt) {

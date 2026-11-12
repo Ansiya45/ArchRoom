@@ -5,6 +5,7 @@ import React, { useRef, useState } from 'react';
 import { X, Video, KeyRound, Sparkles, ArrowRight } from 'lucide-react';
 import { getStoredUser } from '../lib/auth';
 import { trpc } from '../lib/trpc';
+import { extractMeetingCode } from '../lib/meetingCode';
 
 interface JoinModalProps {
   isOpen: boolean;
@@ -28,18 +29,19 @@ export const JoinModal: React.FC<JoinModalProps> = ({
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!meetingCode.trim() || joiningRef.current) return;
+    const code = extractMeetingCode(meetingCode);
+    if (!code || joiningRef.current) return;
     joiningRef.current = true;
     setIsJoining(true);
 
     try {
-      let { meeting: room } = await trpc.meetings.getByCode.query({ meetingCode: meetingCode.trim() });
+      let { meeting: room } = await trpc.meetings.getByCode.query({ meetingCode: code });
       if ((room.scheduleType === 'reusable' || room.scheduleType === 'recurring') && !room.activeOccurrenceId && room.hostUserId === getStoredUser()?.id) {
         ({ meeting: room } = await startHostedMeeting(room));
       }
       const payload = await trpc.meetings.join.mutate({
         occurrenceId: room.activeOccurrenceId ?? undefined,
-        meetingCode: meetingCode.trim(),
+        meetingCode: code,
         joinRequestId: joinRequestIdRef.current,
       });
 
@@ -89,7 +91,7 @@ export const JoinModal: React.FC<JoinModalProps> = ({
               <input
                 type="text"
                 required
-                placeholder="e.g. YLM-982-310"
+                placeholder="e.g. YLM-ABC123 or a meeting link"
                 value={meetingCode}
                 onChange={(e) => setMeetingCode(e.target.value)}
                 className="w-full pl-10 pr-4 py-3 rounded-xl border border-slate-200 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 text-slate-900 text-sm font-medium focus:outline-none transition-all"

@@ -5,6 +5,7 @@ import { db } from '../db/index.js';
 import { meetingAiConsents, meetingAiRequests, meetingParticipants, meetings } from '../db/schema.js';
 import { assertCurrentOccurrence, participantScope } from './meeting-occurrence.service.js';
 import { canManageMeetingSession } from './meeting-host-access.js';
+import { normalizeMeetingCode } from './meeting-code.js';
 import { env } from '../env.js';
 
 type Scope = { meetingCode: string; occurrenceId?: string };
@@ -20,7 +21,7 @@ export class MeetingAiPermissionService {
     return { participants, pending, declined, active: participants.length > 0 && pending === 0 && declined === 0, agreedParticipantIds: participants.filter(row => byId.get(row.id) === true).map(row => row.id) };
   }
   private async scope(input: Scope, identity: ParticipantIdentity) {
-    const meeting = await db.query.meetings.findFirst({ where: eq(meetings.meetingCode, input.meetingCode.trim().toUpperCase()) });
+    const meeting = await db.query.meetings.findFirst({ where: eq(meetings.meetingCode, normalizeMeetingCode(input.meetingCode)) });
     if (!meeting || meeting.status !== 'live') throw new TRPCError({ code: 'FORBIDDEN', message: 'The meeting is not active.' });
     assertCurrentOccurrence(meeting, input.occurrenceId);
     const participant = await db.query.meetingParticipants.findFirst({ where: and(

@@ -9,6 +9,7 @@ import { canManageMeetingSession } from './meeting-host-access.js';
 import { resolveMeetingSchedule, type MeetingSchedule } from './meeting-schedule.service.js';
 
 import { validateRecurrence, type RecurrenceRule } from './recurrence.service.js';
+import { normalizeMeetingCode } from './meeting-code.js';
 
 // Every connected client polls the roster endpoint; hitting LiveKit's
 // management API on each poll blows through its 1,000 req/min project cap at
@@ -159,7 +160,7 @@ export class MeetingService {
   }
 
   async getByCode(meetingCode: string) {
-    const normalizedCode = meetingCode.trim().toUpperCase();
+    const normalizedCode = normalizeMeetingCode(meetingCode);
     const result = await db.query.meetings.findFirst({
       where: eq(meetings.meetingCode, normalizedCode),
     });
@@ -172,7 +173,7 @@ export class MeetingService {
   }
 
   async joinMeeting(meetingCode: string, identity: JoinMeetingIdentity) {
-    const normalizedCode = meetingCode.trim().toUpperCase();
+    const normalizedCode = normalizeMeetingCode(meetingCode);
     const meeting = await db.query.meetings.findFirst({
       where: eq(meetings.meetingCode, normalizedCode),
     });
@@ -390,7 +391,7 @@ export class MeetingService {
   }
 
   async startMeeting(meetingCode: string, userId: string, startRequestId?: string, expectedUpdatedAt?: string, occurrenceId?: string) {
-    const normalizedCode = meetingCode.trim().toUpperCase();
+    const normalizedCode = normalizeMeetingCode(meetingCode);
     const meeting = await db.query.meetings.findFirst({
       where: eq(meetings.meetingCode, normalizedCode),
     });
@@ -424,7 +425,7 @@ export class MeetingService {
   }
 
   async updateGuestName(meetingCode: string, participantId: string, guestName: string) {
-    const normalizedCode = meetingCode.trim().toUpperCase();
+    const normalizedCode = normalizeMeetingCode(meetingCode);
     const meeting = await db.query.meetings.findFirst({
       where: eq(meetings.meetingCode, normalizedCode),
     });
@@ -648,7 +649,7 @@ export class MeetingService {
 
   private async requireMeeting(meetingCode: string) {
     const meeting = await db.query.meetings.findFirst({
-      where: eq(meetings.meetingCode, meetingCode.trim().toUpperCase()),
+      where: eq(meetings.meetingCode, normalizeMeetingCode(meetingCode)),
     });
 
     if (!meeting) {
@@ -710,7 +711,7 @@ export class MeetingService {
   }
 
   private async validateAvailableMeetingCode(meetingCode: string) {
-    const code = meetingCode.trim().toUpperCase();
+    const code = normalizeMeetingCode(meetingCode);
     const existing = await db.query.meetings.findFirst({
       where: eq(meetings.meetingCode, code),
     });

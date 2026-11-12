@@ -4,6 +4,7 @@ import { createClient } from '@supabase/supabase-js';
 import { db } from '../db/index.js';
 import { meetingParticipants, meetings } from '../db/schema.js';
 import { assertCurrentOccurrence, participantScope, attachmentPrefix } from './meeting-occurrence.service.js';
+import { normalizeMeetingCode } from './meeting-code.js';
 import { env } from '../env.js';
 
 export class ChatAttachmentService {
@@ -40,7 +41,7 @@ export class ChatAttachmentService {
 
   private async requireParticipant(meetingCode: string, identity: { userId?: string; participantId?: string; occurrenceId?: string }) {
     const meeting = await db.query.meetings.findFirst({
-      where: eq(meetings.meetingCode, meetingCode.trim().toUpperCase()),
+      where: eq(meetings.meetingCode, normalizeMeetingCode(meetingCode)),
     });
     if (!meeting || meeting.status === 'ended') throw new TRPCError({ code: 'NOT_FOUND', message: 'Active meeting not found' });
     assertCurrentOccurrence(meeting, identity.occurrenceId);

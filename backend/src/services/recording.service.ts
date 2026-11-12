@@ -5,6 +5,7 @@ import { db } from '../db/index.js';
 import { meetings, recordings, meetingOccurrences, meetingParticipants } from '../db/schema.js';
 import { env } from '../env.js';
 import { canManageMeetingSession } from './meeting-host-access.js';
+import { normalizeMeetingCode } from './meeting-code.js';
 
 export type CreateRecordingInput = {
   meetingCode: string;
@@ -62,7 +63,7 @@ export class RecordingService {
 
   private async requireHostByCode(meetingCode: string, userId: string, occurrenceId?: string) {
     const meeting = await db.query.meetings.findFirst({
-      where: eq(meetings.meetingCode, meetingCode.trim().toUpperCase()),
+      where: eq(meetings.meetingCode, normalizeMeetingCode(meetingCode)),
     });
     if (!meeting) throw new TRPCError({ code: 'NOT_FOUND', message: 'Meeting not found' });
     if (!await canManageMeetingSession(meeting, userId, occurrenceId, false)) {
@@ -146,7 +147,7 @@ export class RecordingService {
   }
 
   async getForMeeting(meetingCode: string, userId: string) {
-    const meeting = await db.query.meetings.findFirst({ where: eq(meetings.meetingCode, meetingCode.trim().toUpperCase()) });
+    const meeting = await db.query.meetings.findFirst({ where: eq(meetings.meetingCode, normalizeMeetingCode(meetingCode)) });
     if (!meeting) throw new TRPCError({ code: 'NOT_FOUND', message: 'Meeting not found' });
     const cohostSessions = meeting.hostUserId === userId ? null : await db.select({ occurrenceId: meetingParticipants.occurrenceId })
       .from(meetingParticipants).where(and(eq(meetingParticipants.meetingId, meeting.id),

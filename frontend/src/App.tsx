@@ -22,6 +22,7 @@ import { clearStoredSession, getSessionIdentity, getStoredUser, subscribeToSessi
 import { trpc } from './lib/trpc';
 import { formatMeetingTime, startMeetingOnce, type MeetingRecord } from './lib/meetingSchedule';
 import { storeMeetingSession } from './lib/meetingSession';
+import { extractMeetingCode } from './lib/meetingCode';
 
 export default function App() {
   const navigate = useNavigate();
@@ -55,7 +56,8 @@ export default function App() {
 
   useEffect(() => {
     if (!invitedMeeting) return;
-    navigate(`/meet/${encodeURIComponent(invitedMeeting)}`, { replace: true });
+    const code = extractMeetingCode(invitedMeeting) || invitedMeeting;
+    navigate(`/meet/${encodeURIComponent(code)}`, { replace: true });
   }, [invitedMeeting, navigate]);
 
   // Scheduled & Favorite Meetings list
