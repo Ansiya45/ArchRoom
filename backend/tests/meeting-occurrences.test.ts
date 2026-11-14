@@ -35,7 +35,7 @@ function matches(row: any, condition: any) {
 async function fixture(run: (f: any) => Promise<void>) {
   const original = { transaction: db.transaction, update: db.update, insert: db.insert, occurrence: db.query.meetingOccurrences.findFirst,
     meeting: db.query.meetings.findFirst, participant: db.query.meetingParticipants.findFirst,
-    user: db.query.users.findFirst };
+    user: db.query.users.findFirst, userPermissions: db.query.userPermissions.findMany };
   const rows = new Map<any, any[]>([[meetings, []], [meetingOccurrences, []], [meetingParticipants, []], [meetingHistoryItems, []], [recordings, []]]);
   const find = (table: any) => async ({ where }: any) => rows.get(table)!.find(row => matches(row, where));
   const update = (table: any) => ({ set: (patch: any) => ({ where: (where: any) => {
@@ -63,6 +63,7 @@ async function fixture(run: (f: any) => Promise<void>) {
   db.query.meetings.findFirst = find(meetings) as any;
   db.query.meetingParticipants.findFirst = find(meetingParticipants) as any;
   db.query.users.findFirst = (async () => ({ fullName: 'Test member' })) as any;
+  db.query.userPermissions.findMany = (async () => []) as any;
   const service = new MeetingService();
   try {
     const { meeting } = await service.createMeeting({ title: 'Team Room', reusable: true, meetingCode: 'YLM-ABC234' }, host);
@@ -71,6 +72,7 @@ async function fixture(run: (f: any) => Promise<void>) {
   } finally {
     db.transaction = original.transaction; db.update = original.update; db.insert = original.insert; db.query.meetingOccurrences.findFirst = original.occurrence;
     db.query.meetings.findFirst = original.meeting; db.query.meetingParticipants.findFirst = original.participant; db.query.users.findFirst = original.user;
+    db.query.userPermissions.findMany = original.userPermissions;
   }
 }
 

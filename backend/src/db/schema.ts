@@ -24,6 +24,8 @@ export const participantRoleEnum = pgEnum('participant_role', ['host', 'particip
 export const participantAdmissionEnum = pgEnum('participant_admission', ['pending', 'admitted', 'denied']);
 export const recordingStatusEnum = pgEnum('recording_status', ['created', 'completed', 'failed']);
 export const authCodePurposeEnum = pgEnum('auth_code_purpose', ['verify_email', 'reset_password']);
+export const userRoleEnum = pgEnum('user_role', ['superadmin', 'admin', 'user']);
+export const featureLevelEnum = pgEnum('feature_level', ['none', 'read', 'write', 'full']);
 
 export const users = pgTable(
   'users',
@@ -32,6 +34,9 @@ export const users = pgTable(
     email: varchar('email', { length: 255 }).notNull().unique(),
     passwordHash: text('password_hash').notNull(),
     fullName: varchar('full_name', { length: 120 }).notNull(),
+    role: userRoleEnum('role').notNull().default('user'),
+    disabledAt: timestamp('disabled_at', { withTimezone: true }),
+    invitedBy: uuid('invited_by').references((): AnyPgColumn => users.id),
     emailVerifiedAt: timestamp('email_verified_at', { withTimezone: true }),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
@@ -39,6 +44,33 @@ export const users = pgTable(
   (table) => [
     index('users_email_idx').on(table.email),
   ]
+);
+
+export const userPermissions = pgTable(
+  'user_permissions',
+  {
+    userId: uuid('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+    feature: varchar('feature', { length: 40 }).notNull(),
+    level: featureLevelEnum('level').notNull().default('none'),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.userId, table.feature] })]
+);
+
+export const userInvitations = pgTable(
+  'user_invitations',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    email: varchar('email', { length: 255 }).notNull(),
+    role: userRoleEnum('role').notNull().default('user'),
+    tokenHash: varchar('token_hash', { length: 64 }).notNull().unique(),
+    invitedBy: uuid('invited_by').notNull().references(() => users.id),
+    permissions: jsonb('permissions').$type<Record<string, string>>(),
+    expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+    acceptedAt: timestamp('accepted_at', { withTimezone: true }),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [index('user_invitations_email_idx').on(table.email)]
 );
 
 export const authSessions = pgTable('auth_sessions', {

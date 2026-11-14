@@ -2,6 +2,7 @@ export interface SessionUser {
   id: string;
   email: string;
   fullName: string;
+  role?: string;
 }
 
 const TOKEN_KEY = 'ylaam_meet_token';

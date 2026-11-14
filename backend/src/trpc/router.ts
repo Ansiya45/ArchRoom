@@ -7,9 +7,11 @@ import { recordingsRouter } from '../routers/recordings.js';
 import { chatAttachmentsRouter } from '../routers/chat-attachments.js';
 
 import { meetingNotificationsRouter } from '../routers/meeting-notifications.js';
+import { usersRouter } from '../routers/users.js';
 
 export const appRouter = t.router({
   auth: authRouter,
+  users: usersRouter,
   meetings: meetingsRouter,
   meetingNotifications: meetingNotificationsRouter,
   recordings: recordingsRouter,

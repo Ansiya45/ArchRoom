@@ -6,14 +6,15 @@ import { ArrowRight, Eye, EyeOff, Lock, LogIn, Mail, User, UserPlus, X } from 'l
 import { storeSession, type SessionUser } from '../lib/auth';
 import { trpc } from '../lib/trpc';
 
-interface AuthModalProps { isOpen: boolean; mode: 'login' | 'signup'; onClose: () => void; onSuccess: (user: SessionUser) => void }
+interface AuthModalProps { isOpen: boolean; mode: 'login' | 'signup'; inviteToken?: string | null; onClose: () => void; onSuccess: (user: SessionUser) => void }
 type View = 'login' | 'signup' | 'verify' | 'forgot' | 'reset';
 const passwordRegex = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d).{8,}$/;
 
-export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, mode, onClose, onSuccess }) => {
+export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, mode, inviteToken, onClose, onSuccess }) => {
   const [view, setView] = useState<View>(mode);
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
+  const [invitedEmail, setInvitedEmail] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [code, setCode] = useState('');
@@ -24,8 +25,23 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, mode, onClose, onS
 
   useEffect(() => {
     setView(mode);
-    if (!isOpen) { setError(''); setMessage(''); setCode(''); setPassword(''); setConfirmPassword(''); }
+    if (!isOpen) { setError(''); setMessage(''); setCode(''); setPassword(''); setConfirmPassword(''); setInvitedEmail(''); }
   }, [mode, isOpen]);
+
+  useEffect(() => {
+    if (!isOpen || !inviteToken) return;
+    setView('signup');
+    trpc.users.verifyInvitation.query({ token: inviteToken })
+      .then((invitation) => {
+        setEmail(invitation.email);
+        setInvitedEmail(invitation.email);
+        setMessage(`You have been invited to this workspace as a ${invitation.role === 'admin' ? 'admin' : 'user'}. Create your account to continue.`);
+      })
+      .catch((caught) => {
+        setInvitedEmail('');
+        setError(caught instanceof Error ? caught.message : 'This invitation link is invalid or has expired.');
+      });
+  }, [isOpen, inviteToken]);
 
   if (!isOpen) return null;
   const needsNewPassword = view === 'signup' || view === 'reset';
@@ -39,7 +55,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, mode, onClose, onS
     setSubmitting(true);
     try {
       if (view === 'signup') {
-        await trpc.auth.signup.mutate({ fullName: name, email, password });
+        await trpc.auth.signup.mutate({ fullName: name, email, password, inviteToken: inviteToken ?? undefined });
         setPassword(''); setConfirmPassword(''); setView('verify'); setMessage('We sent a 6-digit verification code to your email.');
       } else if (view === 'verify') {
         const result = await trpc.auth.verifyEmail.mutate({ email, code });
@@ -72,8 +88,8 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, mode, onClose, onS
     finally { setSubmitting(false); }
   };
 
-  const title = { login: 'Welcome back', signup: 'Create your account', verify: 'Verify your email', forgot: 'Forgot your password?', reset: 'Choose a new password' }[view];
-  const description = { login: 'Sign in to access your meetings.', signup: 'We will verify your email before activating your account.', verify: `Enter the code sent to ${email}.`, forgot: 'Enter your account email to receive a reset code.', reset: `Enter the reset code sent to ${email}.` }[view];
+  const title = { login: 'Welcome back', signup: invitedEmail ? 'Accept your invitation' : 'Create your account', verify: 'Verify your email', forgot: 'Forgot your password?', reset: 'Choose a new password' }[view];
+  const description = { login: 'Sign in to access your meetings.', signup: invitedEmail ? 'Complete your invited account below.' : 'We will verify your email before activating your account.', verify: `Enter the code sent to ${email}.`, forgot: 'Enter your account email to receive a reset code.', reset: `Enter the reset code sent to ${email}.` }[view];
 
   return <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 p-4 backdrop-blur-sm">
     <div className="relative w-full max-w-md rounded-3xl border border-slate-100 bg-white p-6 shadow-2xl sm:p-7">
@@ -82,7 +98,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, mode, onClose, onS
       <h3 className="mb-1 text-xl font-bold text-slate-900">{title}</h3><p className="mb-6 text-sm text-slate-500">{description}</p>
       <form onSubmit={submit} className="space-y-4">
         {view === 'signup' && <Field label="Full name" icon={<User />}><input required minLength={2} value={name} onChange={e => setName(e.target.value)} placeholder="Jordan Miller" className="input" /></Field>}
-        {(view === 'login' || view === 'signup' || view === 'forgot') && <Field label="Email" icon={<Mail />}><input required type="email" value={email} onChange={e => setEmail(e.target.value)} placeholder="name@company.com" className="input" /></Field>}
+        {(view === 'login' || view === 'signup' || view === 'forgot') && <Field label="Email" icon={<Mail />}><input required type="email" value={email} readOnly={!!invitedEmail && view === 'signup'} onChange={e => setEmail(e.target.value)} placeholder="name@company.com" className={`input ${invitedEmail && view === 'signup' ? 'bg-slate-100 text-slate-500' : ''}`} /></Field>}
         {(view === 'verify' || view === 'reset') && <Field label="6-digit code" icon={<Mail />}><input required inputMode="numeric" pattern="[0-9]{6}" maxLength={6} value={code} onChange={e => setCode(e.target.value.replace(/\D/g, ''))} placeholder="123456" className="input tracking-[0.35em]" /></Field>}
         {(view === 'login' || needsNewPassword) && <Field label={view === 'reset' ? 'New password' : 'Password'} icon={<Lock />}><input required type={showPassword ? 'text' : 'password'} value={password} onChange={e => setPassword(e.target.value)} autoComplete={view === 'login' ? 'current-password' : 'new-password'} className="input pr-12" /><button type="button" onClick={() => setShowPassword(value => !value)} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400">{showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}</button></Field>}
         {needsNewPassword && <Field label="Confirm password" icon={<Lock />}><input required type="password" value={confirmPassword} onChange={e => setConfirmPassword(e.target.value)} autoComplete="new-password" className="input" /></Field>}

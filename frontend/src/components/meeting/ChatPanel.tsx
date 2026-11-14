@@ -19,9 +19,10 @@ interface ChatPanelProps {
   onClose: () => void;
   onUploadFile: (file: File) => Promise<NonNullable<ChatMessage['fileAttachment']>>;
   onDownloadFile: (attachment: NonNullable<ChatMessage['fileAttachment']>) => void;
+  readOnly?: boolean;
 }
 
-export const ChatPanel: React.FC<ChatPanelProps> = ({ messages, onSendMessage, onClose, onUploadFile, onDownloadFile }) => {
+export const ChatPanel: React.FC<ChatPanelProps> = ({ messages, onSendMessage, onClose, onUploadFile, onDownloadFile, readOnly = false }) => {
   const [text, setText] = useState('');
   const [selectedFile, setSelectedFile] = useState<ChatMessage['fileAttachment'] | null>(null);
   const chatEndRef = useRef<HTMLDivElement>(null);
@@ -163,6 +164,11 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ messages, onSendMessage, o
       {uploadError && <p className="px-4 py-2 text-xs font-medium text-rose-600 bg-rose-50">{uploadError}</p>}
 
       {/* Message Input Form */}
+      {readOnly ? (
+        <div className="p-3 sm:p-4 border-t border-blue-100 bg-white/60 flex-shrink-0">
+          <p className="text-center text-xs text-slate-400">You have read-only access to chat.</p>
+        </div>
+      ) : (
       <form onSubmit={handleSend} className="p-3 sm:p-4 border-t border-blue-100 bg-white/60 backdrop-blur-md flex-shrink-0">
         <div className="relative flex items-center">
           <input
@@ -199,6 +205,7 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ messages, onSendMessage, o
           </div>
         </div>
       </form>
+      )}
     </div>
   );
 };

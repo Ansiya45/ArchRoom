@@ -20,7 +20,8 @@ const base = () => ({ id: meetingId, meetingCode: code, hostUserId: hostId, titl
   scheduledAt: new Date('2026-09-20T18:00:00Z'), timeZone: schedule.timeZone,
   scheduleType: 'one_time', status: 'scheduled', createdAt: new Date(), updatedAt: new Date() });
 async function withStore(initial: any, run: (store: any, service: InstanceType<typeof MeetingService>) => Promise<void>) {
-  const original = { find: db.query.meetings.findFirst, transaction: db.transaction, update: db.update };
+  const original = { find: db.query.meetings.findFirst, transaction: db.transaction, update: db.update,
+    user: db.query.users.findFirst, userPermissions: db.query.userPermissions.findMany };
   const store = { meeting: initial, inserts: 0, participants: [] as any[], writes: 0, patch: null as any, condition: null as any, rejectUpdate: false };
   db.query.meetings.findFirst = (async () => store.meeting) as any;
   db.update = (() => ({ set: (patch: any) => ({ where: (condition: any) => ({ returning: async () => {
@@ -40,8 +41,11 @@ async function withStore(initial: any, run: (store: any, service: InstanceType<t
       if (table === meetings) store.meeting = { ...store.meeting, ...patch };
     } }) }),
   })) as any;
+  db.query.users.findFirst = (async () => ({ id: hostId, role: 'user' })) as any;
+  db.query.userPermissions.findMany = (async () => []) as any;
   try { await run(store, new MeetingService()); }
-  finally { db.query.meetings.findFirst = original.find; db.transaction = original.transaction; db.update = original.update; }
+  finally { db.query.meetings.findFirst = original.find; db.transaction = original.transaction; db.update = original.update;
+    db.query.users.findFirst = original.user; db.query.userPermissions.findMany = original.userPermissions; }
 }
 
 for (const [zone, local, utc] of [

@@ -41,6 +41,7 @@ interface WaitingRoomProps {
   isHost: boolean;
   enableAiTranscription: boolean;
   onEnableAiTranscriptionChange: (enabled: boolean) => void;
+  canTranscribe?: boolean;
 }
 
 interface BackgroundPreset {
@@ -101,6 +102,7 @@ export const WaitingRoom: React.FC<WaitingRoomProps> = ({
   isHost,
   enableAiTranscription,
   onEnableAiTranscriptionChange,
+  canTranscribe = true,
 }) => {
   const activeBg = deviceSettings.backgroundBlur || 'blur';
   const handleCameraUnavailable = useCallback(() => {
@@ -273,7 +275,7 @@ export const WaitingRoom: React.FC<WaitingRoomProps> = ({
             />
           </div>
 
-          {isHost && <div className="rounded-xl border border-violet-400/30 bg-[#1a1e3b] p-3 text-xs text-white">
+          {isHost && canTranscribe && <div className="rounded-xl border border-violet-400/30 bg-[#1a1e3b] p-3 text-xs text-white">
             <label className="flex items-start gap-2 font-semibold"><input type="checkbox" checked={enableAiTranscription} onChange={event => onEnableAiTranscriptionChange(event.target.checked)} className="mt-0.5 accent-violet-600" />Enable AI transcription for this meeting</label>
             <p className="mt-2 leading-relaxed">Off by default. If enabled, meeting audio is processed by YLAAM Meet and OpenAI. Participants will see when transcription is active. Transcript text and summaries are saved to your Meeting History.</p>
           </div>}

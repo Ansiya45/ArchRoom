@@ -26,6 +26,10 @@ interface LeftPanelProps {
   isHost?: boolean;
   onOpenRecordings?: () => void;
   unreadChatCount?: number;
+  canWhiteboard?: boolean;
+  canChat?: boolean;
+  canRecord?: boolean;
+  canViewRecordings?: boolean;
 }
 
 export const LeftPanel: React.FC<LeftPanelProps> = ({
@@ -42,13 +46,17 @@ export const LeftPanel: React.FC<LeftPanelProps> = ({
   isHost = false,
   onOpenRecordings,
   unreadChatCount = 0,
+  canWhiteboard = true,
+  canChat = true,
+  canRecord = true,
+  canViewRecordings = true,
 }) => {
   return (
     <aside className="w-16 sm:w-20 h-full flex flex-col justify-between items-center py-4 bg-white/70 backdrop-blur-xl border border-white/80 rounded-3xl shadow-xl z-30 shrink-0">
       {/* Top / Main Navigation Group */}
       <div className="flex flex-col items-center space-y-3 sm:space-y-4 w-full">
         {/* 1. Whiteboard */}
-        <div className="relative group flex items-center justify-center">
+        {canWhiteboard && <div className="relative group flex items-center justify-center">
           <button
             onClick={onToggleWhiteboard}
             className={`p-3 rounded-2xl transition-all duration-200 border ${
@@ -64,7 +72,7 @@ export const LeftPanel: React.FC<LeftPanelProps> = ({
               Whiteboard
             </div>
           </div>
-        </div>
+        </div>}
 
         {/* 2. Change Background */}
         <div className="relative group flex items-center justify-center">
@@ -86,7 +94,7 @@ export const LeftPanel: React.FC<LeftPanelProps> = ({
         </div>
 
         {/* 3. Chat */}
-        <div className="relative group flex items-center justify-center">
+        {canChat && <div className="relative group flex items-center justify-center">
           <button
             onClick={() => onToggleSidebarTab('chat')}
             className={`relative p-3 rounded-2xl transition-all duration-200 border ${
@@ -107,7 +115,7 @@ export const LeftPanel: React.FC<LeftPanelProps> = ({
               Chat
             </div>
           </div>
-        </div>
+        </div>}
 
         {/* 4. People */}
         <div className="relative group flex items-center justify-center">
@@ -134,7 +142,7 @@ export const LeftPanel: React.FC<LeftPanelProps> = ({
         </div>
 
         {/* 5. Record (host only) */}
-        {isHost && <div className="relative group flex items-center justify-center">
+        {isHost && canRecord && <div className="relative group flex items-center justify-center">
           <button
             onClick={onToggleRecording}
             className={`p-3 rounded-2xl transition-all duration-200 border ${
@@ -152,7 +160,7 @@ export const LeftPanel: React.FC<LeftPanelProps> = ({
           </div>
         </div>}
 
-        {isHost && <div className="relative group flex items-center justify-center">
+        {isHost && canViewRecordings && <div className="relative group flex items-center justify-center">
           <button
             onClick={onOpenRecordings}
             className="p-3 rounded-2xl bg-slate-100/80 hover:bg-slate-200/80 text-slate-600 border border-slate-200/60 hover:scale-105 transition-all duration-200"

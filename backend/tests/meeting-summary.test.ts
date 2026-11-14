@@ -19,7 +19,8 @@ async function fixture(run: (f: any) => Promise<void>) {
   MeetingHistoryService.prototype.save = async input => { history.push(input); };
   const originals = { meeting: db.query.meetings.findFirst, occurrence: db.query.meetingOccurrences.findFirst,
     participant: db.query.meetingParticipants.findFirst, aiRequest: db.query.meetingAiRequests.findFirst, select: db.selectDistinct, fetch: globalThis.fetch,
-    ai: env.OPENAI_API_KEY, resend: env.RESEND_API_KEY };
+    ai: env.OPENAI_API_KEY, resend: env.RESEND_API_KEY,
+    user: db.query.users.findFirst, userPermissions: db.query.userPermissions.findMany };
   const meeting = { id: randomUUID(), meetingCode: scope.meetingCode, title: 'Planning', hostUserId: host, scheduleType: 'recurring', status: 'live', activeOccurrenceId: occurrence };
   const session = { id: occurrence, meetingId: meeting.id, status: 'ended', cancelledAt: null };
   const recipients = [{ id: host, name: 'Host', email: 'host@example.invalid' }, { id: guest, name: 'Attendee', email: 'guest@example.invalid' }];
@@ -28,6 +29,8 @@ async function fixture(run: (f: any) => Promise<void>) {
   db.query.meetingOccurrences.findFirst = (async ({ where }: any) => { conditions.push(where); return session; }) as any;
   db.query.meetingParticipants.findFirst = (async ({ where }: any) => dialect.sqlToQuery(where).params.includes(outsider) ? null : ({ id: randomUUID() })) as any;
   db.query.meetingAiRequests.findFirst = (async () => null) as any;
+  db.query.users.findFirst = (async () => ({ id: host, role: 'user' })) as any;
+  db.query.userPermissions.findMany = (async () => []) as any;
   db.selectDistinct = (() => ({ from: () => ({ innerJoin: () => ({ where: async (where: any) => { conditions.push(where); return recipients; } }) }) })) as any;
   env.OPENAI_API_KEY = 'test-only'; env.RESEND_API_KEY = 'test-only';
   globalThis.fetch = async (url, options) => { requests.push({ url, ...options }); return Response.json({ status: 'completed', output: [{ type: 'message', content: [{ type: 'output_text', text: 'The team agreed to test on Friday.' }] }] }); };
@@ -36,6 +39,7 @@ async function fixture(run: (f: any) => Promise<void>) {
     MeetingHistoryService.prototype.save = originalSave;
     db.query.meetings.findFirst = originals.meeting; db.query.meetingOccurrences.findFirst = originals.occurrence;
     db.query.meetingParticipants.findFirst = originals.participant; db.query.meetingAiRequests.findFirst = originals.aiRequest; db.selectDistinct = originals.select;
+    db.query.users.findFirst = originals.user; db.query.userPermissions.findMany = originals.userPermissions;
     globalThis.fetch = originals.fetch; env.OPENAI_API_KEY = originals.ai; env.RESEND_API_KEY = originals.resend;
   }
 }

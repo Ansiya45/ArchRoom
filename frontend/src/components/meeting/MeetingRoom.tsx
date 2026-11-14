@@ -31,6 +31,7 @@ import { clearMeetingSession, getMeetingSession, storeMeetingSession, type Meeti
 import { useSharedWhiteboard } from '@/hooks/useSharedWhiteboard';
 import { clearStoredSession, getAuthToken, getStoredUser, type SessionUser } from '@/lib/auth';
 import { useWebRtcMeeting } from '@/hooks/useWebRtcMeeting';
+import { usePermissions } from '@/hooks/usePermissions';
 import { useMeetingRecorder } from '@/hooks/useMeetingRecorder';
 import type { RecorderAudioInput, RecorderTile } from '@/lib/compositeMeetingRecorder';
 import { RecordingsModal } from './RecordingsModal';
@@ -62,6 +63,13 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
     if (getMeetingSession(code)?.participantId === sessionRef.current?.participantId) clearMeetingSession(code);
     sessionRef.current = null;
   };
+  const { can } = usePermissions(user?.id);
+  const canRecord = can('recording', 'write');
+  const canViewRecordings = can('recording', 'read');
+  const canTranscribe = can('transcription', 'write');
+  const canChat = can('chat', 'read');
+  const canChatWrite = can('chat', 'write');
+  const canWhiteboard = can('whiteboard', 'read');
   const meeting = useMeeting(meetingCode);
   const call = useWebRtcMeeting(
     meetingCode,
@@ -170,7 +178,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
   }, [meeting.inMeeting, meetingCode, user?.id]);
 
   useEffect(() => {
-    if (!meeting.inMeeting || !isOwner || !user?.id || !enableAiOnJoin || !sessionRef.current?.participantId) return;
+    if (!meeting.inMeeting || !isOwner || !user?.id || !enableAiOnJoin || !canTranscribe || !sessionRef.current?.participantId) return;
     const key = `${meetingCode}:${sessionRef.current.occurrenceId || ''}:${sessionRef.current.participantId}`;
     if (aiStartedForSession.current === key) return;
     aiStartedForSession.current = key;
@@ -184,7 +192,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
         alert(error instanceof Error ? error.message : 'Could not enable AI transcription.');
       } finally { setAiBusy(false); }
     })();
-  }, [meeting.inMeeting, isOwner, user?.id, enableAiOnJoin, meetingCode]);
+  }, [meeting.inMeeting, isOwner, user?.id, enableAiOnJoin, canTranscribe, meetingCode]);
 
   useEffect(() => {
     let cancelled = false;
@@ -847,6 +855,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
         isHost={isOwner}
         enableAiTranscription={enableAiOnJoin}
         onEnableAiTranscriptionChange={setEnableAiOnJoin}
+        canTranscribe={canTranscribe}
       />
       </>
     );
@@ -996,6 +1005,10 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
           isHost={isHost}
           onOpenRecordings={() => setIsRecordingsOpen(true)}
           unreadChatCount={unreadChatCount}
+          canWhiteboard={canWhiteboard}
+          canChat={canChat}
+          canRecord={canRecord}
+          canViewRecordings={canViewRecordings}
         />
           </div>
         </div>
@@ -1120,13 +1133,14 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
         {/* RIGHT SIDEBAR (Chat / Participants / Activities) */}
         {meeting.activeSidebarTab && (
           <div className="w-full sm:w-80 md:w-96 h-full min-h-0 flex-shrink-0 z-30 transition-all duration-300 animate-slideLeft">
-            {meeting.activeSidebarTab === 'chat' && (
+            {meeting.activeSidebarTab === 'chat' && canChat && (
               <ChatPanel
                 messages={call.chatMessages}
                 onSendMessage={(text, fileAttachment) => call.sendChatMessage(text, fileAttachment)}
                 onUploadFile={uploadChatFile}
                 onDownloadFile={(attachment) => void downloadChatFile(attachment)}
                 onClose={() => meeting.toggleSidebarTab(null)}
+                readOnly={!canChatWrite}
               />
             )}
 

@@ -15,10 +15,12 @@ import ScheduledMeetingsView from './components/ScheduledMeetingsView';
 import FavoritesView, { MeetingItem } from './components/FavoritesView';
 import SettingsView from './components/SettingsView';
 const MeetingHistoryView = React.lazy(() => import('./components/MeetingHistoryView'));
+const UserManagementView = React.lazy(() => import('./components/UserManagementView'));
 import SettingsModal from './components/SettingsModal';
 import AuthModal from './components/AuthModal';
 import { CheckCircle2 } from 'lucide-react';
-import { clearStoredSession, getSessionIdentity, getStoredUser, subscribeToSessionRemoval } from './lib/auth';
+import { clearStoredSession, getSessionIdentity, getStoredUser, subscribeToSessionRemoval, type SessionUser } from './lib/auth';
+import { clearAccessCache, usePermissions } from './hooks/usePermissions';
 import { trpc } from './lib/trpc';
 import { formatMeetingTime, startMeetingOnce, type MeetingRecord } from './lib/meetingSchedule';
 import { storeMeetingSession } from './lib/meetingSession';
@@ -28,7 +30,9 @@ export default function App() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const invitedMeeting = searchParams.get('join');
+  const inviteParam = searchParams.get('invite');
   const [activeTab, setActiveTab] = useState<SidebarTab>('home');
+  const [inviteToken, setInviteToken] = useState<string | null>(null);
   const [isJoinOpen, setIsJoinOpen] = useState(false);
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [editingMeeting, setEditingMeeting] = useState<MeetingRecord | null>(null);
@@ -42,12 +46,31 @@ export default function App() {
   const [accountAttempt, setAccountAttempt] = useState(0);
 
   // User Auth state (null by default so Sign Up and Login are displayed)
-  const [user, setUser] = useState<{ name: string; email: string; isLoggedIn: boolean } | null>(() => {
+  const [user, setUser] = useState<{ id?: string; name: string; email: string; role?: string; isLoggedIn: boolean } | null>(() => {
     const stored = getStoredUser();
     return stored
-      ? { name: stored.fullName, email: stored.email, isLoggedIn: true }
+      ? { id: stored.id, name: stored.fullName, email: stored.email, role: stored.role, isLoggedIn: true }
       : null;
   });
+
+  const { access, can, refresh: refreshAccess } = usePermissions(user?.id);
+  const sessionUser: SessionUser | null = user ? { id: user.id ?? '', email: user.email, fullName: user.name, role: user.role } : null;
+
+  const isTabVisible = useCallback((tab: SidebarTab) => {
+    if (!user) return tab === 'home' || tab === 'settings';
+    switch (tab) {
+      case 'create': return can('meetings.instant', 'write') || can('meetings.scheduled', 'write');
+      case 'scheduled': return can('meetings.scheduled', 'read');
+      case 'favorite': return can('meetings.instant', 'read') || can('meetings.scheduled', 'read');
+      case 'history': return can('history', 'read');
+      case 'users': return can('user_management', 'read');
+      default: return true;
+    }
+  }, [user, can]);
+
+  useEffect(() => {
+    if (!isTabVisible(activeTab)) setActiveTab('home');
+  }, [activeTab, isTabVisible]);
 
   const [authModalState, setAuthModalState] = useState<{
     isOpen: boolean;
@@ -59,6 +82,13 @@ export default function App() {
     const code = extractMeetingCode(invitedMeeting) || invitedMeeting;
     navigate(`/meet/${encodeURIComponent(code)}`, { replace: true });
   }, [invitedMeeting, navigate]);
+
+  useEffect(() => {
+    if (!inviteParam || user) return;
+    setInviteToken(inviteParam);
+    setAuthModalState({ isOpen: true, mode: 'signup' });
+    navigate('/', { replace: true });
+  }, [inviteParam, user, navigate]);
 
   // Scheduled & Favorite Meetings list
   const [meetings, setMeetings] = useState<MeetingItem[]>([]);
@@ -84,6 +114,8 @@ export default function App() {
 
   const clearAccountUI = useCallback(() => {
     sessionGeneration.current += 1;
+    clearAccessCache();
+    setInviteToken(null);
     setUser(null);
     setMeetings([]);
     setCurrentMeeting(null);
@@ -142,8 +174,10 @@ export default function App() {
         if (!isCurrent()) return;
 
         setUser({
+          id: account.user.id,
           name: account.user.fullName,
           email: account.user.email,
+          role: (account.user as { role?: string }).role,
           isLoggedIn: true,
         });
 
@@ -184,6 +218,10 @@ export default function App() {
     if (!user) {
       setAuthModalState({ isOpen: true, mode: 'login' });
       showToast('Please sign in before creating a meeting.', 'info');
+      return;
+    }
+    if (!can('meetings.instant', 'write') && !can('meetings.scheduled', 'write')) {
+      showToast('You do not have permission to create meetings. Contact your administrator.', 'info');
       return;
     }
 
@@ -291,7 +329,7 @@ export default function App() {
 
       <div className="flex-1 flex min-h-0 w-full overflow-hidden">
         {/* Fixed Left Sidebar */}
-        <Sidebar activeTab={activeTab} setActiveTab={handleSidebarTabChange} />
+        <Sidebar activeTab={activeTab} setActiveTab={handleSidebarTabChange} isTabVisible={isTabVisible} />
 
         {/* Main Content Area */}
         <main className="flex-1 min-h-0 pb-16 sm:pb-0 sm:pl-[72px] flex flex-col justify-between h-[calc(100vh-56px)] overflow-hidden">
@@ -347,6 +385,11 @@ export default function App() {
             )}
 
             {activeTab === 'history' && user && <React.Suspense fallback={<p role="status">Loading meeting history…</p>}><MeetingHistoryView key={user.email} /></React.Suspense>}
+            {activeTab === 'users' && user && sessionUser && access && (
+              <React.Suspense fallback={<p role="status">Loading user management…</p>}>
+                <UserManagementView user={sessionUser} access={access} onAccessChanged={refreshAccess} />
+              </React.Suspense>
+            )}
             {/* Tab 5: Settings View */}
             {activeTab === 'settings' && (
               <SettingsView onShowToast={(msg) => showToast(msg)} />
@@ -412,11 +455,14 @@ export default function App() {
         key={sessionGeneration.current}
         isOpen={authModalState.isOpen}
         mode={authModalState.mode}
+        inviteToken={inviteToken}
         onClose={() => setAuthModalState({ isOpen: false, mode: 'login' })}
         onSuccess={(authenticatedUser) => {
           setUser({
+            id: authenticatedUser.id,
             name: authenticatedUser.fullName,
             email: authenticatedUser.email,
+            role: authenticatedUser.role,
             isLoggedIn: true,
           });
           showToast(`Signed in successfully as ${authenticatedUser.email}`);

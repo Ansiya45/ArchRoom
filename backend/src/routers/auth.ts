@@ -21,6 +21,7 @@ export const authRouter = t.router({
         email: z.string().email(),
         // Match AuthModal's signup policy, including its character semantics.
         password: newPassword,
+        inviteToken: z.string().max(200).optional(),
       })
     )
     .mutation(async ({ input }) => {

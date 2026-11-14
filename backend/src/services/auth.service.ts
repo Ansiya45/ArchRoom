@@ -2,14 +2,16 @@ import { createHash, randomInt, timingSafeEqual } from 'node:crypto';
 import { and, desc, eq, gt, sql } from 'drizzle-orm';
 import { TRPCError } from '@trpc/server';
 import { db } from '../db/index.js';
-import { authCodes, users } from '../db/schema.js';
+import { authCodes, userInvitations, userPermissions, users } from '../db/schema.js';
+import { env } from '../env.js';
 import { hashPassword, verifyPassword } from '../utils/password.js';
 import { signJwt } from '../utils/jwt.js';
 import { createPersistentSession } from './auth-session.service.js';
 import { passwordResetEmail, sendEmail, verificationEmail } from './email.service.js';
+import { findValidInvitation, sanitizePermissions } from './user-admin.service.js';
 
 type Purpose = 'verify_email' | 'reset_password';
-export type SignupInput = { fullName: string; email: string; password: string };
+export type SignupInput = { fullName: string; email: string; password: string; inviteToken?: string };
 export type LoginInput = { email: string; password: string };
 
 export class AuthService {
@@ -19,10 +21,21 @@ export class AuthService {
     const email = normalizeEmail(input.email);
     if (fullName.length < 2) throw new TRPCError({ code: 'BAD_REQUEST', message: 'Full name is required' });
     if (await this.findUser(email)) throw new TRPCError({ code: 'CONFLICT', message: 'Email already registered' });
+    const invitation = await this.requireInvitationIfGated(email, input.inviteToken);
+    const role = invitation?.role ?? await this.bootstrapRole(email);
     const passwordHash = await hashPassword(input.password);
     let created: typeof users.$inferSelect;
     try {
-      [created] = await db.insert(users).values({ fullName, email, passwordHash }).returning();
+      [created] = await db.insert(users).values({ fullName, email, passwordHash, role, invitedBy: invitation?.invitedBy ?? null }).returning();
+      if (invitation) {
+        const presets = sanitizePermissions(invitation.permissions);
+        await db.transaction(async (tx) => {
+          await tx.update(userInvitations).set({ acceptedAt: new Date() }).where(eq(userInvitations.id, invitation.id));
+          if (Object.keys(presets).length) {
+            await tx.insert(userPermissions).values(Object.entries(presets).map(([feature, level]) => ({ userId: created.id, feature, level })));
+          }
+        });
+      }
     } catch (error) {
       if (typeof error === 'object' && error !== null && 'code' in error && error.code === '23505') throw new TRPCError({ code: 'CONFLICT', message: 'Email already registered' });
       throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: 'Unable to create account', cause: error });
@@ -88,13 +101,48 @@ export class AuthService {
     if (!record) throw new TRPCError({ code: 'NOT_FOUND', message: 'Email ID is not registered.' });
     if (!(await verifyPassword(input.password, record.passwordHash))) throw new TRPCError({ code: 'UNAUTHORIZED', message: 'Wrong password. Please try again.' });
     if (!record.emailVerifiedAt) throw new TRPCError({ code: 'FORBIDDEN', message: 'Your registration is incomplete. Complete the email verification from sign up before logging in.' });
-    return this.session(record);
+    if (record.disabledAt) throw new TRPCError({ code: 'FORBIDDEN', message: 'Your account has been disabled. Contact your administrator.' });
+    return this.session(await this.ensureOwnerRole(record));
   }
 
   async me(userId: string) {
     const user = await db.query.users.findFirst({ where: eq(users.id, userId) });
-    if (!user) throw new TRPCError({ code: 'UNAUTHORIZED', message: 'User session is no longer valid' });
-    return { ok: true, user: { id: user.id, email: user.email, fullName: user.fullName } };
+    if (!user || user.disabledAt) throw new TRPCError({ code: 'UNAUTHORIZED', message: 'User session is no longer valid' });
+    const ensured = await this.ensureOwnerRole(user);
+    return { ok: true, user: { id: ensured.id, email: ensured.email, fullName: ensured.fullName, role: ensured.role } };
+  }
+
+  // Until a super admin exists the workspace is open; once one exists, only
+  // invited emails may register. SUPER_ADMIN_EMAIL pins the owner account.
+  private async requireInvitationIfGated(email: string, inviteToken?: string) {
+    const ownerConfigured = env.SUPER_ADMIN_EMAIL?.toLowerCase();
+    const superadmin = await db.query.users.findFirst({ where: eq(users.role, 'superadmin') });
+    if (!superadmin) {
+      if (ownerConfigured && email !== ownerConfigured) {
+        throw new TRPCError({ code: 'FORBIDDEN', message: 'Registration requires an invitation from your administrator.' });
+      }
+      return null;
+    }
+    if (!inviteToken) {
+      throw new TRPCError({ code: 'FORBIDDEN', message: 'Registration requires an invitation from your administrator.' });
+    }
+    const invitation = await findValidInvitation(inviteToken, email);
+    if (!invitation) {
+      throw new TRPCError({ code: 'FORBIDDEN', message: 'This invitation link is invalid, expired, or for a different email address.' });
+    }
+    return invitation;
+  }
+
+  private async bootstrapRole(email: string) {
+    if (env.SUPER_ADMIN_EMAIL && email === env.SUPER_ADMIN_EMAIL.toLowerCase()) return 'superadmin' as const;
+    const anyUser = await db.query.users.findFirst();
+    return anyUser ? 'user' as const : 'superadmin' as const;
+  }
+
+  private async ensureOwnerRole(user: typeof users.$inferSelect) {
+    if (!env.SUPER_ADMIN_EMAIL || user.email !== env.SUPER_ADMIN_EMAIL.toLowerCase() || user.role === 'superadmin') return user;
+    const [updated] = await db.update(users).set({ role: 'superadmin', updatedAt: new Date() }).where(eq(users.id, user.id)).returning();
+    return updated ?? user;
   }
 
   private async sendCode(user: typeof users.$inferSelect, purpose: Purpose) {
@@ -155,7 +203,7 @@ export class AuthService {
   private async session(user: typeof users.$inferSelect) {
     const { sessionId, refreshToken } = await this.issueSession(user);
     const token = signJwt({ sub: user.id, email: user.email, name: user.fullName, sid: sessionId });
-    return { ok: true, token, refreshToken, user: { id: user.id, email: user.email, fullName: user.fullName } };
+    return { ok: true, token, refreshToken, user: { id: user.id, email: user.email, fullName: user.fullName, role: user.role } };
   }
 }
 

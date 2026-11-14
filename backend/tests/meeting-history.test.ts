@@ -56,6 +56,9 @@ test('saving a Drive reference enforces recording host authorization and stores 
   const { RecordingService } = await import('../src/services/recording.service.js');
   const { TRPCError } = await import('@trpc/server');
   const originalAuthorize = RecordingService.prototype.authorizeExport, originalSave = MeetingHistoryService.prototype.save;
+  const originalUser = db.query.users.findFirst, originalUserPermissions = db.query.userPermissions.findMany;
+  db.query.users.findFirst = (async () => ({ id: 'creator', role: 'user' })) as any;
+  db.query.userPermissions.findMany = (async () => []) as any;
   let saved: any;
   const caller = recordingsRouter.createCaller({ isAuthenticated: true, user: { id: 'creator' } } as any);
   const input = { meetingCode: 'YLM-ABC234', occurrenceId: '22222222-2222-4222-8222-222222222222', url: 'https://drive.google.com/file/d/example/view', fileName: 'recording.mp4' };
@@ -71,5 +74,6 @@ test('saving a Drive reference enforces recording host authorization and stores 
     assert.equal(saved.meetingId, 'meeting'); assert.equal(saved.occurrenceId, input.occurrenceId);
     assert.equal(saved.kind, 'drive'); assert.equal(saved.content, input.url); assert.equal(saved.label, input.fileName);
     assert.equal('token' in saved, false);
-  } finally { RecordingService.prototype.authorizeExport = originalAuthorize; MeetingHistoryService.prototype.save = originalSave; }
+  } finally { RecordingService.prototype.authorizeExport = originalAuthorize; MeetingHistoryService.prototype.save = originalSave;
+    db.query.users.findFirst = originalUser; db.query.userPermissions.findMany = originalUserPermissions; }
 });

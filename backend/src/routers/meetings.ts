@@ -5,6 +5,7 @@ import { z } from 'zod';
 import { t } from '../trpc/init.js';
 import { MeetingService } from '../services/meeting.service.js';
 import { protectedProcedure } from '../trpc/protected.js';
+import { requireAnyFeature, requireFeature } from '../services/permission.service.js';
 
 import { recurrenceInput } from '../services/recurrence.service.js';
 import { MeetingOccurrenceService } from '../services/meeting-occurrence.service.js';
@@ -19,9 +20,15 @@ const scheduleInput = z.object({
 
 export const meetingsRouter = t.router({
   history: protectedProcedure.input(z.object({ offset: z.number().int().min(0).max(100000).default(0) }))
-    .query(({ input, ctx }) => new MeetingHistoryService().list(ctx.user!.id, input.offset)),
+    .query(async ({ input, ctx }) => {
+      await requireFeature(ctx.user!.id, 'history', 'read');
+      return new MeetingHistoryService().list(ctx.user!.id, input.offset);
+    }),
   historyDetail: protectedProcedure.input(z.object({ meetingId: z.string().uuid() }))
-    .query(({ input, ctx }) => new MeetingHistoryService().detail(input.meetingId, ctx.user!.id)),
+    .query(async ({ input, ctx }) => {
+      await requireFeature(ctx.user!.id, 'history', 'read');
+      return new MeetingHistoryService().detail(input.meetingId, ctx.user!.id);
+    }),
   create: protectedProcedure
     .input(
       z.object({
@@ -35,12 +42,17 @@ export const meetingsRouter = t.router({
       })
     )
     .mutation(async ({ input, ctx }) => {
+      const scheduled = !input.startNow && !input.reusable && !!(input.scheduledAt || input.schedule || input.recurrence);
+      await requireFeature(ctx.user!.id, scheduled ? 'meetings.scheduled' : 'meetings.instant', 'write');
       return meetingService.createMeeting(input, ctx.user!.id);
     }),
 
   occurrences: protectedProcedure
     .input(z.object({ meetingCode: z.string().min(1), fromDate: z.string().date().optional(), limit: z.number().int().min(1).max(12).default(6), after: z.object({ at: z.string().datetime(), id: z.string().uuid() }).optional() }))
-    .mutation(({ input, ctx }) => new MeetingOccurrenceService().upcoming(input.meetingCode, ctx.user!.id, input.fromDate, input.limit, input.after)),
+    .mutation(async ({ input, ctx }) => {
+      await requireFeature(ctx.user!.id, 'meetings.scheduled', 'read');
+      return new MeetingOccurrenceService().upcoming(input.meetingCode, ctx.user!.id, input.fromDate, input.limit, input.after);
+    }),
 
   changeRecurrence: protectedProcedure
     .input(z.object({
@@ -48,18 +60,28 @@ export const meetingsRouter = t.router({
       action: z.enum(['edit_occurrence', 'edit_future', 'cancel_occurrence', 'cancel_series']),
       occurrenceId: z.string().uuid().optional(), schedule: scheduleInput.optional(), recurrence: recurrenceInput.optional(),
     }))
-    .mutation(({ input, ctx }) => new RecurrenceSeriesService().change(input, ctx.user!.id)),
+    .mutation(async ({ input, ctx }) => {
+      await requireFeature(ctx.user!.id, 'meetings.scheduled', 'write');
+      return new RecurrenceSeriesService().change(input, ctx.user!.id);
+    }),
 
   reschedule: protectedProcedure
     .input(z.object({ meetingId: z.string().uuid(), schedule: scheduleInput }))
-    .mutation(({ input, ctx }) => meetingService.rescheduleMeeting(input.meetingId, input.schedule, ctx.user!.id)),
+    .mutation(async ({ input, ctx }) => {
+      await requireFeature(ctx.user!.id, 'meetings.scheduled', 'write');
+      return meetingService.rescheduleMeeting(input.meetingId, input.schedule, ctx.user!.id);
+    }),
 
   list: protectedProcedure.query(async ({ ctx }) => {
+    await requireAnyFeature(ctx.user!.id, ['meetings.instant', 'meetings.scheduled'], 'read');
     return meetingService.listMeetings(ctx.user!.id);
   }),
   setPreference: protectedProcedure.input(z.object({ meetingId: z.string().uuid(), favorite: z.boolean().optional(), hidden: z.boolean().optional() })
     .refine(value => value.favorite !== undefined || value.hidden !== undefined, 'Choose a preference to update.'))
-    .mutation(({ input, ctx }) => meetingService.setPreference(input.meetingId, ctx.user!.id, { favorite: input.favorite, hidden: input.hidden })),
+    .mutation(async ({ input, ctx }) => {
+      await requireAnyFeature(ctx.user!.id, ['meetings.instant', 'meetings.scheduled'], 'read');
+      return meetingService.setPreference(input.meetingId, ctx.user!.id, { favorite: input.favorite, hidden: input.hidden });
+    }),
 
   getByCode: t.procedure
     .input(z.object({ meetingCode: z.string().min(1), occurrenceId: z.string().uuid().optional() }))
@@ -129,6 +151,7 @@ export const meetingsRouter = t.router({
       })
     )
     .mutation(async ({ input, ctx }) => {
+      await requireFeature(ctx.user!.id, 'meetings.instant', 'write');
       return meetingService.startMeeting(input.meetingCode, ctx.user!.id, input.startRequestId, input.expectedUpdatedAt, input.occurrenceId);
     }),
 
@@ -197,29 +220,50 @@ export const meetingsRouter = t.router({
 
   summaryRecipients: protectedProcedure
     .input(z.object({ meetingCode: z.string().min(1), occurrenceId: z.string().uuid().optional() }))
-    .query(({ input, ctx }) => new MeetingSummaryService().recipients(input, ctx.user!.id)),
+    .query(async ({ input, ctx }) => {
+      await requireFeature(ctx.user!.id, 'transcription', 'read');
+      return new MeetingSummaryService().recipients(input, ctx.user!.id);
+    }),
   aiStatus: t.procedure
     .input(z.object({ meetingCode: z.string().min(1), occurrenceId: z.string().uuid().optional(), participantId: z.string().uuid().optional() }))
     .query(({ input, ctx }) => new MeetingAiPermissionService().status(input, { userId: ctx.user?.id, participantId: input.participantId })),
   requestAiTranscription: protectedProcedure
     .input(z.object({ meetingCode: z.string().min(1), occurrenceId: z.string().uuid().optional() }))
-    .mutation(({ input, ctx }) => new MeetingAiPermissionService().request(input, ctx.user!.id)),
+    .mutation(async ({ input, ctx }) => {
+      await requireFeature(ctx.user!.id, 'transcription', 'write');
+      return new MeetingAiPermissionService().request(input, ctx.user!.id);
+    }),
   respondAiTranscription: t.procedure
     .input(z.object({ meetingCode: z.string().min(1), occurrenceId: z.string().uuid().optional(), participantId: z.string().uuid().optional(), requestId: z.string().uuid(), agree: z.boolean() }))
     .mutation(({ input, ctx }) => new MeetingAiPermissionService().respond(input, { userId: ctx.user?.id, participantId: input.participantId })),
   stopAiTranscription: protectedProcedure
     .input(z.object({ meetingCode: z.string().min(1), occurrenceId: z.string().uuid().optional(), requestId: z.string().uuid() }))
-    .mutation(({ input, ctx }) => new MeetingAiPermissionService().stop(input, ctx.user!.id)),
+    .mutation(async ({ input, ctx }) => {
+      await requireFeature(ctx.user!.id, 'transcription', 'write');
+      return new MeetingAiPermissionService().stop(input, ctx.user!.id);
+    }),
   aiCaptureHeartbeat: protectedProcedure
     .input(z.object({ meetingCode: z.string().min(1), occurrenceId: z.string().uuid().optional(), requestId: z.string().uuid() }))
-    .mutation(({ input, ctx }) => new MeetingAiPermissionService().heartbeat(input, ctx.user!.id)),
+    .mutation(async ({ input, ctx }) => {
+      await requireFeature(ctx.user!.id, 'transcription', 'write');
+      return new MeetingAiPermissionService().heartbeat(input, ctx.user!.id);
+    }),
   transcribeSpeech: protectedProcedure
     .input(z.object({ meetingCode: z.string().min(1), occurrenceId: z.string().uuid().optional(), requestId: z.string().uuid(), sequence: z.number().int().min(0).max(20000), audio: z.string().min(1).max(2800000).regex(/^[A-Za-z0-9+/]+={0,2}$/), mimeType: z.enum(['audio/webm', 'audio/webm;codecs=opus', 'audio/mp4']) }))
-    .mutation(({ input, ctx }) => new MeetingSummaryService().transcribe(input, ctx.user!.id)),
+    .mutation(async ({ input, ctx }) => {
+      await requireFeature(ctx.user!.id, 'transcription', 'write');
+      return new MeetingSummaryService().transcribe(input, ctx.user!.id);
+    }),
   generateSummary: protectedProcedure
     .input(z.object({ meetingCode: z.string().min(1), occurrenceId: z.string().uuid().optional(), speech: z.string().max(200000) }))
-    .mutation(({ input, ctx }) => new MeetingSummaryService().generate(input, ctx.user!.id)),
+    .mutation(async ({ input, ctx }) => {
+      await requireFeature(ctx.user!.id, 'transcription', 'write');
+      return new MeetingSummaryService().generate(input, ctx.user!.id);
+    }),
   shareTranscript: protectedProcedure
     .input(z.object({ meetingCode: z.string().min(1), occurrenceId: z.string().uuid().optional(), summary: z.string().max(12000).optional(), transcript: z.string().max(200000).default(''), recipientIds: z.array(z.string().uuid()).min(1).max(100) }))
-    .mutation(({ input, ctx }) => new MeetingSummaryService().send(input, ctx.user!.id)),
+    .mutation(async ({ input, ctx }) => {
+      await requireFeature(ctx.user!.id, 'transcription', 'write');
+      return new MeetingSummaryService().send(input, ctx.user!.id);
+    }),
 });

@@ -1,13 +1,14 @@
 'use client';
 
 import React from 'react';
-import { Home, CalendarPlus, CalendarDays, Star, Settings, History } from 'lucide-react';
+import { Home, CalendarPlus, CalendarDays, Star, Settings, History, Users } from 'lucide-react';
 
-export type SidebarTab = 'home' | 'create' | 'scheduled' | 'favorite' | 'history' | 'settings';
+export type SidebarTab = 'home' | 'create' | 'scheduled' | 'favorite' | 'history' | 'settings' | 'users';
 
 interface SidebarProps {
   activeTab: SidebarTab;
   setActiveTab: (tab: SidebarTab) => void;
+  isTabVisible?: (tab: SidebarTab) => boolean;
 }
 
 interface NavItem {
@@ -50,7 +51,7 @@ const SidebarButton: React.FC<{
   );
 };
 
-export const Sidebar: React.FC<SidebarProps> = ({ activeTab, setActiveTab }) => {
+export const Sidebar: React.FC<SidebarProps> = ({ activeTab, setActiveTab, isTabVisible = () => true }) => {
   const topNavItems: NavItem[] = [
     {
       id: 'home',
@@ -75,6 +76,9 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, setActiveTab }) => 
   ];
 
   topNavItems.push({ id: 'history', label: 'Meeting History', icon: History });
+  topNavItems.push({ id: 'users', label: 'User Management', icon: Users });
+
+  const visibleTopNavItems = topNavItems.filter((item) => isTabVisible(item.id));
 
   const settingsItem: NavItem = {
     id: 'settings',
@@ -82,14 +86,14 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, setActiveTab }) => 
     icon: Settings,
   };
 
-  const allItems = [...topNavItems, settingsItem];
+  const allItems = [...visibleTopNavItems, settingsItem];
 
   return <>
     <aside className="fixed left-0 top-[56px] bottom-0 z-30 w-[72px] bg-white border-r border-slate-200 flex flex-col items-center justify-between py-6 shadow-2xs hidden sm:flex">
       {/* Top Navigation Icon Buttons */}
       <div className="flex flex-col items-center gap-6 w-full px-2">
         <nav className="flex flex-col items-center gap-4 w-full">
-          {topNavItems.map((item) => (
+          {visibleTopNavItems.map((item) => (
             <SidebarButton
               key={item.id}
               item={item}

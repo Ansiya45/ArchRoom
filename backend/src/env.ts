@@ -20,6 +20,7 @@ export const envSchema = z.object({
   LIVEKIT_API_KEY: z.string().optional(),
   LIVEKIT_API_SECRET: z.string().optional(),
   APP_PUBLIC_URL: z.string().url().optional(),
+  SUPER_ADMIN_EMAIL: z.string().email().optional(),
   MEETING_EMAIL_FROM: z.string().optional(),
   OPENAI_API_KEY: z.string().optional(),
   OPENAI_TRANSCRIPTION_MODEL: z.string().default('gpt-4o-transcribe'),

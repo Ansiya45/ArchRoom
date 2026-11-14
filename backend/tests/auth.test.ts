@@ -85,6 +85,8 @@ test('reset response hides provider failure while verification resend reports it
 
 test('simultaneous signups for the same email create one account and send one code', async () => {
   const originalInsert = db.insert;
+  const originalFindUser = db.query.users.findFirst;
+  db.query.users.findFirst = (async () => undefined) as any;
   const { service, sent } = serviceFor(undefined);
   Object.assign(service, { findUser: async () => undefined });
   let created = false;
@@ -100,7 +102,7 @@ test('simultaneous signups for the same email create one account and send one co
     const rejected = results.find(result => result.status === 'rejected');
     assert.equal(rejected?.status === 'rejected' && rejected.reason.code, 'CONFLICT');
     assert.equal(sent.length, 1);
-  } finally { db.insert = originalInsert; }
+  } finally { db.insert = originalInsert; db.query.users.findFirst = originalFindUser; }
 });
 
 test('resend replaces the code on success and preserves it when the email provider fails', async () => {
