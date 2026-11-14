@@ -36,6 +36,7 @@ import { useMeetingRecorder } from '@/hooks/useMeetingRecorder';
 import type { RecorderAudioInput, RecorderTile } from '@/lib/compositeMeetingRecorder';
 import { RecordingsModal } from './RecordingsModal';
 import { TranscriptModal } from './TranscriptModal';
+import { MeetingRecapModal } from './MeetingRecapModal';
 import { useMeetingSummaryCapture } from '@/hooks/useMeetingSummaryCapture';
 
 interface MeetingRoomProps {
@@ -99,7 +100,8 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
   const [aiStatus, setAiStatus] = useState<AiStatus>({ state: 'off' });
   const [aiBusy, setAiBusy] = useState(false);
   const [aiCaptureFault, setAiCaptureFault] = useState(false);
-  const [enableAiOnJoin, setEnableAiOnJoin] = useState(false);
+  const [enableAiOnJoin, setEnableAiOnJoin] = useState(true);
+  const [transcriptAccess, setTranscriptAccess] = useState<'all' | 'host'>('all');
   const aiStartedForSession = useRef('');
   const [joinRequests, setJoinRequests] = useState<Array<{ id: string; name: string }>>([]);
   const previousJoinRequestIdsRef = useRef<Set<string>>(new Set());
@@ -108,6 +110,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
   const [admissionActionError, setAdmissionActionError] = useState('');
   const [isRecordingsOpen, setIsRecordingsOpen] = useState(false);
   const [summaryReview, setSummaryReview] = useState<{ speech: string; occurrenceId?: string; warning: string } | null>(null);
+  const [recap, setRecap] = useState<{ occurrenceId?: string; participantId?: string } | null>(null);
   const [closingForSummary, setClosingForSummary] = useState(false);
   const [unreadChatCount, setUnreadChatCount] = useState(0);
   const [chatToast, setChatToast] = useState<{ sender: string; message: string } | null>(null);
@@ -185,6 +188,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
     void (async () => {
       setAiBusy(true); setAiCaptureFault(false);
       try {
+        await trpc.meetings.setTranscriptAccess.mutate({ meetingCode, occurrenceId: sessionRef.current?.occurrenceId, access: transcriptAccess });
         await trpc.meetings.requestAiTranscription.mutate({ meetingCode, occurrenceId: sessionRef.current?.occurrenceId });
         setAiStatus(await trpc.meetings.aiStatus.query({ meetingCode, occurrenceId: sessionRef.current?.occurrenceId, participantId: sessionRef.current?.participantId }));
       } catch (error) {
@@ -192,7 +196,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
         alert(error instanceof Error ? error.message : 'Could not enable AI transcription.');
       } finally { setAiBusy(false); }
     })();
-  }, [meeting.inMeeting, isOwner, user?.id, enableAiOnJoin, canTranscribe, meetingCode]);
+  }, [meeting.inMeeting, isOwner, user?.id, enableAiOnJoin, canTranscribe, transcriptAccess, meetingCode]);
 
   useEffect(() => {
     let cancelled = false;
@@ -417,11 +421,16 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
           });
           if (leavingRef.current) return;
           if (status.sessionEnded || status.meeting.status === 'ended' || status.leftAt || status.admission !== 'admitted') {
+            const ended = status.sessionEnded || status.meeting.status === 'ended';
+            const recapContext = ended ? { occurrenceId: session.occurrenceId, participantId: session.participantId } : null;
             forgetSession(meetingCode);
             stopAllCameraStreams();
             meeting.leaveMeeting();
-            alert(status.sessionEnded || status.meeting.status === 'ended' ? 'The host ended the meeting.' : 'The host removed you from the meeting.');
-            navigate('/');
+            if (ended && recapContext) setRecap(recapContext);
+            else {
+              alert('The host removed you from the meeting.');
+              navigate('/');
+            }
           }
         } else {
           const { meeting: room } = await trpc.meetings.getByCode.query({ meetingCode, occurrenceId: sessionRef.current?.occurrenceId });
@@ -832,6 +841,9 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
       onClose={() => setIsRecordingsOpen(false)} onDiscardPreview={recorder.clearPreview} />
   </>;
 
+  if (recap) return <MeetingRecapModal meetingCode={meetingCode} occurrenceId={recap.occurrenceId}
+    participantId={recap.participantId} onClose={() => navigate('/')} />;
+
   if (!meeting.inMeeting) {
     return (
       <>
@@ -856,6 +868,8 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
         enableAiTranscription={enableAiOnJoin}
         onEnableAiTranscriptionChange={setEnableAiOnJoin}
         canTranscribe={canTranscribe}
+        transcriptAccess={transcriptAccess}
+        onTranscriptAccessChange={setTranscriptAccess}
       />
       </>
     );

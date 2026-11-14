@@ -115,6 +115,7 @@ export const meetings = pgTable(
     recurrenceCancelledAt: timestamp('recurrence_cancelled_at', { withTimezone: true }),
     recurrenceEditedAt: timestamp('recurrence_edited_at', { withTimezone: true }),
     activeOccurrenceId: uuid('active_occurrence_id').references((): AnyPgColumn => meetingOccurrences.id),
+    transcriptAccess: varchar('transcript_access', { length: 10 }).notNull().default('all'),
     status: meetingStatusEnum('status').default('scheduled').notNull(),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),

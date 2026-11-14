@@ -42,6 +42,8 @@ interface WaitingRoomProps {
   enableAiTranscription: boolean;
   onEnableAiTranscriptionChange: (enabled: boolean) => void;
   canTranscribe?: boolean;
+  transcriptAccess?: 'all' | 'host';
+  onTranscriptAccessChange?: (access: 'all' | 'host') => void;
 }
 
 interface BackgroundPreset {
@@ -103,6 +105,8 @@ export const WaitingRoom: React.FC<WaitingRoomProps> = ({
   enableAiTranscription,
   onEnableAiTranscriptionChange,
   canTranscribe = true,
+  transcriptAccess = 'all',
+  onTranscriptAccessChange,
 }) => {
   const activeBg = deviceSettings.backgroundBlur || 'blur';
   const handleCameraUnavailable = useCallback(() => {
@@ -277,7 +281,15 @@ export const WaitingRoom: React.FC<WaitingRoomProps> = ({
 
           {isHost && canTranscribe && <div className="rounded-xl border border-violet-400/30 bg-[#1a1e3b] p-3 text-xs text-white">
             <label className="flex items-start gap-2 font-semibold"><input type="checkbox" checked={enableAiTranscription} onChange={event => onEnableAiTranscriptionChange(event.target.checked)} className="mt-0.5 accent-violet-600" />Enable AI transcription for this meeting</label>
-            <p className="mt-2 leading-relaxed">Off by default. If enabled, meeting audio is processed by YLAAM Meet and OpenAI. Participants will see when transcription is active. Transcript text and summaries are saved to your Meeting History.</p>
+            <p className="mt-2 leading-relaxed">On by default — meeting audio in any language (English, Hindi, Malayalam, Tamil, Kannada and more) is processed by YLAAM Meet and OpenAI. Participants will see when transcription is active. Transcript text and summaries are saved to your Meeting History.</p>
+            {enableAiTranscription && onTranscriptAccessChange && <label className="mt-3 block font-semibold">
+              Transcript &amp; AI summary downloads
+              <select value={transcriptAccess} onChange={event => onTranscriptAccessChange(event.target.value as 'all' | 'host')}
+                className="mt-1 block w-full rounded-lg border border-white/10 bg-[#0d1029] px-2.5 py-2 text-xs font-semibold text-white focus:border-violet-500 focus:outline-none">
+                <option value="all">Available to all participants</option>
+                <option value="host">Host only</option>
+              </select>
+            </label>}
           </div>}
 
           {sessionError && <p role="alert" className="text-sm text-red-600">{sessionError} <button onClick={onRetrySession} className="font-semibold underline">Try again</button></p>}

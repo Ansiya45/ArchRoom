@@ -266,4 +266,26 @@ export const meetingsRouter = t.router({
       await requireFeature(ctx.user!.id, 'transcription', 'write');
       return new MeetingSummaryService().send(input, ctx.user!.id);
     }),
+
+  setTranscriptAccess: protectedProcedure
+    .input(z.object({ meetingCode: z.string().min(1), occurrenceId: z.string().uuid().optional(), access: z.enum(['all', 'host']) }))
+    .mutation(async ({ input, ctx }) => {
+      await requireFeature(ctx.user!.id, 'transcription', 'write');
+      return new MeetingSummaryService().setAccess(input, ctx.user!.id);
+    }),
+
+  // Participant-scoped recap: guests use participantId, members their session.
+  transcriptRecap: t.procedure
+    .input(z.object({ meetingCode: z.string().min(1), occurrenceId: z.string().uuid().optional(), participantId: z.string().uuid().optional() }))
+    .query(async ({ input, ctx }) => {
+      if (ctx.user?.id) await requireFeature(ctx.user.id, 'transcription', 'read');
+      return new MeetingSummaryService().recap(input, { userId: ctx.user?.id, participantId: input.participantId });
+    }),
+
+  aiSummaryRecap: t.procedure
+    .input(z.object({ meetingCode: z.string().min(1), occurrenceId: z.string().uuid().optional(), participantId: z.string().uuid().optional() }))
+    .mutation(async ({ input, ctx }) => {
+      if (ctx.user?.id) await requireFeature(ctx.user.id, 'transcription', 'read');
+      return new MeetingSummaryService().downloadableSummary(input, { userId: ctx.user?.id, participantId: input.participantId });
+    }),
 });
