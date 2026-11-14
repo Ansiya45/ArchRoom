@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Ban, CheckCircle2, ChevronDown, Mail, RefreshCw, ShieldCheck, Trash2, UserPlus, Users } from 'lucide-react';
+import { Ban, CheckCircle2, ChevronDown, Mail, RefreshCw, ShieldCheck, Trash2, UserPlus, Users, X } from 'lucide-react';
 import { trpc } from '../lib/trpc';
 import type { SessionUser } from '../lib/auth';
 import {
@@ -107,6 +107,11 @@ export const UserManagementView: React.FC<Props> = ({ user, access, onAccessChan
     setDraftPermissions((draft) => ({ ...draft, [row.id]: current }));
   };
 
+  const closePermissions = (row: ManagedUser) => {
+    setExpandedId(null);
+    setDraftPermissions((draft) => { const next = { ...draft }; delete next[row.id]; return next; });
+  };
+
   const savePermissions = (row: ManagedUser) => {
     setBusyUserId(row.id);
     void run(
@@ -115,6 +120,7 @@ export const UserManagementView: React.FC<Props> = ({ user, access, onAccessChan
     ).then(() => {
       setDraftPermissions((draft) => { const next = { ...draft }; delete next[row.id]; return next; });
       setBusyUserId(null);
+      setExpandedId(null);
       onAccessChanged();
     });
   };
@@ -247,7 +253,14 @@ export const UserManagementView: React.FC<Props> = ({ user, access, onAccessChan
                   </div>
 
                   {expanded && row.role !== 'superadmin' && (
-                    <div className="mt-3 rounded-xl border border-slate-100 bg-slate-50/60 p-4">
+                    <div className="mt-3 rounded-xl border border-slate-100 bg-slate-100 p-4">
+                      <div className="mb-3 flex items-center justify-between">
+                        <p className="text-xs font-bold uppercase tracking-wide text-slate-500">Feature permissions</p>
+                        <button onClick={() => closePermissions(row)} aria-label="Close permissions"
+                          className="rounded-lg p-1 text-slate-400 hover:bg-slate-50 hover:text-slate-700">
+                          <X className="h-4 w-4" />
+                        </button>
+                      </div>
                       <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
                         {FEATURE_KEYS.map((key) => {
                           const feature = access.features.find((item) => item.key === key);
@@ -262,11 +275,17 @@ export const UserManagementView: React.FC<Props> = ({ user, access, onAccessChan
                           );
                         })}
                       </div>
-                      <div className="mt-3 flex items-center justify-between">
-                        <p className="text-[11px] text-slate-400">Full access includes every action; write allows creating and editing; read is view-only.</p>
-                        <button disabled={!dirty || busyUserId === row.id} onClick={() => savePermissions(row)} className={buttonClass}>
-                          {busyUserId === row.id ? 'Saving…' : 'Save permissions'}
-                        </button>
+                      <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
+                        <p className="text-xs text-slate-300">Full access includes every action; write allows creating and editing; read is view-only.</p>
+                        <div className="flex gap-2">
+                          <button onClick={() => closePermissions(row)}
+                            className="rounded-xl border border-slate-200 px-4 py-2.5 text-sm font-semibold text-slate-600 transition hover:bg-slate-50">
+                            Close
+                          </button>
+                          <button disabled={!dirty || busyUserId === row.id} onClick={() => savePermissions(row)} className={buttonClass}>
+                            {busyUserId === row.id ? 'Saving…' : 'Save permissions'}
+                          </button>
+                        </div>
                       </div>
                     </div>
                   )}
