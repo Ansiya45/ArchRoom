@@ -143,7 +143,11 @@ export class MeetingService {
     const preferenceMap = new Map(preferences.map(preference => [preference.meetingId, preference]));
     const uniqueMeetings = new Map([...rows, ...joined].map((meeting) => [meeting.id, meeting]));
 
-    return { ok: true, meetings: [...uniqueMeetings.values()].filter(meeting => !preferenceMap.get(meeting.id)?.hidden)
+    // Dead meetings — ended sessions and cancelled series — cannot be joined
+    // and only produce stale links on the dashboard. They stay in the
+    // database for meeting history but are filtered out of the meeting list.
+    return { ok: true, meetings: [...uniqueMeetings.values()]
+      .filter(meeting => meeting.status !== 'ended' && !meeting.recurrenceCancelledAt && !preferenceMap.get(meeting.id)?.hidden)
       .map(meeting => ({ ...meeting, isFavorite: preferenceMap.get(meeting.id)?.favorite ?? false })) };
   }
 

@@ -37,13 +37,19 @@ export function loadAccess(userId: string): Promise<AccessState> {
  */
 export function usePermissions(userId: string | undefined | null) {
   const [access, setAccess] = useState<AccessState | null>(() => (userId ? cache.get(userId) ?? null : null));
+  // A failed access fetch must not permanently hide meeting features — the
+  // backend still enforces permissions on every call, so the UI falls back
+  // to the default-open posture instead of silently disabling everything.
+  const [loadFailed, setLoadFailed] = useState(false);
 
   useEffect(() => {
-    if (!userId) { setAccess(null); return; }
+    if (!userId) { setAccess(null); setLoadFailed(false); return; }
     const cached = cache.get(userId);
-    if (cached) { setAccess(cached); return; }
+    if (cached) { setAccess(cached); setLoadFailed(false); return; }
     let cancelled = false;
-    loadAccess(userId).then((result) => { if (!cancelled) setAccess(result); }).catch(() => {});
+    loadAccess(userId)
+      .then((result) => { if (!cancelled) { setAccess(result); setLoadFailed(false); } })
+      .catch(() => { if (!cancelled) setLoadFailed(true); });
     return () => { cancelled = true; };
   }, [userId]);
 
@@ -55,9 +61,13 @@ export function usePermissions(userId: string | undefined | null) {
 
   const can = useCallback((key: FeatureKey, min: FeatureLevel) => {
     if (!userId) return true; // Guests are meeting-scoped, not workspace-governed.
-    if (!access) return false; // Deny until access is known for signed-in users.
+    if (!access) {
+      // Deny only while the first load is in flight; after a failed fetch the
+      // backend remains the enforcement point, so use the open defaults.
+      return loadFailed ? hasFeature(null, key, min) : false;
+    }
     return hasFeature(access, key, min);
-  }, [userId, access]);
+  }, [userId, access, loadFailed]);
 
   return { access, can, refresh, loaded: !userId || !!access };
 }

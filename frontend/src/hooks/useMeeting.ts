@@ -42,7 +42,9 @@ export function useMeeting(initialMeetingCode: string = 'YLM-9284-XKP') {
     id: 'user-self',
     name: `${initialDisplayName} (You)`,
     avatar: 'https://api.dicebear.com/9.x/initials/svg?seed=You',
-    role: authenticatedUser ? 'host' : 'attendee',
+    // The roster sync assigns the real role. Defaulting every signed-in user
+    // to 'host' made non-owners briefly see a HOST badge on their own tile.
+    role: 'attendee',
     isMuted: false,
     isCameraOn: true,
     isSpeaking: false,

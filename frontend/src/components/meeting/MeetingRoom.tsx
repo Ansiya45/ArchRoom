@@ -56,13 +56,18 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
   const [meetingError, setMeetingError] = useState('');
   const [checkingMeeting, setCheckingMeeting] = useState(false);
   const sessionRef = useRef<MeetingSession | null>(getMeetingSession(meetingCode));
+  // Refs do not trigger re-renders; sessionTick makes session changes visible
+  // to effects that gate on sessionRef.current (e.g. AI transcription enable).
+  const [sessionTick, setSessionTick] = useState(0);
   const rememberSession = (code: string, session: MeetingSession) => {
     sessionRef.current = session;
     storeMeetingSession(code, session);
+    setSessionTick(tick => tick + 1);
   };
   const forgetSession = (code: string) => {
     if (getMeetingSession(code)?.participantId === sessionRef.current?.participantId) clearMeetingSession(code);
     sessionRef.current = null;
+    setSessionTick(tick => tick + 1);
   };
   const { can } = usePermissions(user?.id);
   const canRecord = can('recording', 'write');
@@ -100,6 +105,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
   const [aiStatus, setAiStatus] = useState<AiStatus>({ state: 'off' });
   const [aiBusy, setAiBusy] = useState(false);
   const [aiCaptureFault, setAiCaptureFault] = useState(false);
+  const [aiError, setAiError] = useState('');
   const [enableAiOnJoin, setEnableAiOnJoin] = useState(true);
   const [transcriptAccess, setTranscriptAccess] = useState<'all' | 'host'>('all');
   const aiStartedForSession = useRef('');
@@ -178,25 +184,34 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
     void refresh();
     const timer = window.setInterval(() => void refresh(), 5000);
     return () => { cancelled = true; window.clearInterval(timer); };
-  }, [meeting.inMeeting, meetingCode, user?.id]);
+  }, [meeting.inMeeting, meetingCode, user?.id, sessionTick]);
+
+  const startAiTranscription = React.useCallback(async () => {
+    const session = sessionRef.current;
+    if (aiBusy || !session?.participantId) return;
+    const key = `${meetingCode}:${session.occurrenceId || ''}:${session.participantId}`;
+    aiStartedForSession.current = key;
+    setAiBusy(true); setAiCaptureFault(false); setAiError('');
+    try {
+      // The download-visibility preference is best-effort; it must never
+      // prevent the transcription request itself from being created.
+      try {
+        await trpc.meetings.setTranscriptAccess.mutate({ meetingCode, occurrenceId: session.occurrenceId, access: transcriptAccess });
+      } catch { /* Preference stays at its previous value; capture still runs. */ }
+      await trpc.meetings.requestAiTranscription.mutate({ meetingCode, occurrenceId: session.occurrenceId });
+      setAiStatus(await trpc.meetings.aiStatus.query({ meetingCode, occurrenceId: session.occurrenceId, participantId: session.participantId }));
+    } catch (error) {
+      aiStartedForSession.current = ''; setAiStatus({ state: 'off' });
+      setAiError(error instanceof Error ? error.message : 'Could not enable AI transcription.');
+    } finally { setAiBusy(false); }
+  }, [aiBusy, meetingCode, transcriptAccess]);
 
   useEffect(() => {
     if (!meeting.inMeeting || !isOwner || !user?.id || !enableAiOnJoin || !canTranscribe || !sessionRef.current?.participantId) return;
     const key = `${meetingCode}:${sessionRef.current.occurrenceId || ''}:${sessionRef.current.participantId}`;
     if (aiStartedForSession.current === key) return;
-    aiStartedForSession.current = key;
-    void (async () => {
-      setAiBusy(true); setAiCaptureFault(false);
-      try {
-        await trpc.meetings.setTranscriptAccess.mutate({ meetingCode, occurrenceId: sessionRef.current?.occurrenceId, access: transcriptAccess });
-        await trpc.meetings.requestAiTranscription.mutate({ meetingCode, occurrenceId: sessionRef.current?.occurrenceId });
-        setAiStatus(await trpc.meetings.aiStatus.query({ meetingCode, occurrenceId: sessionRef.current?.occurrenceId, participantId: sessionRef.current?.participantId }));
-      } catch (error) {
-        setEnableAiOnJoin(false); aiStartedForSession.current = ''; setAiStatus({ state: 'off' });
-        alert(error instanceof Error ? error.message : 'Could not enable AI transcription.');
-      } finally { setAiBusy(false); }
-    })();
-  }, [meeting.inMeeting, isOwner, user?.id, enableAiOnJoin, canTranscribe, transcriptAccess, meetingCode]);
+    void startAiTranscription();
+  }, [meeting.inMeeting, isOwner, user?.id, enableAiOnJoin, canTranscribe, sessionTick, startAiTranscription, meetingCode]);
 
   useEffect(() => {
     let cancelled = false;
@@ -282,7 +297,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
       else if (room.status === 'ended' && room.scheduleType !== 'reusable' && room.scheduleType !== 'recurring') setMeetingError('This meeting has ended.');
     }).catch(error => {
       if (!cancelled) setMeetingError(error?.data?.code === 'NOT_FOUND'
-        ? 'Meeting not found. Check the meeting code with the host.'
+        ? 'No meeting exists with this code. It may have been typed incorrectly — check for lookalike characters (S and 5, Z and 2, B and 8), or ask the host to share the full invite link again.'
         : 'Unable to load this meeting. Please try again.');
     }).finally(() => { if (!cancelled) setCheckingMeeting(false); });
     return () => { cancelled = true; };
@@ -1064,6 +1079,13 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
       <div className="fixed bottom-24 left-4 z-30 max-w-sm rounded-lg bg-zinc-900/95 p-3 text-xs text-white shadow-lg" role="status">
         {aiStatus.state === 'off' ? <>
           <p>AI transcription is off.</p>
+          {aiError && <p role="alert" className="mt-1 text-red-300">{aiError}</p>}
+          {isOwner && canTranscribe && (
+            <button type="button" disabled={aiBusy} onClick={() => void startAiTranscription()}
+              className="mt-2 rounded-lg bg-violet-600 px-3 py-1.5 font-bold hover:bg-violet-500 disabled:opacity-50">
+              {aiBusy ? 'Enabling…' : 'Enable AI transcription'}
+            </button>
+          )}
         </> : <>
           <p className="font-semibold">{aiStatus.capturing ? 'AI transcription active. Meeting audio is processed by YLAAM Meet and OpenAI; transcript text is saved in the host’s Meeting History.' : 'AI transcription is enabled. Meeting audio will be processed by YLAAM Meet and OpenAI; transcript text is saved in the host’s Meeting History.'}</p>
           {'needsResponse' in aiStatus && aiStatus.needsResponse && (
