@@ -4,6 +4,17 @@ import React from 'react';
 import { Participant, LayoutMode, BackgroundChoice } from '@/types/meeting';
 import { VideoCard } from './VideoCard';
 
+const SharedPresentation: React.FC<{ stream: MediaStream }> = ({ stream }) => {
+  const ref = React.useRef<HTMLVideoElement | null>(null);
+  React.useEffect(() => {
+    if (ref.current && ref.current.srcObject !== stream) {
+      ref.current.srcObject = stream;
+      void ref.current.play().catch(() => undefined);
+    }
+  }, [stream]);
+  return <video ref={ref} autoPlay playsInline muted className="h-full w-full bg-black object-contain" />;
+};
+
 interface VideoGridProps {
   participants: Participant[];
   activeSpeakerId: string;
@@ -17,6 +28,7 @@ interface VideoGridProps {
   remoteStreams?: Record<string, MediaStream>;
   remoteBackgrounds?: Record<string, BackgroundChoice>;
   remoteScreenShares?: Record<string, boolean>;
+  remoteScreenStreams?: Record<string, MediaStream>;
   localDisplayStream?: MediaStream | null;
   remoteRaisedHands?: Record<string, boolean>;
 }
@@ -34,6 +46,7 @@ export const VideoGrid: React.FC<VideoGridProps> = ({
   remoteStreams = {},
   remoteBackgrounds = {},
   remoteScreenShares = {},
+  remoteScreenStreams = {},
   localDisplayStream,
   remoteRaisedHands = {},
 }) => {
@@ -49,6 +62,28 @@ export const VideoGrid: React.FC<VideoGridProps> = ({
 
   // Remaining participants for secondary side column/grid
   const stripParticipants = participants.filter((p) => p.id !== mainParticipant?.id);
+  const presenter = participants.find(p => p.id === 'user-self' ? Boolean(localDisplayStream) : Boolean(remoteScreenShares[p.id]));
+
+  if (presenter) {
+    const screenStream = presenter.id === 'user-self' ? localDisplayStream : remoteScreenStreams[presenter.id];
+    const count = participants.length;
+    return <div data-testid="presentation-layout" className="flex h-full min-h-0 w-full min-w-0 flex-col gap-2 overflow-hidden md:flex-row md:gap-3">
+      <div data-testid="presentation-screen" className="relative min-h-0 min-w-0 flex-[2] overflow-hidden rounded-2xl bg-black md:h-full">
+        {screenStream ? <SharedPresentation stream={screenStream} /> : <div className="flex h-full min-h-32 items-center justify-center text-sm text-white">{presenter.name} is sharing</div>}
+        <span className="absolute left-3 top-3 z-10 rounded-lg bg-black/60 px-3 py-1 text-xs text-white">{presenter.name} is presenting</span>
+      </div>
+      <div data-testid="presentation-participants" className={`min-h-0 min-w-0 shrink-0 overflow-y-auto overscroll-contain md:h-full md:w-[34%] ${count <= 3 ? 'h-28' : 'h-40'}`}>
+        <div className={`grid gap-2 ${count <= 3 ? 'grid-cols-2 md:grid-cols-1' : 'grid-cols-2'} ${count >= 5 ? 'auto-rows-min' : ''}`}>
+          {participants.map(p => <div key={p.id} data-testid="presentation-tile" className="aspect-square min-w-0 overflow-hidden rounded-xl">
+            <VideoCard participant={{ ...p, isPinned: p.id === pinnedParticipantId, isScreenSharing: false,
+              isHandRaised: p.id === 'user-self' ? p.isHandRaised : Boolean(remoteRaisedHands[p.id]) }}
+              isMainStage={false} activeBg={participantBackground(p.id)} onTogglePin={onTogglePin} onToggleMute={onToggleMute}
+              isSelf={p.id === 'user-self'} mediaStream={p.id === 'user-self' ? localStream : remoteStreams[p.id]} />
+          </div>)}
+        </div>
+      </div>
+    </div>;
+  }
 
   return (
     <div className="w-full flex-1 min-h-0 flex flex-col justify-between px-1 sm:px-2 md:px-3 overflow-hidden relative">
@@ -74,7 +109,7 @@ export const VideoGrid: React.FC<VideoGridProps> = ({
                 onTogglePin={onTogglePin}
                 onToggleMute={onToggleMute}
                 isSelf={mainParticipant.id === 'user-self'}
-                mediaStream={mainParticipant.id === 'user-self' ? (localDisplayStream || localStream) : remoteStreams[mainParticipant.id]}
+                mediaStream={mainParticipant.id === 'user-self' ? localStream : remoteStreams[mainParticipant.id]}
               />
             ) : (
               <div className="w-full h-full bg-white/60 border border-white rounded-3xl flex items-center justify-center text-slate-500 backdrop-blur-xl shadow-xl">
@@ -115,7 +150,7 @@ export const VideoGrid: React.FC<VideoGridProps> = ({
                       onTogglePin={onTogglePin}
                       onToggleMute={onToggleMute}
                       isSelf={p.id === 'user-self'}
-                      mediaStream={p.id === 'user-self' ? (localDisplayStream || localStream) : remoteStreams[p.id]}
+                      mediaStream={p.id === 'user-self' ? localStream : remoteStreams[p.id]}
                     />
                   </div>
                 ))}
@@ -153,7 +188,7 @@ export const VideoGrid: React.FC<VideoGridProps> = ({
                   onTogglePin={onTogglePin}
                   onToggleMute={onToggleMute}
                   isSelf={p.id === 'user-self'}
-                  mediaStream={p.id === 'user-self' ? (localDisplayStream || localStream) : remoteStreams[p.id]}
+                  mediaStream={p.id === 'user-self' ? localStream : remoteStreams[p.id]}
                 />
               </div>
             ))}

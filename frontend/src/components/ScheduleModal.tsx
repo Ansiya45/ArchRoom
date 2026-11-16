@@ -46,6 +46,9 @@ export const ScheduleModal: React.FC<ScheduleModalProps> = ({
   const [folderLoading, setFolderLoading] = useState(false);
   const [folderError, setFolderError] = useState('');
   const [newFolderName, setNewFolderName] = useState('');
+  const [newFolderOpen, setNewFolderOpen] = useState(false);
+  const creatingFolder = useRef(false);
+  const refreshingFolders = useRef(false);
   const navigate = useNavigate();
   const submitting = useRef(false);
   const [error, setError] = useState('');
@@ -75,6 +78,7 @@ export const ScheduleModal: React.FC<ScheduleModalProps> = ({
       setFolderState(null);
       setFolderError('');
       setNewFolderName('');
+      setNewFolderOpen(false);
     }
   }, [isOpen, editingMeeting]);
 
@@ -89,21 +93,30 @@ export const ScheduleModal: React.FC<ScheduleModalProps> = ({
   }, [isOpen, recordingSettingsOpen]);
 
   const refreshFolders = async () => {
-    setFolderLoading(true); setFolderError('');
+    if (refreshingFolders.current || creatingFolder.current) return;
+    refreshingFolders.current = true;
+    setFolderError('');
     try { setFolderState(await trpc.recordingFolders.refresh.mutate()); }
-    catch { setFolderState({ connected: false, canCreate: false, folders: [] }); setFolderError('Recording folders could not be refreshed.'); }
-    finally { setFolderLoading(false); }
+    catch { setFolderError('Recording folders could not be refreshed.'); }
+    finally { refreshingFolders.current = false; }
   };
 
   const createFolder = async () => {
+    if (creatingFolder.current || refreshingFolders.current || !newFolderName.trim()) return;
+    creatingFolder.current = true;
     setFolderLoading(true); setFolderError('');
     try {
       const created = await trpc.recordingFolders.create.mutate({ name: newFolderName });
-      setFolderState(await trpc.recordingFolders.refresh.mutate());
+      const includeCreated = (state: NonNullable<typeof folderState>) => ({ ...state,
+        folders: [...state.folders.filter(folder => folder.id !== created.id), created] });
+      setFolderState(state => state ? includeCreated(state) : state);
       setSelectedFolderId(created.id);
       setNewFolderName('');
+      setNewFolderOpen(false);
+      try { setFolderState(includeCreated(await trpc.recordingFolders.refresh.mutate())); }
+      catch { setFolderError('Folder created, but recording folders could not be refreshed.'); }
     } catch (cause) { setFolderError(cause instanceof Error ? cause.message : 'Batch folder could not be created.'); }
-    finally { setFolderLoading(false); }
+    finally { creatingFolder.current = false; setFolderLoading(false); }
   };
 
   if (!isOpen) return null;
@@ -118,7 +131,7 @@ export const ScheduleModal: React.FC<ScheduleModalProps> = ({
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
-    if (submitting.current) return;
+    if (submitting.current || creatingFolder.current) return;
     submitting.current = true;
     setLoading(true);
     setError('');
@@ -269,24 +282,35 @@ export const ScheduleModal: React.FC<ScheduleModalProps> = ({
             {recordingSettingsOpen && <section id="recording-settings-preview" aria-label="Recording Settings" className="mt-3 space-y-4 border-t border-slate-200 pt-3 text-sm">
               <div>
                 <h4 className="font-semibold text-slate-900">Recording Settings</h4>
-                <p className="mt-1 rounded-lg border border-blue-500/20 bg-blue-500/10 p-2 text-xs text-blue-200">Optionally choose an authorized company folder. Finalized recordings will upload there automatically; otherwise you can choose a folder after recording.</p>
+                <p className="mt-1 text-xs text-blue-200">Optionally choose an authorized company folder. Finalized recordings will upload there automatically; otherwise you can choose a folder after recording.</p>
               </div>
               <div className="space-y-2">
-                <p className="font-semibold text-white">Recording destination</p>
-                <label htmlFor="recording-folder-preview" className="block text-xs text-slate-500">Optional company Drive folder for this meeting or recurring series</label>
-                <select id="recording-folder-preview" value={selectedFolderId ?? ''} onChange={event => setSelectedFolderId(event.target.value || null)}
-                  disabled={folderLoading || !folderState?.connected} className="w-full rounded-xl border border-slate-200 bg-slate-50 p-2 text-slate-700 disabled:opacity-60">
-                  <option value="">Choose after recording</option>
-                  {folderState?.folders.map(folder => <option key={folder.id} value={folder.id}>{folder.name}</option>)}
-                </select>
+                <label htmlFor="recording-folder-preview" className="block font-semibold text-white">Recording destination</label>
+                <div className="relative min-w-0">
+                  <select id="recording-folder-preview" value={selectedFolderId ?? ''} onChange={event => setSelectedFolderId(event.target.value || null)}
+                    onFocus={() => void refreshFolders()}
+                    disabled={folderLoading || !folderState?.connected} className="w-full min-w-0 appearance-none truncate rounded-xl border border-slate-200 bg-slate-50 py-2 pl-3 pr-10 text-slate-700 disabled:opacity-60">
+                    <option value="">Choose after recording</option>
+                    {folderState?.folders.map(folder => <option key={folder.id} value={folder.id}>{folder.name}</option>)}
+                  </select>
+                  <ChevronDown aria-hidden="true" className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-500" />
+                </div>
                 {!folderState?.connected && !folderLoading && <p className="text-xs text-slate-500">Google Drive is not connected or the recording root is not verified. Batch folders are unavailable.</p>}
                 {folderLoading && <p role="status" className="text-xs text-slate-500">Loading verified folders...</p>}
                 {folderError && <p role="alert" className="text-xs text-red-700">{folderError}</p>}
-                <div className="flex flex-wrap gap-2">
-                  <button type="button" disabled={folderLoading || !folderState?.connected} onClick={() => void refreshFolders()} className="rounded-lg border border-slate-200 bg-slate-100 px-3 py-2 text-xs hover:bg-slate-200 transition-colors disabled:opacity-50">Refresh Folders</button>
-                  {folderState?.canCreate && <><input aria-label="New batch folder name" value={newFolderName} onChange={event => setNewFolderName(event.target.value)} maxLength={255} className="rounded-lg border border-slate-200 bg-slate-50 text-white px-3 py-2 text-xs" />
-                    <button type="button" disabled={folderLoading || !newFolderName.trim()} onClick={() => void createFolder()} className="rounded-lg border border-slate-200 bg-slate-100 px-3 py-2 text-xs hover:bg-slate-200 transition-colors disabled:opacity-50">Create New Batch Folder</button></>}
-                </div>
+                {folderState?.canCreate && <div className="space-y-2">
+                  <button type="button" aria-expanded={newFolderOpen} aria-controls="new-recording-folder" disabled={folderLoading} onClick={() => setNewFolderOpen(true)} className="rounded-lg border border-slate-200 bg-slate-100 px-3 py-2 text-xs hover:bg-slate-200 transition-colors disabled:opacity-50">Create New Folder</button>
+                  {newFolderOpen && <div id="new-recording-folder" className="space-y-2">
+                    <input autoFocus aria-label="New folder name" placeholder="Enter folder name" value={newFolderName} disabled={folderLoading} onChange={event => setNewFolderName(event.target.value)}
+                      onKeyDown={event => { if (event.key === 'Enter') { event.preventDefault(); void createFolder(); } }}
+                      maxLength={255} className="w-full min-w-0 rounded-lg border border-slate-200 bg-slate-50 text-white px-3 py-2 text-xs" />
+                    <div className="flex gap-2">
+                      <button type="button" disabled={folderLoading || !newFolderName.trim()} onClick={() => void createFolder()} className="rounded-lg border border-slate-200 bg-slate-100 px-3 py-2 text-xs hover:bg-slate-200 transition-colors disabled:opacity-50">Create</button>
+                      <button type="button" disabled={folderLoading} onClick={() => { setNewFolderOpen(false); setNewFolderName(''); setFolderError(''); }} className="rounded-lg border border-slate-200 bg-slate-100 px-3 py-2 text-xs hover:bg-slate-200 transition-colors disabled:opacity-50">Cancel</button>
+                    </div>
+                  </div>}
+                </div>}
+
               </div>
               {selectedFolderId && !folderLoading && folderState?.connected && folderState.folders.some(folder => folder.id === selectedFolderId) &&
                 <BatchStudents key={selectedFolderId} folderId={selectedFolderId} folderName={folderState.folders.find(folder => folder.id === selectedFolderId)!.name} />}
@@ -324,7 +348,7 @@ export const ScheduleModal: React.FC<ScheduleModalProps> = ({
 
       <button
         type="submit"
-        disabled={loading}
+        disabled={loading || (folderLoading && newFolderOpen)}
         className="w-full py-3.5 rounded-xl bg-blue-600 text-white font-semibold hover:bg-blue-700 transition-colors disabled:opacity-60"
       >
         {editingMeeting ? (loading ? "Saving..." : "Save Schedule") : meetingMode === "instant"

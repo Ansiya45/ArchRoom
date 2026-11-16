@@ -23,6 +23,7 @@ import {
   PhoneOff,
   BarChart3,
   Check,
+  Copy,
   Clock3,
   UserCheck,
 } from 'lucide-react';
@@ -136,6 +137,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
   const [recordingReview, setRecordingReview] = useState(false);
   const [verifiedRecordingLinks, setVerifiedRecordingLinks] = useState<Record<string, string>>({});
   const [recordingLinkNotice, setRecordingLinkNotice] = useState('');
+  const [copiedRecordingLink, setCopiedRecordingLink] = useState<string | null>(null);
   useEffect(() => {
     const completed = companyUpload.statuses.filter(status => status.stage === 'completed');
     if (!recordingReview || !recordingMeetingId || !user?.id || !completed.length) {
@@ -943,15 +945,19 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
         : <><p>Your meeting has closed. Keep this page open until you have saved or explicitly discarded your recording.</p>
           <p className="text-sm text-slate-400">Keep this page open until local recovery completes or you download the recording. Company upload depends on availability.</p></>}
       {!recordingLocked && companyUpload.statuses.filter(status => status.stage === 'completed').map(status =>
-        <div key={status.recordingId} className="space-y-2 rounded-[8px] border border-white/10 p-3 text-sm">
-          <p className="break-words font-semibold">{status.fileName}</p>
+        <div key={status.recordingId} className="min-w-0 space-y-2 text-sm">
+          <p className="truncate font-semibold" title={status.fileName}>{status.fileName}</p>
           {verifiedRecordingLinks[status.recordingId]
-            ? <><a className="break-all text-blue-300 underline" href={verifiedRecordingLinks[status.recordingId]} target="_blank" rel="noopener noreferrer">{verifiedRecordingLinks[status.recordingId]}</a>
-              <button className="block rounded-[8px] border border-white/10 px-4 py-2" onClick={() => {
-                void navigator.clipboard.writeText(verifiedRecordingLinks[status.recordingId]).then(
-                  () => setRecordingLinkNotice('Recording link copied.'),
-                  () => setRecordingLinkNotice('Could not copy the link. Select it above to copy manually.'));
-              }}>Copy Link</button></>
+            ? <div className="flex min-w-0 items-center gap-2">
+                <a className="min-w-0 flex-1 truncate text-blue-300 underline" href={verifiedRecordingLinks[status.recordingId]} target="_blank" rel="noopener noreferrer" title={verifiedRecordingLinks[status.recordingId]}>{verifiedRecordingLinks[status.recordingId]}</a>
+                <button type="button" aria-label={copiedRecordingLink === status.recordingId ? 'Recording link copied' : 'Copy recording link'} title={copiedRecordingLink === status.recordingId ? 'Recording link copied' : 'Copy recording link'} className="shrink-0 rounded-[8px] border border-white/10 p-2" onClick={() => {
+                  void navigator.clipboard.writeText(verifiedRecordingLinks[status.recordingId]).then(
+                    () => { setCopiedRecordingLink(status.recordingId); setRecordingLinkNotice(''); },
+                    () => { setCopiedRecordingLink(null); setRecordingLinkNotice('Could not copy the link. Select it above to copy manually.'); });
+                }}>{copiedRecordingLink === status.recordingId
+                  ? <Check aria-hidden="true" className="h-4 w-4 text-green-400" />
+                  : <Copy aria-hidden="true" className="h-4 w-4" />}</button>
+              </div>
             : <p className="text-slate-400">The verified Drive link is temporarily unavailable. You can leave and find the recording in Meeting History later.</p>}
         </div>)}
       {recordingLinkNotice && <p role="status" className="text-sm">{recordingLinkNotice}</p>}
@@ -962,11 +968,11 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
       {recorder.preview && recoverySetup && !recordingLocked && <button disabled={recoveryBusy} className="rounded-[8px] border border-white/10 px-4 py-2" onClick={() => void retryLocalSave()}>Save encrypted copy on this device</button>}
       {recorder.error && <p role="alert">{recorder.error}</p>}
       {recorder.preview && !recordingLocked && <button className="rounded-[8px] bg-violet-600 px-4 py-2" onClick={() => setIsRecordingsOpen(true)}>Save / Download Recording</button>}
-      <button className="rounded-[8px] border border-white/10 px-4 py-2" onClick={() => {
+      <button onClick={() => {
         if (recordingLocked) { if (window.confirm('Leaving will discard the in-page preview. Continue?')) navigate('/'); return; }
         if (!canLeaveRecordingReview(recorder.preview ? recorder.preview.recordingId : null, companyUpload.statuses)) { setIsRecordingsOpen(true); return; }
         recorder.clearPreview(); navigate('/');
-      }}>{recordingLocked ? 'Leave review' : recorder.preview
+      }} className="rounded-[8px] bg-red-600 px-4 py-2 text-white hover:bg-red-700">{recordingLocked ? 'Leave review' : recorder.preview
         ? canLeaveRecordingReview(recorder.preview.recordingId, companyUpload.statuses) ? 'Leave Meeting' : 'Review before leaving'
         : companyUpload.statuses.some(status => status.stage === 'completed') ? 'Leave Meeting' : 'Return home'}</button>
     </section>
@@ -1216,7 +1222,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
 
 
         {/* CENTER VIDEO GRID & STAGE */}
-        <div className="flex-1 h-full min-h-0 overflow-hidden flex flex-col relative">
+        <div className="flex-1 min-w-0 h-full min-h-0 overflow-hidden flex flex-col relative">
           <VideoGrid
             participants={meeting.participants}
             activeSpeakerId={meeting.activeSpeakerId}
@@ -1228,6 +1234,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
             onSelectSpeaker={meeting.setActiveSpeakerId}
             localStream={call.localStream}
             remoteStreams={call.remoteStreams}
+            remoteScreenStreams={call.remoteScreenStreams}
             remoteBackgrounds={call.remoteBackgrounds}
             remoteScreenShares={call.remoteScreenShares}
             remoteRaisedHands={call.remoteRaisedHands}
@@ -1279,7 +1286,7 @@ export const MeetingRoom: React.FC<MeetingRoomProps> = ({
 
         {/* RIGHT SIDEBAR (Chat / Participants / Activities) */}
         {meeting.activeSidebarTab && (
-          <div className="w-full sm:w-80 md:w-96 h-full min-h-0 flex-shrink-0 z-30 transition-all duration-300 animate-slideLeft">
+          <div className="w-[min(44vw,20rem)] sm:w-72 md:w-80 max-w-[44%] h-full min-h-0 flex-shrink-0 z-30 transition-all duration-300 animate-slideLeft">
             {meeting.activeSidebarTab === 'chat' && (
               <ChatPanel
                 messages={call.chatMessages}

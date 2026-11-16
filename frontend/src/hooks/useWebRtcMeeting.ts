@@ -16,8 +16,7 @@ function publicationTrack(participant: Participant, source: Track.Source) {
 }
 
 function participantStream(participant: Participant, previous?: MediaStream) {
-  const video = publicationTrack(participant, Track.Source.ScreenShare)
-    || publicationTrack(participant, Track.Source.Camera);
+  const video = publicationTrack(participant, Track.Source.Camera);
   const audio = publicationTrack(participant, Track.Source.Microphone);
   return updateMediaStream(previous, video, audio);
 }
@@ -48,6 +47,7 @@ export function useWebRtcMeeting(
   const [localStream, setLocalStream] = useState<MediaStream | null>(null);
   const [displayStream, setDisplayStream] = useState<MediaStream | null>(null);
   const [remoteStreams, setRemoteStreams] = useState<Record<string, MediaStream>>({});
+  const [remoteScreenStreams, setRemoteScreenStreams] = useState<Record<string, MediaStream>>({});
   const [isConnected, setIsConnected] = useState(false);
   const [remoteBackgrounds, setRemoteBackgrounds] = useState<Record<string, BackgroundChoice>>({});
   const [remoteScreenShares, setRemoteScreenShares] = useState<Record<string, boolean>>({});
@@ -127,6 +127,7 @@ export function useWebRtcMeeting(
     setDisplayStream(displayStreamRef.current);
 
     const streams: Record<string, MediaStream> = {};
+    const screenStreams: Record<string, MediaStream> = {};
     const backgrounds: Record<string, BackgroundChoice> = {};
     const screenShares: Record<string, boolean> = {};
     const raisedHands: Record<string, boolean> = {};
@@ -134,6 +135,8 @@ export function useWebRtcMeeting(
     const cameras: Record<string, boolean> = {};
     room.remoteParticipants.forEach((participant) => {
       streams[participant.identity] = streamFor(participant);
+      const screenTrack = publicationTrack(participant, Track.Source.ScreenShare);
+      if (screenTrack) screenStreams[participant.identity] = updateMediaStream(undefined, screenTrack);
       backgrounds[participant.identity] = backgroundOf(participant);
       screenShares[participant.identity] = Boolean(publicationTrack(participant, Track.Source.ScreenShare));
       raisedHands[participant.identity] = participant.attributes.handRaised === 'true';
@@ -148,6 +151,7 @@ export function useWebRtcMeeting(
     setTranscriptAccessAllowed(host?.attributes.transcriptAccess === 'true');
     streamsRef.current = streamsByIdentity;
     setRemoteStreams(streams);
+    setRemoteScreenStreams(screenStreams);
     setRemoteBackgrounds(backgrounds);
     setRemoteScreenShares(screenShares);
     setRemoteRaisedHands(raisedHands);
@@ -409,6 +413,7 @@ export function useWebRtcMeeting(
       setIsConnected(false);
       setDisplayStream(null);
       setRemoteStreams({});
+      setRemoteScreenStreams({});
       setSpeakingLevels({});
       setRemoteBackgrounds({});
       setRemoteScreenShares({});
@@ -500,6 +505,7 @@ export function useWebRtcMeeting(
     isConnected,
     localStream,
     remoteStreams,
+    remoteScreenStreams,
     remoteBackgrounds,
     remoteScreenShares,
     remoteRaisedHands,

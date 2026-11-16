@@ -409,8 +409,9 @@ test('verified company recording link can be copied before leaving without disca
   await expect(page.getByText('Recording saved successfully.')).toBeVisible();
   await expect(page.getByRole('link', { name: verifiedUrl })).toBeVisible();
   await expect(page.getByText(unrelatedUrl)).toHaveCount(0);
-  await page.getByRole('button', { name: 'Copy Link', exact: true }).click();
+  await page.getByRole('button', { name: 'Copy recording link', exact: true }).click();
   await expect.poll(() => page.evaluate(() => (window as any).__copiedRecordingLink)).toBe(verifiedUrl);
+  await expect(page.getByRole('button', { name: 'Recording link copied', exact: true }).locator('svg')).toHaveClass(/text-green-400/);
   await page.getByRole('button', { name: 'Leave Meeting', exact: true }).click();
   await expect(page).toHaveURL('/');
 });
