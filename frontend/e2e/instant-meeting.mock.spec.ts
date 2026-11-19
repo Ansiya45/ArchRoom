@@ -42,6 +42,7 @@ test.describe('instant meeting creation — isolated API', () => {
     expect(authMock.instantCreateCalls).toHaveLength(1);
     expect(authMock.instantCreateCalls[0]).toEqual({
       title: 'E2E instant product sync', meetingCode, startNow: false, reusable: true,
+      recordingFolderId: null, recordingAccessPolicy: 'private',
     });
     await expect.poll(() => page.evaluate(() => sessionStorage.getItem('e2e_instant_navigation')))
       .toBe(`/meet/${meetingCode}`);
@@ -136,5 +137,30 @@ test('scheduled weekly training uses selected weekdays with no end date', async 
   expect(authMock.instantCreateCalls[0]).toMatchObject({
     startNow: false, reusable: false,
     recurrence: { frequency: 'weekly', interval: 1, weekdays: [1, 3], ends: { type: 'never' } },
+  });
+});
+
+test('recording preferences save with meeting creation while Drive is disconnected', async ({ page, authMock }) => {
+  authMock.instantCreationEnabled = true;
+  await keepMeetingRoomOutOfScope(page);
+  await login(page, authMock);
+  const dialog = await openInstantMeeting(page);
+  const settings = dialog.getByRole('button', { name: /Settings Recording preview/ });
+  await settings.click();
+  await expect(dialog.getByRole('region', { name: 'Recording Settings' })).toBeVisible();
+  await expect(dialog.getByText('Folder choice and access preferences are saved with the meeting.', { exact: false })).toBeVisible();
+  await expect(dialog.getByLabel('Select batch/course folder')).toBeDisabled();
+  await expect(dialog.getByRole('button', { name: /Refresh Folders/ })).toBeDisabled();
+  await expect(dialog.getByRole('button', { name: 'Create New Batch Folder' })).toHaveCount(0);
+  await dialog.getByRole('radio', { name: /Anyone with the link/ }).check();
+  await expect(dialog.getByRole('alert')).toContainText('forwarded outside the intended audience');
+  await settings.click();
+  await expect(dialog.getByRole('region', { name: 'Recording Settings' })).toBeHidden();
+  await dialog.getByLabel('Meeting Topic / Title').fill('Preview only');
+  await dialog.locator('button[type=submit]').click();
+  await expect.poll(() => authMock.instantCreateCalls.length).toBe(1);
+  expect(authMock.instantCreateCalls[0]).toEqual({
+    title: 'Preview only', meetingCode: authMock.instantCreateCalls[0].meetingCode,
+    startNow: false, reusable: true, recordingFolderId: null, recordingAccessPolicy: 'anyone_with_link',
   });
 });

@@ -6,6 +6,7 @@ import { meetings, meetingOccurrences, meetingParticipants } from '../db/schema.
 import { occurrenceTimeZone } from './recurrence-series.service.js';
 import { expandRecurrence } from './recurrence.service.js';
 import { localDateTime } from './meeting-schedule.service.js';
+import { canOpenAssignedMeeting } from './meeting-host-access.js';
 
 type Meeting = typeof meetings.$inferSelect;
 export function assertCurrentOccurrence(meeting: Meeting, occurrenceId?: string | null) {
@@ -31,7 +32,7 @@ export class MeetingOccurrenceService {
   async upcoming(meetingCode: string, hostUserId: string, fromDate?: string, limit = 6, after?: { at: string; id: string }) {
     return db.transaction(async (tx) => {
       const [meeting] = await tx.select().from(meetings).where(eq(meetings.meetingCode, meetingCode)).for('update');
-      if (!meeting || meeting.hostUserId !== hostUserId) throw new TRPCError({ code: 'FORBIDDEN', message: 'Only the host can view scheduled occurrences.' });
+      if (!meeting || !await canOpenAssignedMeeting(meeting, hostUserId)) throw new TRPCError({ code: 'FORBIDDEN', message: 'Only the host can view scheduled occurrences.' });
       if (meeting.scheduleType !== 'recurring' || !meeting.scheduledAt || !meeting.timeZone || !meeting.recurrenceRule) throw new TRPCError({ code: 'BAD_REQUEST', message: 'This is not a recurring meeting.' });
       if (!Number.isInteger(limit) || limit < 1 || limit > 12) throw new TRPCError({ code: 'BAD_REQUEST', message: 'Invalid page size.' });
       const from = after ? localDateTime(new Date(after.at), meeting.timeZone).slice(0,10) : fromDate || localDateTime(new Date(), meeting.timeZone).slice(0,10);
@@ -67,7 +68,7 @@ export class MeetingOccurrenceService {
     if (!startRequestId) throw new TRPCError({ code: 'BAD_REQUEST', message: 'A start request ID is required for a reusable room.' });
     return db.transaction(async (tx) => {
       const [meeting] = await tx.select().from(meetings).where(eq(meetings.id, meetingId)).for('update');
-      if (!meeting || meeting.hostUserId !== hostUserId || (meeting.scheduleType !== 'reusable' && meeting.scheduleType !== 'recurring')) {
+      if (!meeting || !await canOpenAssignedMeeting(meeting, hostUserId) || (meeting.scheduleType !== 'reusable' && meeting.scheduleType !== 'recurring')) {
         throw new TRPCError({ code: 'FORBIDDEN', message: 'Only the host can open this room.' });
       }
       if (meeting.recurrenceCancelledAt) throw new TRPCError({ code: 'CONFLICT', message: 'This recurring series has been cancelled.' });
@@ -117,10 +118,11 @@ export class MeetingOccurrenceService {
         }
         return { ok: true, meeting, participant: existing };
       }
+      const assignedHost = userId ? await canOpenAssignedMeeting(meeting, userId) : false;
       const [participant] = await tx.insert(meetingParticipants).values({
         meetingId, occurrenceId, userId: userId ?? null, guestName: userId ? null : guestName!.trim(), joinRequestId,
-        role: userId && meeting.hostUserId === userId ? 'host' : 'participant',
-        admission: userId && meeting.hostUserId === userId ? 'admitted' : 'pending',
+        role: assignedHost ? 'host' : 'participant',
+        admission: assignedHost ? 'admitted' : 'pending',
       }).returning();
       return { ok: true, meeting, participant };
     });

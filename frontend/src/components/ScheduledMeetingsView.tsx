@@ -140,6 +140,7 @@ export const ScheduledMeetingsView: React.FC<ScheduledMeetingsViewProps> = ({
               </div>
 
               {m.record && m.record.hostUserId === hostUserId && <MeetingNotifications meeting={m.record} />}
+              {m.record && m.record.hostUserId === hostUserId && m.record.status !== 'live' && <button type="button" onClick={() => onRescheduleMeeting(m.record!)} className="text-left text-xs font-semibold text-blue-600 hover:text-blue-700">Session host settings</button>}
               {m.record?.scheduleType !== 'recurring' && m.record?.status === 'scheduled' && m.record.scheduledAt && m.record.hostUserId === hostUserId && (
                 <button type="button" onClick={() => onRescheduleMeeting(m.record!)}
                   className="text-left text-xs font-semibold text-blue-600 hover:text-blue-700">Reschedule</button>

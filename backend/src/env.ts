@@ -1,5 +1,20 @@
-import 'dotenv/config';
+import { config as loadDotenv } from 'dotenv';
+import { fileURLToPath } from 'node:url';
 import { z } from 'zod';
+
+// Resolve configuration relative to the backend package instead of the shell's
+// current working directory. Local development overrides belong in
+// backend/.env.local; backend/.env supplies the remaining defaults. Explicit
+// process variables always win. Test runners can continue to isolate themselves
+// by setting DOTENV_CONFIG_PATH.
+const configuredPath = process.env.DOTENV_CONFIG_PATH;
+loadDotenv({
+  path: configuredPath
+    ? configuredPath
+    : [fileURLToPath(new URL('../.env.local', import.meta.url)), fileURLToPath(new URL('../.env', import.meta.url))],
+  override: false,
+  quiet: true,
+});
 
 export const envSchema = z.object({
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
@@ -12,6 +27,17 @@ export const envSchema = z.object({
   DB_POOL_MAX: z.string().regex(/^[1-5]$/, 'DB_POOL_MAX must be an integer from 1 to 5').default('3').transform(Number),
   JWT_SECRET: z.string().min(1, 'JWT_SECRET is required'),
   JWT_EXPIRES_IN: z.string().default('1h'),
+  COMPANY_DRIVE_UPLOAD_JOBS_ENABLED: z.enum(['true', 'false']).default('false').transform(value => value === 'true'),
+  LOCAL_RECORDING_STAGING_ENABLED: z.enum(['true', 'false']).default('false').transform(value => value === 'true'),
+  // Stage A only: no OAuth endpoint or Drive client is enabled by these values.
+  GOOGLE_INTEGRATION_ADMIN_USER_ID: z.string().uuid().optional(),
+  GOOGLE_INTEGRATION_TOKEN_KEY: z.string().optional(),
+  GOOGLE_CLIENT_ID: z.string().optional(),
+  GOOGLE_CLIENT_SECRET: z.string().optional(),
+  GOOGLE_OAUTH_CALLBACK_URL: z.string().url().optional(),
+  STUDENT_GOOGLE_CLIENT_ID: z.string().optional(),
+  STUDENT_GOOGLE_CLIENT_SECRET: z.string().optional(),
+  STUDENT_GOOGLE_OAUTH_CALLBACK_URL: z.string().url().optional(),
   SUPABASE_URL: z.string().optional(),
   SUPABASE_SERVICE_ROLE_KEY: z.string().optional(),
   SUPABASE_STORAGE_BUCKET: z.string().default('meeting-recordings'),

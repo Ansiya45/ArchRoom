@@ -3,6 +3,18 @@ import { test, expect, openLogin, login, logout, expectNoSession } from './fixtu
 
 // Browser UI tests with mocked tRPC responses, NOT live credential verification.
 test.describe('authentication UI — mocked API', () => {
+  test('a failed old-session refresh cannot block a new sign-in', async ({ page, authMock }) => {
+    await page.addInitScript(() => {
+      localStorage.setItem('ylaam_meet_token', 'expired-token');
+      localStorage.setItem('ylaam_meet_refresh_token', 'a'.repeat(64));
+    });
+    await page.route('**/api/auth.refresh*', route => route.fulfill({ status: 500, contentType: 'application/json', body: JSON.stringify({ error: { message: 'An unexpected server error occurred', code: -32603, data: { code: 'INTERNAL_SERVER_ERROR', httpStatus: 500 } } }) }));
+    await openLogin(page);
+    await page.getByPlaceholder('name@company.com').fill(authMock.user.email);
+    await page.locator('input[autocomplete="current-password"]').fill(authMock.password);
+    await page.getByRole('button', { name: 'Sign in', exact: true }).click();
+    await expect(page.getByRole('banner').getByRole('button', { name: authMock.user.fullName })).toBeVisible();
+  });
   test('a delayed account response cannot restore private state after logout', async ({ page, authMock }) => {
     let release!: () => void;
     const held = new Promise<void>(resolve => { release = resolve; });
@@ -32,6 +44,37 @@ test.describe('authentication UI — mocked API', () => {
     await login(page, authMock);
     expect(await page.evaluate(() => localStorage.getItem('ylaam_meet_token'))).toBe(authMock.token);
     expect(await page.evaluate(() => JSON.parse(localStorage.getItem('ylaam_meet_user')!))).toEqual(authMock.user);
+  });
+
+  for (const mode of ['login', 'signup'] as const) {
+    test(`${mode} explains an empty server response without exposing a JSON parsing error`, async ({ page, authMock }) => {
+      await page.route(`**/api/auth.${mode}*`, route => route.fulfill({ status: 500, contentType: 'text/plain', body: '' }));
+      await page.goto('/');
+      if (mode === 'login') {
+        await openLogin(page);
+        await page.getByPlaceholder('name@company.com').fill(authMock.user.email);
+        await page.locator('input[autocomplete="current-password"]').fill(authMock.password);
+        await page.getByRole('button', { name: 'Sign in', exact: true }).click();
+      } else {
+        await page.getByRole('button', { name: 'Sign Up', exact: true }).click();
+        await page.getByPlaceholder('Jordan Miller').fill(authMock.user.fullName);
+        await page.getByPlaceholder('name@company.com').fill(authMock.user.email);
+        for (const input of await page.locator('input[autocomplete="new-password"]').all()) await input.fill(authMock.password);
+        await page.getByRole('button', { name: 'Create account', exact: true }).click();
+      }
+      await expect(page.getByRole('alert')).toHaveText('The server did not return a valid response. Check that the backend is running, then try again.');
+      await expectNoSession(page);
+    });
+  }
+
+  test('login explains an HTML server error without displaying parser internals', async ({ page, authMock }) => {
+    await page.route('**/api/auth.login*', route => route.fulfill({ status: 502, contentType: 'text/html', body: '<html><body>Proxy error</body></html>' }));
+    await openLogin(page);
+    await page.getByPlaceholder('name@company.com').fill(authMock.user.email);
+    await page.locator('input[autocomplete="current-password"]').fill(authMock.password);
+    await page.getByRole('button', { name: 'Sign in', exact: true }).click();
+    await expect(page.getByRole('alert')).toHaveText('The server did not return a valid response. Check that the backend is running, then try again.');
+    await expectNoSession(page);
   });
 
   test('incorrect password displays the backend error and permits retry', async ({ page, authMock }) => {
@@ -97,6 +140,18 @@ test.describe('authentication UI — mocked API', () => {
     await page.locator('input[autocomplete="current-password"]').fill(authMock.password);
     await page.getByRole('button', { name: 'Sign in', exact: true }).click();
     await expect(page.getByRole('banner').getByRole('button', { name: authMock.user.fullName })).toBeVisible();
+  });
+
+  test('invitation opened under another account requires an explicit safe account switch', async ({ page, authMock }) => {
+    await login(page, authMock);
+    await page.goto('/?invite=synthetic-invitation-token');
+    const dialog = page.getByRole('dialog', { name: 'Switch account to accept invitation' });
+    await expect(dialog).toContainText(authMock.user.email);
+    await expect(dialog).toContainText(authMock.invitationEmail);
+    await dialog.getByRole('button', { name: 'Sign out and accept invitation' }).click();
+    await expect(page.getByRole('heading', { name: 'Accept your invitation' })).toBeVisible();
+    await expect(page.getByPlaceholder('name@company.com')).toHaveValue(authMock.invitationEmail);
+    await expectNoSession(page);
   });
 
   test('session survives navigation and revalidates on reload', async ({ page, authMock }) => {

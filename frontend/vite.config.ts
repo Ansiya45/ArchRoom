@@ -14,6 +14,10 @@ export default defineConfig({
         ws: true,
         rewrite: (path) => path.replace(/^\/api(?=\/|$)/, ''),
       },
+      '/google-drive': {
+        target: 'http://127.0.0.1:3001',
+        changeOrigin: true,
+      },
     },
   },
   resolve: {

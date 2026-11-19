@@ -5,7 +5,11 @@ import { z } from 'zod';
 import { t } from '../trpc/init.js';
 import { MeetingService } from '../services/meeting.service.js';
 import { protectedProcedure } from '../trpc/protected.js';
-import { requireAnyFeature, requireFeature } from '../services/permission.service.js';
+import { getUserAccess, requireAnyFeature, requireFeature } from '../services/permission.service.js';
+import { db } from '../db/index.js';
+import { users } from '../db/schema.js';
+import { isNull, isNotNull, and } from 'drizzle-orm';
+import { TRPCError } from '@trpc/server';
 
 import { recurrenceInput } from '../services/recurrence.service.js';
 import { MeetingOccurrenceService } from '../services/meeting-occurrence.service.js';
@@ -13,12 +17,23 @@ import { MeetingOccurrenceService } from '../services/meeting-occurrence.service
 import { RecurrenceSeriesService } from '../services/recurrence-series.service.js';
 
 const meetingService = new MeetingService();
+const recordingSettingsInput = z.object({
+  recordingFolderId: z.string().min(1).max(128).nullable().optional(),
+  recordingAccessPolicy: z.enum(['private', 'restricted', 'anyone_with_link']),
+});
 const scheduleInput = z.object({
   localDateTime: z.string().regex(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/),
   timeZone: z.string().min(1).max(100),
 });
 
 export const meetingsRouter = t.router({
+  hostCandidates: protectedProcedure.query(async ({ ctx }) => {
+    const access = await getUserAccess(ctx.user.id);
+    if (access.disabled || access.role !== 'superadmin') throw new TRPCError({ code: 'FORBIDDEN' });
+    return db.select({ id: users.id, fullName: users.fullName, email: users.email }).from(users).where(and(isNull(users.disabledAt), isNotNull(users.emailVerifiedAt)));
+  }),
+  assignHost: protectedProcedure.input(z.object({ meetingId: z.string().uuid(), assignedHostUserId: z.string().uuid().nullable() }).strict())
+    .mutation(({ input, ctx }) => meetingService.assignHost(input.meetingId, input.assignedHostUserId, ctx.user.id)),
   history: protectedProcedure.input(z.object({ offset: z.number().int().min(0).max(100000).default(0) }))
     .query(async ({ input, ctx }) => {
       await requireFeature(ctx.user!.id, 'history', 'read');
@@ -33,12 +48,15 @@ export const meetingsRouter = t.router({
     .input(
       z.object({
         title: z.string().min(1),
+        assignedHostUserId: z.string().uuid().nullable().optional(),
         meetingCode: z.string().regex(/^YLM-[A-Z2-9]{6}$/).optional(),
         scheduledAt: z.string().datetime().optional().or(z.literal('')).optional(),
         startNow: z.boolean().default(false),
         schedule: scheduleInput.optional(),
         reusable: z.boolean().optional(),
         recurrence: recurrenceInput.optional(),
+        recordingFolderId: z.string().min(1).max(128).nullable().optional(),
+        recordingAccessPolicy: z.enum(['private', 'restricted', 'anyone_with_link']).optional(),
       })
     )
     .mutation(async ({ input, ctx }) => {
@@ -71,6 +89,10 @@ export const meetingsRouter = t.router({
       await requireFeature(ctx.user!.id, 'meetings.scheduled', 'write');
       return meetingService.rescheduleMeeting(input.meetingId, input.schedule, ctx.user!.id);
     }),
+
+  updateRecordingSettings: protectedProcedure
+    .input(recordingSettingsInput.extend({ meetingId: z.string().uuid() }))
+    .mutation(({ input, ctx }) => meetingService.updateRecordingSettings(input.meetingId, input, ctx.user!.id)),
 
   list: protectedProcedure.query(async ({ ctx }) => {
     await requireAnyFeature(ctx.user!.id, ['meetings.instant', 'meetings.scheduled'], 'read');
@@ -151,7 +173,8 @@ export const meetingsRouter = t.router({
       })
     )
     .mutation(async ({ input, ctx }) => {
-      await requireFeature(ctx.user!.id, 'meetings.instant', 'write');
+        const { meeting } = await meetingService.getByCode(input.meetingCode);
+        await requireFeature(ctx.user!.id, meeting.scheduleType === 'one_time' || meeting.scheduleType === 'recurring' ? 'meetings.scheduled' : 'meetings.instant', 'write');
       return meetingService.startMeeting(input.meetingCode, ctx.user!.id, input.startRequestId, input.expectedUpdatedAt, input.occurrenceId);
     }),
 

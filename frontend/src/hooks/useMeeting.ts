@@ -30,8 +30,10 @@ export function useMeeting(initialMeetingCode: string = 'YLM-9284-XKP') {
   const [recordingMs, setRecordingMs] = useState<number>(0);
 
   // Local User Controls
-  const [isMicOn, setIsMicOn] = useState<boolean>(true);
-  const [isCameraOn, setIsCameraOn] = useState<boolean>(true);
+  // Media is opt-in for every participant. Only the local mic/camera controls
+  // may change these values to true.
+  const [isMicOn, setIsMicOn] = useState<boolean>(false);
+  const [isCameraOn, setIsCameraOn] = useState<boolean>(false);
   const [isHandRaised, setIsHandRaised] = useState<boolean>(false);
   const [isScreenSharing, setIsScreenSharing] = useState<boolean>(false);
   const [isWhiteboardOpen, setIsWhiteboardOpen] = useState<boolean>(false);
@@ -40,13 +42,13 @@ export function useMeeting(initialMeetingCode: string = 'YLM-9284-XKP') {
   const [displayName, setDisplayNameState] = useState<string>(initialDisplayName);
   const [participants, setParticipants] = useState<Participant[]>([{
     id: 'user-self',
-    name: `${initialDisplayName} (You)`,
+    name: initialDisplayName,
     avatar: 'https://api.dicebear.com/9.x/initials/svg?seed=You',
     // The roster sync assigns the real role. Defaulting every signed-in user
     // to 'host' made non-owners briefly see a HOST badge on their own tile.
     role: 'attendee',
-    isMuted: false,
-    isCameraOn: true,
+    isMuted: true,
+    isCameraOn: false,
     isSpeaking: false,
     isHandRaised: false,
     isPinned: false,
@@ -104,17 +106,8 @@ export function useMeeting(initialMeetingCode: string = 'YLM-9284-XKP') {
     return () => clearInterval(interval);
   }, [isRecording, inMeeting]);
 
-  // Speaking state comes from LiveKit's ActiveSpeakersChanged event via
-  // syncSpeakers — it reflects real audio, not an animation timer.
+  // Preserve the actual audio levels separately while selecting a speaker.
   const syncSpeakers = useCallback((activeIds: string[]) => {
-    const active = new Set(activeIds);
-    setParticipants((prev) =>
-      prev.map((p) => ({
-        ...p,
-        isSpeaking: !p.isMuted && active.has(p.id),
-        audioLevel: !p.isMuted && active.has(p.id) ? 70 : 0,
-      }))
-    );
     const first = activeIds.find((id) => id !== 'user-self') ?? activeIds[0];
     if (first) setActiveSpeakerId(first);
   }, []);
@@ -124,7 +117,7 @@ export function useMeeting(initialMeetingCode: string = 'YLM-9284-XKP') {
     setIsMicOn((prev) => {
       const next = !prev;
       setParticipants((list) =>
-        list.map((p) => (p.id === 'user-self' ? { ...p, isMuted: !next } : p))
+        list.map((p) => (p.id === 'user-self' ? { ...p, isMuted: !next, isSpeaking: next ? p.isSpeaking : false, audioLevel: next ? p.audioLevel : 0 } : p))
       );
       return next;
     });
@@ -133,7 +126,7 @@ export function useMeeting(initialMeetingCode: string = 'YLM-9284-XKP') {
   const setMicEnabled = useCallback((enabled: boolean) => {
     setIsMicOn(enabled);
     setParticipants((list) =>
-      list.map((p) => (p.id === 'user-self' ? { ...p, isMuted: !enabled } : p))
+      list.map((p) => (p.id === 'user-self' ? { ...p, isMuted: !enabled, isSpeaking: enabled ? p.isSpeaking : false, audioLevel: enabled ? p.audioLevel : 0 } : p))
     );
   }, []);
 
@@ -142,7 +135,7 @@ export function useMeeting(initialMeetingCode: string = 'YLM-9284-XKP') {
       setDisplayNameState(name);
       setParticipants((list) =>
         list.map((participant) =>
-          participant.id === 'user-self' ? { ...participant, name: `${name || 'Guest User'} (You)` } : participant
+          participant.id === 'user-self' ? { ...participant, name: name || 'Guest User' } : participant
         )
       );
       storeMeetingSession(meetingCode, {
@@ -222,9 +215,17 @@ export function useMeeting(initialMeetingCode: string = 'YLM-9284-XKP') {
   const syncParticipantAudio = useCallback((mutedById: Record<string, boolean>) => {
     setParticipants((list) =>
       list.map((p) => p.id !== 'user-self' && mutedById[p.id] !== undefined
-        ? { ...p, isMuted: mutedById[p.id], isSpeaking: mutedById[p.id] ? false : p.isSpeaking }
+        ? { ...p, isMuted: mutedById[p.id], isSpeaking: mutedById[p.id] ? false : p.isSpeaking, audioLevel: mutedById[p.id] ? 0 : p.audioLevel }
         : p)
     );
+  }, []);
+
+  const syncParticipantSpeaking = useCallback((levelsById: Record<string, number>) => {
+    setParticipants((list) => list.map((p) => ({
+      ...p,
+      isSpeaking: !p.isMuted && levelsById[p.id] !== undefined,
+      audioLevel: !p.isMuted ? levelsById[p.id] ?? 0 : 0,
+    })));
   }, []);
 
   const syncParticipantVideo = useCallback((cameraById: Record<string, boolean>) => {
@@ -244,7 +245,7 @@ export function useMeeting(initialMeetingCode: string = 'YLM-9284-XKP') {
       const existing = current.find((participant) => participant.id === id);
       return {
         id,
-        name: `${entry.name}${entry.isSelf ? ' (You)' : ''}`,
+        name: entry.name,
         avatar: `https://api.dicebear.com/9.x/initials/svg?seed=${encodeURIComponent(entry.name)}`,
         role: entry.role === 'host' ? 'host' : 'attendee',
         // Media mute state is synchronized separately from LiveKit. Roster
@@ -349,6 +350,7 @@ export function useMeeting(initialMeetingCode: string = 'YLM-9284-XKP') {
     togglePinParticipant,
     toggleMuteParticipant,
     syncParticipantAudio,
+    syncParticipantSpeaking,
     syncParticipantVideo,
     syncParticipants,
     syncSpeakers,

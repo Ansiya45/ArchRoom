@@ -20,7 +20,7 @@ export async function createPersistentSession(user: typeof users.$inferSelect) {
 async function sessionUser(session: typeof authSessions.$inferSelect | undefined) {
   if (!session) return null;
   const user = await db.query.users.findFirst({ where: eq(users.id, session.userId) });
-  return user?.emailVerifiedAt && session.passwordVersion === digest(user.passwordHash) ? user : null;
+  return user?.emailVerifiedAt && !user.disabledAt && session.passwordVersion === digest(user.passwordHash) ? user : null;
 }
 
 export async function refreshSession(refreshToken: string) {
@@ -29,7 +29,7 @@ export async function refreshSession(refreshToken: string) {
   if (!user || !session) throw new TRPCError({ code: 'UNAUTHORIZED', message: 'Please sign in again.' });
   return {
     token: signJwt({ sub: user.id, email: user.email, name: user.fullName, sid: session.id }),
-    user: { id: user.id, email: user.email, fullName: user.fullName },
+    user: { id: user.id, email: user.email, fullName: user.fullName, role: user.role },
   };
 }
 

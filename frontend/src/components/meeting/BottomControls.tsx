@@ -26,7 +26,6 @@ interface BottomControlsProps {
 interface ControlButtonProps {
   onClick: () => void;
   icon: React.ReactNode;
-  label: string;
   isActive?: boolean;
   isDanger?: boolean;
   tooltip: string;
@@ -35,7 +34,6 @@ interface ControlButtonProps {
 const ControlButton: React.FC<ControlButtonProps> = ({
   onClick,
   icon,
-  label,
   isActive = false,
   isDanger = false,
   tooltip,
@@ -43,7 +41,7 @@ const ControlButton: React.FC<ControlButtonProps> = ({
   return (
     <div className="relative group flex flex-col items-center">
       {/* Tooltip */}
-      <div className="absolute -top-11 opacity-0 group-hover:opacity-100 transition-all duration-200 pointer-events-none z-50 transform group-hover:-translate-y-1">
+      <div className="absolute -top-11 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-all duration-200 pointer-events-none z-50 transform group-hover:-translate-y-1">
         <div className="px-2.5 py-1 rounded-lg bg-slate-900/90 border border-white/20 text-white text-[11px] font-semibold whitespace-nowrap shadow-xl backdrop-blur-md">
           {tooltip}
         </div>
@@ -52,21 +50,18 @@ const ControlButton: React.FC<ControlButtonProps> = ({
       {/* Button */}
       <button
         onClick={onClick}
+        aria-label={tooltip}
         className={`relative flex items-center justify-center space-x-1 p-3 sm:p-3.5 rounded-xl transition-all duration-200 backdrop-blur-md border ${
           isDanger
-            ? 'bg-red-500 hover:bg-red-600 text-white border-red-400 shadow-md shadow-red-200 active:scale-95'
+            ? 'bg-red-500 hover:bg-red-600 text-white border-red-400 active:scale-95'
             : isActive
-            ? 'bg-blue-600 hover:bg-blue-700 text-white border-blue-500 shadow-lg shadow-blue-200 active:scale-95'
-            : 'bg-white hover:bg-slate-50 text-slate-700 border-slate-200/90 shadow-sm active:scale-95'
+            ? 'bg-blue-600 hover:bg-blue-700 text-white border-blue-500 active:scale-95'
+            : 'bg-white hover:bg-slate-50 text-slate-700 border-slate-200/90 active:scale-95'
         }`}
       >
         <span className="w-5 h-5 flex items-center justify-center">{icon}</span>
       </button>
 
-      {/* Control Label below icon */}
-      <span aria-hidden={!label} className={`text-[10px] font-semibold mt-1 hidden md:block h-[15px] ${label ? 'text-slate-600' : 'invisible'}`}>
-        {label || 'Control'}
-      </span>
     </div>
   );
 };
@@ -89,7 +84,6 @@ export const BottomControls: React.FC<BottomControlsProps> = ({
         <ControlButton
           onClick={onToggleMic}
           icon={isMicOn ? <Mic /> : <MicOff />}
-          label=""
           isActive={isMicOn}
           isDanger={!isMicOn}
           tooltip={isMicOn ? 'Mute Microphone' : 'Unmute Microphone'}
@@ -99,7 +93,6 @@ export const BottomControls: React.FC<BottomControlsProps> = ({
         <ControlButton
           onClick={onToggleCamera}
           icon={isCameraOn ? <Video /> : <VideoOff />}
-          label={isCameraOn ? 'Video On' : 'Video Off'}
           isActive={isCameraOn}
           isDanger={!isCameraOn}
           tooltip={isCameraOn ? 'Turn Camera Off' : 'Turn Camera On'}
@@ -111,7 +104,6 @@ export const BottomControls: React.FC<BottomControlsProps> = ({
         <ControlButton
           onClick={onToggleScreenSharing}
           icon={<Monitor />}
-          label={isScreenSharing ? 'Stop Share' : 'Share Screen'}
           isActive={isScreenSharing}
           tooltip={isScreenSharing ? 'Stop Screen Sharing' : 'Share Entire Screen'}
         />
@@ -120,7 +112,6 @@ export const BottomControls: React.FC<BottomControlsProps> = ({
         <ControlButton
           onClick={onToggleHandRaised}
           icon={<Hand />}
-          label="Raise Hand"
           isActive={isHandRaised}
           tooltip={isHandRaised ? 'Lower Hand' : 'Raise Hand'}
         />
@@ -131,7 +122,6 @@ export const BottomControls: React.FC<BottomControlsProps> = ({
         <ControlButton
           onClick={onOpenLeave}
           icon={<PhoneOff />}
-          label="Leave"
           isDanger={true}
           tooltip="Leave Meeting"
         />

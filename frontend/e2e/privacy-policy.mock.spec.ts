@@ -10,8 +10,11 @@ test('public policy renders all sections and contact without authentication, inc
   await expect(page.getByRole('heading', { level: 2 })).toHaveCount(19);
   for (const title of titles) await expect(page.getByRole('heading', { level: 2 }).filter({ hasText: title })).toHaveCount(1);
   await expect(page.getByRole('link', { name: 'noreply@archonsolution.in', exact: true })).toHaveAttribute('href', 'mailto:noreply@archonsolution.in');
-  await expect(page.locator('main')).toContainText('AI transcription is off when you enter a meeting.');
-  await expect(page.locator('main')).toContainText('Each current participant is asked to agree or decline');
+  await expect(page.locator('main')).toContainText('AI transcription is off by default.');
+  await expect(page.locator('main')).toContainText('Other current participants are asked to agree or decline before transcription begins.');
+  await expect(page.locator('main')).toContainText("Transcription requires every current admitted participant's agreement.");
+  await expect(page.locator('main')).toContainText('If anyone declines, the request stops and transcription remains off.');
+  await expect(page.locator('main')).toContainText('A newly admitted participant must also agree before transcription can continue.');
   await expect(page.locator('main')).not.toContainText('[Company review');
   await expect(page.locator('main')).toContainText('Effective date: 14 October 2026');
   await page.reload();

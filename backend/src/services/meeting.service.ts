@@ -5,11 +5,13 @@ import { meetings, meetingAiRequests, meetingParticipants, meetingPreferences, u
 import { AccessToken, RoomServiceClient, TrackSource } from 'livekit-server-sdk';
 import { env } from '../env.js';
 import { MeetingOccurrenceService, assertCurrentOccurrence, participantScope, mediaRoomName } from './meeting-occurrence.service.js';
-import { canManageMeetingSession } from './meeting-host-access.js';
+import { canManageMeetingSession, canOpenAssignedMeeting } from './meeting-host-access.js';
+import { getUserAccess } from './permission.service.js';
 import { resolveMeetingSchedule, type MeetingSchedule } from './meeting-schedule.service.js';
 
 import { validateRecurrence, type RecurrenceRule } from './recurrence.service.js';
 import { normalizeMeetingCode } from './meeting-code.js';
+import { validateRecordingDestination } from './recording-folder-access.service.js';
 
 // Every connected client polls the roster endpoint; hitting LiveKit's
 // management API on each poll blows through its 1,000 req/min project cap at
@@ -36,12 +38,15 @@ async function liveIdentitiesFor(roomName: string): Promise<Set<string> | null> 
 
 export type CreateMeetingInput = {
   title: string;
+  assignedHostUserId?: string | null;
   meetingCode?: string;
   scheduledAt?: string | null;
   startNow?: boolean;
   schedule?: MeetingSchedule;
   reusable?: boolean;
   recurrence?: RecurrenceRule;
+  recordingFolderId?: string | null;
+  recordingAccessPolicy?: 'private' | 'restricted' | 'anyone_with_link';
 };
 
 export type JoinMeetingIdentity = {
@@ -52,7 +57,32 @@ export type JoinMeetingIdentity = {
 };
 
 export class MeetingService {
+  constructor(private readonly validateDestination = validateRecordingDestination) {}
+
+  async validateHostAssignment(actorId: string, targetId: string) {
+    const access = await getUserAccess(actorId);
+    if (access.disabled || access.role !== 'superadmin') throw new TRPCError({ code: 'FORBIDDEN', message: 'Only a super admin can assign a session host.' });
+    const target = await db.query.users.findFirst({ where: eq(users.id, targetId) });
+    if (!target || target.disabledAt || !target.emailVerifiedAt) throw new TRPCError({ code: 'BAD_REQUEST', message: 'Choose an active, verified workspace user.' });
+  }
+
+  async assignHost(meetingId: string, assignedHostUserId: string | null, actorId: string) {
+    const access = await getUserAccess(actorId);
+    if (access.disabled || access.role !== 'superadmin') throw new TRPCError({ code: 'FORBIDDEN' });
+    if (assignedHostUserId) await this.validateHostAssignment(actorId, assignedHostUserId);
+    return db.transaction(async tx => {
+      const [previous] = await tx.select().from(meetings).where(and(eq(meetings.id, meetingId), eq(meetings.hostUserId, actorId))).for('update');
+      if (!previous || previous.status === 'live') throw new TRPCError({ code: 'CONFLICT', message: 'Assign the host on your own meeting before its session starts.' });
+      if (previous.assignedHostUserId && previous.assignedHostUserId !== assignedHostUserId && previous.assignedHostUserId !== actorId) {
+        await tx.update(meetingParticipants).set({ role: 'participant' }).where(and(eq(meetingParticipants.meetingId, meetingId), eq(meetingParticipants.userId, previous.assignedHostUserId), isNull(meetingParticipants.leftAt), participantScope(previous)));
+      }
+      const [meeting] = await tx.update(meetings).set({ assignedHostUserId, updatedAt: new Date() }).where(eq(meetings.id, meetingId)).returning();
+      return { ok: true, meeting };
+    });
+  }
+
   async createMeeting(input: CreateMeetingInput, hostUserId: string) {
+    if (input.assignedHostUserId) await this.validateHostAssignment(hostUserId, input.assignedHostUserId);
     if (input.reusable && (input.schedule || input.scheduledAt || input.startNow)) {
       throw new TRPCError({ code: 'BAD_REQUEST', message: 'Reusable rooms have no scheduled time. Create the room, then open it when needed.' });
     }
@@ -66,6 +96,7 @@ export class MeetingService {
     if (!title) {
       throw new TRPCError({ code: 'BAD_REQUEST', message: 'Meeting title is required' });
     }
+    const recordingFolderId = await this.validateDestination(hostUserId, input.recordingFolderId ?? null);
 
     const code = input.meetingCode
       ? await this.validateAvailableMeetingCode(input.meetingCode)
@@ -76,6 +107,9 @@ export class MeetingService {
         .insert(meetings)
         .values({
           title,
+          assignedHostUserId: input.assignedHostUserId ?? null,
+          recordingFolderId,
+          recordingAccessPolicy: input.recordingAccessPolicy ?? 'private',
           hostUserId,
           meetingCode: code,
           scheduledAt: schedule?.scheduledAt ?? (input.scheduledAt ? new Date(input.scheduledAt) : null),
@@ -123,11 +157,22 @@ export class MeetingService {
     return { ok: true, meeting: updated };
   }
 
+  async updateRecordingSettings(meetingId: string, input: { recordingFolderId?: string | null; recordingAccessPolicy: 'private' | 'restricted' | 'anyone_with_link' }, userId: string) {
+    const meeting = await db.query.meetings.findFirst({ where: eq(meetings.id, meetingId) });
+    if (!meeting) throw new TRPCError({ code: 'NOT_FOUND', message: 'Meeting not found' });
+    if (meeting.hostUserId !== userId) throw new TRPCError({ code: 'FORBIDDEN', message: 'Only the meeting creator can change recording settings.' });
+    const recordingFolderId = await this.validateDestination(userId, input.recordingFolderId ?? null);
+    const [updated] = await db.update(meetings).set({ recordingFolderId, recordingAccessPolicy: input.recordingAccessPolicy })
+      .where(and(eq(meetings.id, meetingId), eq(meetings.hostUserId, userId))).returning();
+    if (!updated) throw new TRPCError({ code: 'CONFLICT', message: 'Meeting settings could not be updated.' });
+    return { ok: true, meeting: updated };
+  }
+
   async listMeetings(userId: string) {
     // These queries are independent. Run them together so dashboard latency is
     // bounded by the slowest database query instead of their sum.
     const [rows, participants, preferences] = await Promise.all([
-      db.select().from(meetings).where(eq(meetings.hostUserId, userId)),
+      db.select().from(meetings).where(or(eq(meetings.hostUserId, userId), eq(meetings.assignedHostUserId, userId))),
       db.select({ meetingId: meetingParticipants.meetingId })
         .from(meetingParticipants)
         .where(and(eq(meetingParticipants.userId, userId), isNull(meetingParticipants.leftAt))),
@@ -191,6 +236,7 @@ export class MeetingService {
     }
 
     if (identity.userId) {
+      const assignedHost = await canOpenAssignedMeeting(meeting, identity.userId);
       const existing = await db.query.meetingParticipants.findFirst({
         where: and(
           eq(meetingParticipants.meetingId, meeting.id), participantScope(meeting),
@@ -200,6 +246,10 @@ export class MeetingService {
       });
 
       if (existing) {
+        if (assignedHost && existing.role !== 'host') {
+          const [updated] = await db.update(meetingParticipants).set({ role: 'host', admission: 'admitted' }).where(eq(meetingParticipants.id, existing.id)).returning();
+          return { ok: true, meeting, participant: updated };
+        }
         return { ok: true, meeting, participant: existing };
       }
 
@@ -212,7 +262,7 @@ export class MeetingService {
       });
       if (previouslyAdmitted) {
         const [rejoined] = await db.update(meetingParticipants)
-          .set({ leftAt: null, joinedAt: new Date() })
+          .set({ leftAt: null, joinedAt: new Date(), ...(assignedHost ? { role: 'host' as const } : {}) })
           .where(eq(meetingParticipants.id, previouslyAdmitted.id))
           .returning();
         return { ok: true, meeting, participant: rejoined };
@@ -225,8 +275,8 @@ export class MeetingService {
           userId: identity.userId,
           guestName: null,
           joinRequestId: identity.joinRequestId,
-          role: 'participant',
-          admission: meeting.hostUserId === identity.userId ? 'admitted' : 'pending',
+          role: assignedHost ? 'host' : 'participant',
+          admission: assignedHost ? 'admitted' : 'pending',
           joinedAt: new Date(),
           leftAt: null,
         })
@@ -404,7 +454,7 @@ export class MeetingService {
       throw new TRPCError({ code: 'NOT_FOUND', message: 'Meeting not found' });
     }
 
-    if (meeting.hostUserId !== userId) {
+    if (!await canOpenAssignedMeeting(meeting, userId)) {
       throw new TRPCError({ code: 'FORBIDDEN', message: 'Only the meeting host can start this meeting' });
     }
 

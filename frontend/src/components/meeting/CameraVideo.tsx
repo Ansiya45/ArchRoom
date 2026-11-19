@@ -9,6 +9,7 @@ interface CameraVideoProps {
   activeBg?: BackgroundChoice;
   className?: string;
   fallbackAvatar?: string;
+  cameraOffContent?: React.ReactNode;
   objectFit?: 'cover' | 'contain';
   isSelf?: boolean;
   mediaStream?: MediaStream | null;
@@ -66,6 +67,7 @@ export const CameraVideo: React.FC<CameraVideoProps> = ({
   isCameraOn,
   activeBg = 'none',
   className = '',
+  cameraOffContent,
   fallbackAvatar = 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=800&auto=format&fit=crop&q=80',
   objectFit = 'cover',
   isSelf = true,
@@ -409,6 +411,10 @@ export const CameraVideo: React.FC<CameraVideoProps> = ({
       if (animFrameId) cancelAnimationFrame(animFrameId);
     };
   }, [effectiveBg, isCameraOn, stream, isSelf, hasError, isAiSegmentationReady]);
+
+  if (!isCameraOn && cameraOffContent) {
+    return <div className={`w-full h-full flex items-center justify-center bg-[#080b1f] p-6 text-center ${className}`}>{cameraOffContent}</div>;
+  }
 
   if (!isCameraOn) {
     return (

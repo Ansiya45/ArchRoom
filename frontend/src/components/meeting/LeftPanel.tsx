@@ -61,7 +61,7 @@ export const LeftPanel: React.FC<LeftPanelProps> = ({
             onClick={onToggleWhiteboard}
             className={`p-3 rounded-2xl transition-all duration-200 border ${
               isWhiteboardOpen
-                ? 'bg-blue-600 text-white border-blue-500 shadow-md shadow-blue-200 scale-105'
+                ? 'bg-blue-600 text-white border-blue-500 scale-105'
                 : 'bg-slate-100/80 hover:bg-slate-200/80 text-slate-600 border-slate-200/60 hover:scale-105'
             }`}
           >
@@ -80,7 +80,7 @@ export const LeftPanel: React.FC<LeftPanelProps> = ({
             onClick={onToggleBgPicker}
             className={`p-3 rounded-2xl transition-all duration-200 border ${
               isBgPickerOpen
-                ? 'bg-blue-600 text-white border-blue-500 shadow-md shadow-blue-200 scale-105'
+                ? 'bg-blue-600 text-white border-blue-500 scale-105'
                 : 'bg-slate-100/80 hover:bg-slate-200/80 text-slate-600 border-slate-200/60 hover:scale-105'
             }`}
           >
@@ -99,7 +99,7 @@ export const LeftPanel: React.FC<LeftPanelProps> = ({
             onClick={() => onToggleSidebarTab('chat')}
             className={`relative p-3 rounded-2xl transition-all duration-200 border ${
               activeSidebarTab === 'chat'
-                ? 'bg-blue-600 text-white border-blue-500 shadow-md shadow-blue-200 scale-105'
+                ? 'bg-blue-600 text-white border-blue-500 scale-105'
                 : 'bg-slate-100/80 hover:bg-slate-200/80 text-slate-600 border-slate-200/60 hover:scale-105'
             }`}
           >
@@ -123,7 +123,7 @@ export const LeftPanel: React.FC<LeftPanelProps> = ({
             onClick={() => onToggleSidebarTab('participants')}
             className={`p-3 rounded-2xl transition-all duration-200 border relative ${
               activeSidebarTab === 'participants'
-                ? 'bg-blue-600 text-white border-blue-500 shadow-md shadow-blue-200 scale-105'
+                ? 'bg-blue-600 text-white border-blue-500 scale-105'
                 : 'bg-slate-100/80 hover:bg-slate-200/80 text-slate-600 border-slate-200/60 hover:scale-105'
             }`}
           >
@@ -145,9 +145,10 @@ export const LeftPanel: React.FC<LeftPanelProps> = ({
         {isHost && canRecord && <div className="relative group flex items-center justify-center">
           <button
             onClick={onToggleRecording}
+            aria-label={isRecording ? 'Stop recording' : 'Start recording'}
             className={`p-3 rounded-2xl transition-all duration-200 border ${
               isRecording
-                ? 'bg-red-500 text-white border-red-400 shadow-md shadow-red-200 animate-pulse scale-105'
+                ? 'bg-red-500 text-white border-red-400 animate-pulse scale-105'
                 : 'bg-slate-100/80 hover:bg-slate-200/80 text-slate-600 border-slate-200/60 hover:scale-105'
             }`}
           >

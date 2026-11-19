@@ -100,10 +100,10 @@ test.describe('application dashboard — isolated API', () => {
     const save = page.getByRole('button', { name: 'Save & Apply Settings' });
     await save.click();
     await save.click();
-    await expect(page.getByText('Settings saved successfully!')).toHaveCount(1);
+    await expect(page.getByText('Device preferences saved. They will be applied when the next meeting starts.')).toHaveCount(1);
     await page.getByRole('button', { name: 'Home', exact: true }).click();
     await expect(page.getByRole('heading', { name: /Meet Without/ })).toBeVisible();
-    await expect(page.getByText('Settings saved successfully!')).toBeHidden({ timeout: 5_000 });
+    await expect(page.getByText('Device preferences saved. They will be applied when the next meeting starts.')).toBeHidden({ timeout: 5_000 });
   });
 
   test('logout and browser navigation cannot restore dashboard data', async ({ page, authMock }) => {

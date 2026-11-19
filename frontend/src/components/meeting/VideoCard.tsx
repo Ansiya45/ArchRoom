@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   Mic,
   MicOff,
@@ -24,6 +24,34 @@ interface VideoCardProps {
   isSelf?: boolean;
   activeBg?: BackgroundChoice;
   mediaStream?: MediaStream | null;
+}
+
+let meterContext: AudioContext | null = null;
+let meterUsers = 0;
+
+function resumeMeterContext() {
+  if (meterContext?.state === 'suspended') void meterContext.resume().catch(() => undefined);
+}
+
+function acquireMeterContext() {
+  meterContext ??= new AudioContext();
+  if (meterUsers === 0) {
+    window.addEventListener('pointerdown', resumeMeterContext);
+    window.addEventListener('keydown', resumeMeterContext);
+  }
+  meterUsers += 1;
+  resumeMeterContext();
+  return meterContext;
+}
+
+function releaseMeterContext(context: AudioContext) {
+  meterUsers -= 1;
+  if (meterUsers === 0 && meterContext === context) {
+    window.removeEventListener('pointerdown', resumeMeterContext);
+    window.removeEventListener('keydown', resumeMeterContext);
+    meterContext = null;
+    void context.close();
+  }
 }
 
 const SharedScreenVideo: React.FC<{ stream: MediaStream }> = ({ stream }) => {
@@ -79,6 +107,57 @@ export const VideoCard: React.FC<VideoCardProps> = ({
     isScreenSharing,
     audioLevel,
   } = participant;
+  const [detectedAudioLevel, setDetectedAudioLevel] = useState(0);
+  const [audioTrack, setAudioTrack] = useState<MediaStreamTrack | undefined>(() => mediaStream?.getAudioTracks()[0]);
+
+  useEffect(() => {
+    const refreshTrack = () => setAudioTrack(mediaStream?.getAudioTracks()[0]);
+    refreshTrack();
+    mediaStream?.addEventListener('addtrack', refreshTrack);
+    mediaStream?.addEventListener('removetrack', refreshTrack);
+    return () => {
+      mediaStream?.removeEventListener('addtrack', refreshTrack);
+      mediaStream?.removeEventListener('removetrack', refreshTrack);
+    };
+  }, [mediaStream]);
+
+  useEffect(() => {
+    if (isMuted || !audioTrack || !globalThis.AudioContext) {
+      setDetectedAudioLevel(0);
+      return;
+    }
+    setDetectedAudioLevel(0);
+    let context: AudioContext;
+    let source: MediaStreamAudioSourceNode;
+    try {
+      context = acquireMeterContext();
+      source = context.createMediaStreamSource(new MediaStream([audioTrack]));
+    } catch {
+      if (context!) releaseMeterContext(context);
+      return;
+    }
+    const analyser = context.createAnalyser();
+    analyser.fftSize = 512;
+    source.connect(analyser);
+    const samples = new Uint8Array(analyser.fftSize);
+    let lastSoundAt = 0;
+    const timer = window.setInterval(() => {
+      analyser.getByteTimeDomainData(samples);
+      let total = 0;
+      for (const sample of samples) total += Math.abs(sample - 128);
+      const level = Math.min(100, Math.round(total / samples.length * 3));
+      if (level > 3) lastSoundAt = Date.now();
+      setDetectedAudioLevel(Date.now() - lastSoundAt < 400 ? Math.max(level, 6) : 0);
+    }, 100);
+    return () => {
+      window.clearInterval(timer);
+      source.disconnect();
+      releaseMeterContext(context);
+    };
+  }, [audioTrack, isMuted]);
+
+  const waveSpeaking = !isMuted && (detectedAudioLevel > 0 || isSpeaking);
+  const waveLevel = Math.max(detectedAudioLevel, audioLevel);
 
   return (
     <div
@@ -218,7 +297,7 @@ export const VideoCard: React.FC<VideoCardProps> = ({
 
       {/* Top Right Quick Actions */}
       <div className={`absolute top-3 right-3 z-20 flex items-center space-x-1.5 transition-opacity duration-200 ${
-        isPinned ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
+        isPinned ? 'opacity-100' : 'opacity-100 md:opacity-0 md:group-hover:opacity-100 md:group-focus-within:opacity-100'
       }`}>
         {onTogglePin && (
           <button
@@ -232,6 +311,8 @@ export const VideoCard: React.FC<VideoCardProps> = ({
                 : 'bg-black/40 text-white border-white/20 hover:bg-black/60'
             }`}
             title={isPinned ? 'Unpin Speaker' : 'Pin Speaker'}
+            aria-label={isPinned ? `Unpin ${name}` : `Pin ${name}`}
+            aria-pressed={isPinned}
           >
             <Pin className="w-3.5 h-3.5 fill-current" />
           </button>
@@ -256,52 +337,33 @@ export const VideoCard: React.FC<VideoCardProps> = ({
       <div className="absolute bottom-3 left-3 right-3 z-20 flex items-center justify-between pointer-events-none">
         {/* Name Pill */}
         <div className="flex items-center space-x-2 px-3.5 py-2 rounded-xl bg-black/40 backdrop-blur-md border border-white/20 text-white max-w-[85%] shadow-lg">
-          {/* Mute/Mic status */}
+          {/* Audio status wave */}
           <div
-            className={`p-1 rounded-md ${
+            role="img"
+            aria-label={isMuted ? 'Microphone muted' : 'Microphone on'}
+            className={`flex h-5 w-6 items-center justify-center gap-0.5 rounded-md p-1 ${
               isMuted ? 'bg-red-500/30 text-red-300' : 'bg-emerald-500/30 text-emerald-300'
             }`}
           >
-            {isMuted ? <MicOff className="w-3.5 h-3.5" /> : <Mic className="w-3.5 h-3.5" />}
+            {[1, 2, 3].map((bar) => (
+              <span
+                key={bar}
+                aria-hidden="true"
+                className={`${waveSpeaking ? 'w-0.5 self-end animate-bounce' : 'h-1 w-1'} rounded-full ${isMuted ? 'bg-red-300' : 'bg-emerald-300'}`}
+                style={waveSpeaking ? {
+                  height: `${Math.min(100, Math.max(60, waveLevel * 5) * (bar === 2 ? 0.8 : bar === 3 ? 0.6 : 1))}%`,
+                  animationDuration: `${bar === 2 ? 0.3 : bar === 3 ? 0.5 : 0.4}s`,
+                } : undefined}
+              />
+            ))}
           </div>
 
           <span className="text-xs font-semibold truncate">
             {name}
           </span>
 
-          {/* Equalizer animation when speaking */}
-          {!isMuted && isSpeaking && (
-            <div className="flex items-end space-x-0.5 h-3 px-1">
-              <div
-                className="w-0.5 bg-blue-400 rounded-full animate-bounce"
-                style={{ height: `${Math.max(20, audioLevel)}%`, animationDuration: '0.4s' }}
-              />
-              <div
-                className="w-0.5 bg-blue-400 rounded-full animate-bounce"
-                style={{ height: `${Math.max(40, audioLevel * 0.8)}%`, animationDuration: '0.3s' }}
-              />
-              <div
-                className="w-0.5 bg-blue-400 rounded-full animate-bounce"
-                style={{ height: `${Math.max(15, audioLevel * 0.5)}%`, animationDuration: '0.5s' }}
-              />
-            </div>
-          )}
         </div>
 
-        {/* Pin indicator badge (Clickable to unpin) */}
-        {isPinned && (
-          <button
-            onClick={(e) => {
-              e.stopPropagation();
-              onTogglePin?.(id);
-            }}
-            className="pointer-events-auto px-2.5 py-1 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-[10px] font-semibold border border-blue-300/40 flex items-center space-x-1 shadow-md transition-colors"
-            title="Click to unpin"
-          >
-            <Pin className="w-3 h-3 fill-current" />
-            <span className="hidden sm:inline">Pinned</span>
-          </button>
-        )}
       </div>
     </div>
   );

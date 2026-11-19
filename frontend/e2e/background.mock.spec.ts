@@ -1,4 +1,28 @@
 import { test, expect } from './fixtures/auth-mock';
+test('published background track keeps foreground and replacement visible across frames', async ({ page }) => {
+  await page.route('https://images.unsplash.com/**', route => route.fulfill({ contentType: 'image/svg+xml', headers: { 'Access-Control-Allow-Origin': '*' }, body: '<svg xmlns="http://www.w3.org/2000/svg" width="320" height="180"><rect width="320" height="180" fill="blue"/></svg>' }));
+  await page.goto('/');
+  await page.evaluate(async () => {
+    const w = window as any;
+    const source = document.createElement('canvas'); source.width = 320; source.height = 180;
+    const paint = () => { source.getContext('2d')!.fillStyle = 'red'; source.getContext('2d')!.fillRect(0, 0, 320, 180); w.paintFrame = requestAnimationFrame(paint); }; paint();
+    w.source = source.captureStream(30);
+    w.SelfieSegmentation = class {
+      cb: any; setOptions() {} onResults(cb: any) { this.cb = cb; } async close() {}
+      async send() { const mask = document.createElement('canvas'); mask.width = 320; mask.height = 180; const ctx = mask.getContext('2d')!; ctx.fillStyle = 'white'; ctx.fillRect(0, 0, 160, 180); this.cb({ segmentationMask: mask }); }
+    };
+    const modulePath = '/src/lib/backgroundVideoProcessor.ts';
+    const { createBackgroundVideoProcessor } = await import(/* @vite-ignore */ modulePath);
+    w.processor = createBackgroundVideoProcessor('office');
+    await w.processor.init({ track: w.source.getVideoTracks()[0] });
+    const video = document.createElement('video'); video.id = 'published-output'; video.muted = true; video.autoplay = true; video.srcObject = new MediaStream([w.processor.processedTrack]); document.body.append(video); await video.play();
+  });
+  const sample = () => page.evaluate(() => { const video = document.querySelector<HTMLVideoElement>('#published-output')!; const canvas = document.createElement('canvas'); canvas.width = 320; canvas.height = 180; const ctx = canvas.getContext('2d')!; ctx.drawImage(video, 0, 0, 320, 180); return [ctx.getImageData(40, 90, 1, 1).data[0], ctx.getImageData(280, 90, 1, 1).data[2]]; });
+  await expect.poll(sample).toEqual([255, 255]);
+  await page.waitForTimeout(300);
+  expect(await sample()).toEqual([255, 255]);
+  await page.evaluate(async () => { const w = window as any; await w.processor.destroy(); cancelAnimationFrame(w.paintFrame); w.source.getTracks().forEach((track: MediaStreamTrack) => track.stop()); });
+});
 test('switching backgrounds retains the camera and restores original video', async ({ page }) => {
   await page.goto('/');
   await page.evaluate(async () => {

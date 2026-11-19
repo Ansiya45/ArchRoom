@@ -12,7 +12,7 @@ const { signJwt, verifyJwt } = await import('../src/utils/jwt.js');
 const { createContext } = await import('../src/trpc/context.js');
 
 async function fixture(run: (f: any) => Promise<void>) {
-  const user = { id: randomUUID(), email: 'test@example.invalid', fullName: 'Test', passwordHash: 'password-hash', emailVerifiedAt: new Date() };
+  const user = { id: randomUUID(), email: 'test@example.invalid', fullName: 'Test', role: 'superadmin', passwordHash: 'password-hash', emailVerifiedAt: new Date(), disabledAt: null as Date | null };
   const sessions = new Map<string, any>();
   const original = { insert: db.insert, delete: db.delete, session: db.query.authSessions.findFirst, user: db.query.users.findFirst };
   const dialect = new PgDialect();
@@ -47,7 +47,16 @@ test('device credential is stored hashed and renews an expired access token', ()
   assert.throws(() => verifyJwt(expired), /expired/);
   const renewed = await refreshSession(device.refreshToken);
   assert.equal(verifyJwt(renewed.token).sid, device.sessionId);
+  assert.equal(renewed.user.role, 'superadmin');
   assert.equal(await isSessionActive(verifyJwt(renewed.token)), true);
+}));
+
+test('disabling a user immediately rejects refresh and existing access sessions', () => fixture(async ({ user }) => {
+  const device = await createPersistentSession(user);
+  const access = await refreshSession(device.refreshToken);
+  user.disabledAt = new Date();
+  await assert.rejects(refreshSession(device.refreshToken), { code: 'UNAUTHORIZED' });
+  assert.equal(await isSessionActive(verifyJwt(access.token)), false);
 }));
 
 test('logout revokes both renewal and access for that device while preserving another device', () => fixture(async ({ user }) => {

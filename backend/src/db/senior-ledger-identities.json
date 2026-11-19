@@ -1,0 +1,122 @@
+[
+  {
+    "timestamp": 1786439803205,
+    "tag": "0000_left_quicksilver",
+    "acceptedHashes": [
+      "47efddc263792f3142a4c354d8372929df5d3c765f7f3d55fb414ebe63673502",
+      "1ce8acd8aa5e01d181cef8d1f3fac357bd03383e4f5bd29d1edf243b55c49130"
+    ]
+  },
+  {
+    "timestamp": 1786690871104,
+    "tag": "0001_illegal_loners",
+    "acceptedHashes": [
+      "82bcad4150231ca5151e82ad3dc325041a7d36fd2d8a71cb17d2485eb7a6c25f"
+    ]
+  },
+  {
+    "timestamp": 1787011200000,
+    "tag": "0002_waiting_room",
+    "acceptedHashes": [
+      "b8604a7f44a8b461395a9b0171a7f61f941a07f42ecf2c26a265b9857e1e6941",
+      "aee58b7d6a3612aa5ada18c7b5444d8fcc71219d7aea553323246d7bb312988d"
+    ]
+  },
+  {
+    "timestamp": 1787990400000,
+    "tag": "0003_idempotent_join",
+    "acceptedHashes": [
+      "2a286e8c5c2147b1219914cc9336548f1411dfe14321c9eaf4245ca7ee1fb503",
+      "90190b44ba82a9054fac1c62b94c69579ef300ea80a1f283167df44f90e028a0"
+    ]
+  },
+  {
+    "timestamp": 1788307200000,
+    "tag": "0004_email_auth",
+    "acceptedHashes": [
+      "fb98fc3651b3107d19dc22218dc4c97a55d22eddbc9a36b6c64fe4f09933afd2",
+      "3a6feac4561a45c69ad2ac2018b215e5bd764a1e6be4aec6417433ae6ef94f42"
+    ]
+  },
+  {
+    "timestamp": 1789631531134,
+    "tag": "0005_one_time_scheduling",
+    "acceptedHashes": [
+      "c0e2aa8c5e44ec7d103417894946ea8ac31ba41fc23464082b86fad77ce39145",
+      "9de073a4cb4e085ad2d501d5ea4467f1d1b38da263b1f01d87e253a9c719cde0"
+    ]
+  },
+  {
+    "timestamp": 1789810245943,
+    "tag": "0006_reusable_sessions",
+    "acceptedHashes": [
+      "e7be0c9338e81ed0b316d7267f8be887b1462aab95a656e3e010faba436d28ef",
+      "08e10a871b70982204154a10eca5192fae2832d636d9cbe9b25092bc9bbf0c92"
+    ]
+  },
+  {
+    "timestamp": 1789811481362,
+    "tag": "0007_recurring_meetings",
+    "acceptedHashes": [
+      "dc0194c9786a9eea19ab07fc9116296b767597305ef92da0cef68608da1813c4",
+      "c40da8380d0a2b240f61c47b16377cef9bcc64f9a321dc47765fa1b122200b0c"
+    ]
+  },
+  {
+    "timestamp": 1789812354798,
+    "tag": "0008_meeting_notifications",
+    "acceptedHashes": [
+      "3fbce7ff06c8efdbcae65841ac192e381b1d0b366a2b9fa5d1984f0cc8ead850",
+      "365de70a942bf8797aa3cd1e6c694be2f9136f66a0813233aeff73d172a1ce5b"
+    ]
+  },
+  {
+    "timestamp": 1789966364266,
+    "tag": "0009_recurring_edits",
+    "acceptedHashes": [
+      "3e1c968376a5d2d6d04812d6f1ea1c9628e689f95c0c7b7ae60794292fa68854",
+      "b5b4461f2c0263a6f11358d486ef1353444ee62c4a10b30272f7ce3220cefeb9"
+    ]
+  },
+  {
+    "timestamp": 1790812800000,
+    "tag": "0010_persistent_auth_sessions",
+    "acceptedHashes": [
+      "db96c1af4592751917587197de854a0f26ebabc5740142545c57e74b4a38fd38",
+      "4cc74ccc2316397eec2d1f653684b7fbaa09c9e74911941cfd6da5e7e2d8f887",
+      "d179f0598e0654d597eacdbc0db7bac6ac21721ee5645c45a3a20ba055c4ef8f"
+    ]
+  },
+  {
+    "timestamp": 1791950400000,
+    "tag": "0011_meeting_ai_consent",
+    "acceptedHashes": [
+      "1ac297de7f8185c002f53d74a58e072b32a16d04009777b9452414f467e3bad5",
+      "737f3b0a1c88544d003ff57e67fa3b7fdeaeb5f3c7f3560c3ea516cd8e9bd4a2"
+    ]
+  },
+  {
+    "timestamp": 1792108800000,
+    "tag": "0012_meeting_history",
+    "acceptedHashes": [
+      "49d90db3536300d0540100e7a0e71c38832107b19eb34076999a7ad84339ab53",
+      "38d60ceda3fe07842abd079f8af3bf7370c63447dddf5fda8233f2bd75879724"
+    ]
+  },
+  {
+    "timestamp": 1793404800000,
+    "tag": "0013_org_rbac",
+    "acceptedHashes": [
+      "ced139a925e406e5ee7bd7de1a9f9623f9e523a6be8b3794b6c47df384578713",
+      "dc2c9ffa5dd645cd9f0f3a64d59db4cc0b502662a8131864dcf054c9b090ab0f"
+    ]
+  },
+  {
+    "timestamp": 1793491200000,
+    "tag": "0014_transcript_recap",
+    "acceptedHashes": [
+      "4333dc7c2de2a071a296c317ce099f50366e9b6b3c251155129d2b6905e247fc",
+      "dc534a58ba6a61dfc4b80709cef1b20a13691314e3f416569cc8d4d3add52a0e"
+    ]
+  }
+]

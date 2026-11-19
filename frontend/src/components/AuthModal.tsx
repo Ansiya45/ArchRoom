@@ -71,7 +71,10 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, mode, inviteToken,
         storeSession(result.token, result.user, result.refreshToken); onSuccess(result.user); onClose();
       }
     } catch (caught) {
-      const detail = caught instanceof Error ? caught.message : 'Something went wrong.';
+      const rawDetail = caught instanceof Error ? caught.message : 'Something went wrong.';
+      const detail = caught instanceof SyntaxError || /Unexpected end of JSON input|Failed to execute 'json' on 'Response'|Unexpected token .*JSON|is not valid JSON/.test(rawDetail)
+        ? 'The server did not return a valid response. Check that the backend is running, then try again.'
+        : rawDetail;
       // Login checks the password before returning this unverified-account error.
       // Opening the dialog grants no session and never sends an email itself.
       if (view === 'login' && caught instanceof TRPCClientError && caught.data?.code === 'FORBIDDEN' &&

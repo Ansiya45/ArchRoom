@@ -1,0 +1,4 @@
+# Local runtime output and isolated database/test artifacts.
+/.runtime-logs/
+/backend/.disposable-compiled/
+/backend/.phase-b-*/

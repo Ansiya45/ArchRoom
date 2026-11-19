@@ -1,10 +1,11 @@
 import { observable } from '@trpc/server/observable';
 import { getRefreshToken } from './auth';
-import { createTRPCClient, httpBatchLink, type TRPCLink } from '@trpc/client';
+import { createTRPCClient, httpBatchLink, splitLink, type TRPCLink } from '@trpc/client';
 import type { AppRouter } from '../../../backend/src/trpc/router';
 import { getValidAccessToken } from './sessionRenewal';
 
 const TRPC_URL = import.meta.env.VITE_API_BASE_URL || '/api';
+const publicAuth = (path: string) => ['auth.login', 'auth.signup', 'auth.verifyEmail', 'auth.requestPasswordReset', 'auth.resetPassword'].includes(path);
 
 // A server-expired token can differ from the browser's clock. Retry only the
 // rejected operation, never an entire batch containing successful mutations.
@@ -16,7 +17,7 @@ const renewRejectedSession: TRPCLink<AppRouter> = () => ({ op, next }) => observ
       next: value => observer.next(value),
       complete: () => observer.complete(),
       error: error => {
-        if (!retried && error.data?.code === 'UNAUTHORIZED' && getRefreshToken()
+        if (!retried && !publicAuth(op.path) && error.data?.code === 'UNAUTHORIZED' && getRefreshToken()
           && (!op.path.startsWith('auth.') || op.path === 'auth.me')) {
           void getValidAccessToken(true).then(token => {
             if (stopped) return;
@@ -34,12 +35,16 @@ const renewRejectedSession: TRPCLink<AppRouter> = () => ({ op, next }) => observ
 export const trpc = createTRPCClient<AppRouter>({
   links: [
     renewRejectedSession,
-    httpBatchLink({
+    splitLink({
+      condition: op => publicAuth(op.path),
+      true: httpBatchLink({ url: TRPC_URL }),
+      false: httpBatchLink({
       url: TRPC_URL,
       async headers() {
         const token = await getValidAccessToken();
         return token ? { Authorization: `Bearer ${token}` } : {};
       },
+      }),
     }),
   ],
 });

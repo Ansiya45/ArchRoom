@@ -8,6 +8,7 @@ export const test = base.extend<{ authMock: AuthMock }>({
     const id = randomUUID();
     const auth = {
       user: { id, email: `${id}@example.invalid`, fullName: `E2E ${id.slice(0, 8)}` },
+      invitationEmail: `invited-${id}@example.invalid`,
       password: `Aa1-${randomUUID()}`, token: randomUUID() as string, refreshToken: undefined as string | undefined,
       calls: [] as string[], expired: false, allowSignup: false, unverified: false,
       privateTitle: `Private account item ${id}`,
@@ -15,6 +16,11 @@ export const test = base.extend<{ authMock: AuthMock }>({
       invitedEmails: [] as string[], notificationCalls: [] as Array<{ path: string; input: any }>,
       instantCreationEnabled: false, instantCreateError: false,
       instantCreateCalls: [] as any[],
+      editableMeeting: null as any, recordingSettingsCalls: [] as any[], rescheduleCalls: [] as any[],
+      driveAdmin: false, driveCanCreate: false, driveConnected: false, drivePending: false,
+      driveState: '' as '' | 'authorization_unavailable' | 'root_unverified' | 'status_unavailable',
+      recordingFolders: [] as Array<{ id: string; name: string }>, folderCreateCalls: [] as string[],
+      oauthStartForms: [] as Array<{ method: string; origin: string | undefined; token: string | null }>,
     };
     const forbidden: string[] = [];
     const origin = new URL(baseURL!).origin;
@@ -32,6 +38,9 @@ export const test = base.extend<{ authMock: AuthMock }>({
         const results = paths.map((path, index) => {
           auth.calls.push(path);
           const value = url.searchParams.get('batch') === '1' ? input?.[index] : input;
+          if (path === 'meetings.hostCandidates') return auth.driveAdmin
+            ? ok([{ id: '22222222-2222-4222-8222-222222222222', fullName: 'Assigned trainer', email: 'trainer@example.invalid' }])
+            : error('Super administrator access required', 'FORBIDDEN', 403, path);
           // auth.me and public room metadata can be emitted in one tRPC batch.
           // Keep the public item allowed while the meeting fixture owns the
           // standalone room requests used for state-specific tests.
@@ -45,6 +54,9 @@ export const test = base.extend<{ authMock: AuthMock }>({
             if (auth.unverified) return error('Your registration is incomplete. Complete the email verification from sign up before logging in.', 'FORBIDDEN', 403, path);
             return ok({ ok: true, token: auth.token, refreshToken: auth.refreshToken, user: auth.user });
           }
+          if (path === 'users.verifyInvitation' && request.method() === 'GET') {
+            return ok({ email: auth.invitationEmail, role: 'user', expiresAt: new Date(Date.now() + 86_400_000).toISOString() });
+          }
           if (path === 'auth.refresh' && value?.refreshToken === auth.refreshToken && auth.refreshToken) {
             if (auth.expired) return error('Please sign in again.', 'UNAUTHORIZED', 401, path);
             auth.token = `e30.${Buffer.from(JSON.stringify({ exp: Math.floor(Date.now() / 1000) + 7 * 86400 })).toString('base64url')}.mock`;
@@ -54,15 +66,47 @@ export const test = base.extend<{ authMock: AuthMock }>({
             auth.refreshToken = undefined;
             return ok({ ok: true });
           }
+          if (path === 'googleDriveIntegration.status' && request.method() === 'GET') {
+            const connectionState = !auth.driveAdmin ? 'not_connected' : auth.driveState || (auth.drivePending ? 'pending' : auth.driveConnected ? 'connected' : 'not_connected');
+            return ok({ isAdministrator: auth.driveAdmin, connected: connectionState === 'connected', pending: connectionState === 'pending', connectionState,
+              accountEmail: ['connected', 'pending', 'authorization_unavailable', 'root_unverified'].includes(connectionState) ? 'company@example.invalid' : null });
+          }
+          if (path === 'googleDriveIntegration.start' && request.method() === 'POST') {
+            if (!auth.driveAdmin) return error('Integration administrator access is required.', 'FORBIDDEN', 403, path);
+            return ok({ startUrl: `${origin}/google-drive/oauth/start` });
+          }
+          if (path === 'googleDriveIntegration.verifyRoot' && request.method() === 'POST') {
+            if (!auth.driveAdmin || value?.selectedFolderId !== 'configured-root-folder') return error('Configured root could not be verified.', 'PRECONDITION_FAILED', 412, path);
+            auth.driveConnected = true; auth.drivePending = false;
+            return ok({ verified: true });
+          }
+          if (path === 'googleDriveIntegration.pickerAccess' && request.method() === 'POST') {
+            if (!auth.driveAdmin || !auth.drivePending) return error('Integration administrator access is required.', 'FORBIDDEN', 403, path);
+            return ok({ accessToken: 'synthetic-picker-token', expiresIn: 300 });
+          }
+          if (path === 'recordingFolders.list' || path === 'recordingFolders.refresh')
+            return ok({ connected: auth.driveConnected, canCreate: auth.driveConnected && (auth.driveAdmin || auth.driveCanCreate),
+              folders: auth.driveConnected ? auth.recordingFolders : [] });
+          if (path === 'recordingFolders.listStudents')
+            return error('Batch management access is required.', 'FORBIDDEN', 403, path);
+          if (path === 'batchRegistration.linkStatus') return ok({ active: false, expiresAt: null });
+          if (path === 'recordingFolders.create' && request.method() === 'POST') {
+            if (!auth.driveConnected || !(auth.driveAdmin || auth.driveCanCreate)) return error('Folder creation unavailable.', 'FORBIDDEN', 403, path);
+            auth.folderCreateCalls.push(value.name);
+            const folder = { id: `mock-folder-${auth.folderCreateCalls.length}`, name: value.name };
+            auth.recordingFolders.push(folder);
+            return ok(folder);
+          }
           if (path === 'auth.signup' && request.method() === 'POST' && auth.allowSignup) {
             return ok({ ok: true, verificationRequired: true, email: value.email });
           }
-          if (['auth.me', 'meetings.list'].includes(path) && request.method() === 'GET') {
+          if (['auth.me', 'meetings.list', 'users.myAccess'].includes(path) && request.method() === 'GET') {
             if (auth.expired || request.headers().authorization !== `Bearer ${auth.token}`) return error('Authentication required', 'UNAUTHORIZED', 401, path);
             if (path === 'auth.me') return ok({ ok: true, user: auth.user });
+            if (path === 'users.myAccess') return ok({ role:'user', disabled:false, permissions:{}, features:[] });
             // Read-only sentinel to detect cached private-data exposure on logout.
             // No scheduling logic or meeting actions are exercised.
-            return ok({ ok: true, meetings: [{ id, title: auth.privateTitle,
+            return ok({ ok: true, meetings: auth.editableMeeting ? [auth.editableMeeting] : [{ id, title: auth.privateTitle,
               meetingCode: `E2E-${id.slice(0, 6)}`, hostUserId: auth.user.id,
               status: auth.notificationsEnabled ? 'scheduled' : 'ended', scheduleType: 'one_time',
               scheduledAt: '2026-09-29T05:00:00.000Z',
@@ -100,11 +144,27 @@ export const test = base.extend<{ authMock: AuthMock }>({
               createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
             } });
           }
+          if (auth.editableMeeting && path === 'meetings.updateRecordingSettings' && request.method() === 'POST') {
+            auth.recordingSettingsCalls.push(value);
+            auth.editableMeeting = { ...auth.editableMeeting, recordingFolderId: value.recordingFolderId, recordingAccessPolicy: value.recordingAccessPolicy };
+            return ok({ ok: true, meeting: auth.editableMeeting });
+          }
+          if (auth.editableMeeting && path === 'meetings.reschedule' && request.method() === 'POST') {
+            auth.rescheduleCalls.push(value);
+            auth.editableMeeting = { ...auth.editableMeeting, scheduledAt: '2026-09-30T05:00:00.000Z', timeZone: value.schedule.timeZone };
+            return ok({ ok: true, meeting: auth.editableMeeting });
+          }
           forbidden.push(path);
           return error('Blocked by isolated auth fixture', 'FORBIDDEN', 403, path);
         });
         await route.fulfill({ status: 200, contentType: 'application/json',
           body: JSON.stringify(url.searchParams.get('batch') === '1' ? results : results[0]) });
+        return;
+      }
+      if (url.origin === origin && url.pathname === '/google-drive/oauth/start' && request.method() === 'POST') {
+        const form = new URLSearchParams(request.postData() || '');
+        auth.oauthStartForms.push({ method: request.method(), origin: request.headers().origin, token: form.get('token') });
+        await route.fulfill({ status: 200, contentType: 'text/plain', body: 'Mocked Google setup navigation' });
         return;
       }
       if (['xhr', 'fetch'].includes(request.resourceType()) || !['GET', 'HEAD'].includes(request.method())) {
@@ -125,11 +185,17 @@ export const test = base.extend<{ authMock: AuthMock }>({
 
 export type AuthMock = {
   user: { id: string; email: string; fullName: string };
+  invitationEmail: string;
   password: string; token: string; refreshToken?: string; calls: string[]; expired: boolean;
   allowSignup: boolean; privateTitle: string; unverified: boolean;
   notificationsEnabled: boolean; reminderEnabled: boolean; invitedEmails: string[];
   notificationCalls: Array<{ path: string; input: any }>;
   instantCreationEnabled: boolean; instantCreateError: boolean; instantCreateCalls: any[];
+  editableMeeting: any; recordingSettingsCalls: any[]; rescheduleCalls: any[];
+  driveAdmin: boolean; driveCanCreate: boolean; driveConnected: boolean; drivePending: boolean;
+  driveState: '' | 'authorization_unavailable' | 'root_unverified' | 'status_unavailable';
+  recordingFolders: Array<{ id: string; name: string }>; folderCreateCalls: string[];
+  oauthStartForms: Array<{ method: string; origin: string | undefined; token: string | null }>;
 };
 export async function openLogin(page: Page) {
   await page.goto('/');

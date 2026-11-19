@@ -1,5 +1,5 @@
 import { createHash, randomInt, timingSafeEqual } from 'node:crypto';
-import { and, desc, eq, gt, sql } from 'drizzle-orm';
+import { and, desc, eq, gt, isNull, sql } from 'drizzle-orm';
 import { TRPCError } from '@trpc/server';
 import { db } from '../db/index.js';
 import { authCodes, userInvitations, userPermissions, users } from '../db/schema.js';
@@ -26,16 +26,22 @@ export class AuthService {
     const passwordHash = await hashPassword(input.password);
     let created: typeof users.$inferSelect;
     try {
-      [created] = await db.insert(users).values({ fullName, email, passwordHash, role, invitedBy: invitation?.invitedBy ?? null }).returning();
-      if (invitation) {
-        const presets = sanitizePermissions(invitation.permissions);
-        await db.transaction(async (tx) => {
-          await tx.update(userInvitations).set({ acceptedAt: new Date() }).where(eq(userInvitations.id, invitation.id));
+      created = await db.transaction(async (tx) => {
+        const [newUser] = await tx.insert(users).values({ fullName, email, passwordHash, role, invitedBy: invitation?.invitedBy ?? null }).returning();
+        if (invitation) {
+          const accepted = await tx.update(userInvitations).set({ acceptedAt: new Date() }).where(and(
+            eq(userInvitations.id, invitation.id),
+            isNull(userInvitations.acceptedAt),
+            gt(userInvitations.expiresAt, new Date()),
+          )).returning({ id: userInvitations.id });
+          if (!accepted.length) throw new TRPCError({ code: 'FORBIDDEN', message: 'This invitation link is invalid or has expired.' });
+          const presets = sanitizePermissions(invitation.permissions);
           if (Object.keys(presets).length) {
-            await tx.insert(userPermissions).values(Object.entries(presets).map(([feature, level]) => ({ userId: created.id, feature, level })));
+            await tx.insert(userPermissions).values(Object.entries(presets).map(([feature, level]) => ({ userId: newUser.id, feature, level })));
           }
-        });
-      }
+        }
+        return newUser;
+      });
     } catch (error) {
       if (typeof error === 'object' && error !== null && 'code' in error && error.code === '23505') throw new TRPCError({ code: 'CONFLICT', message: 'Email already registered' });
       throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: 'Unable to create account', cause: error });

@@ -22,6 +22,18 @@ const INVITE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 const digest = (value: string) => createHash('sha256').update(value).digest('hex');
 const normalizeEmail = (email: string) => email.trim().toLowerCase();
 
+export function userInvitationLink(publicUrl: string | undefined, token: string): string {
+  if (!publicUrl) {
+    throw new TRPCError({
+      code: 'PRECONDITION_FAILED',
+      message: 'User invitations require APP_PUBLIC_URL on the backend.',
+    });
+  }
+  const link = new URL(publicUrl);
+  link.searchParams.set('invite', token);
+  return link.toString();
+}
+
 export function sanitizePermissions(raw: Record<string, string> | undefined | null): PermissionMap {
   const permissions: PermissionMap = {};
   if (!raw) return permissions;
@@ -64,11 +76,15 @@ export class UserAdminService {
 
   async invite(actorId: string, input: { email: string; role: 'admin' | 'user'; permissions?: Record<string, string> }) {
     const email = normalizeEmail(input.email);
+    // Validate configuration before changing invitation state. Never email an
+    // unusable `undefined/?invite=...` link when a process missed its runtime
+    // public-URL configuration.
+    const token = randomBytes(32).toString('hex');
+    const invitationLink = userInvitationLink(env.APP_PUBLIC_URL, token);
     if (await db.query.users.findFirst({ where: eq(users.email, email) })) {
       throw new TRPCError({ code: 'CONFLICT', message: 'A user with this email is already registered.' });
     }
     const actor = await db.query.users.findFirst({ where: eq(users.id, actorId) });
-    const token = randomBytes(32).toString('hex');
     const expiresAt = new Date(Date.now() + INVITE_TTL_MS);
     // Replace any outstanding invitation for the same address so the newest link is the valid one.
     await db.delete(userInvitations).where(and(eq(userInvitations.email, email), isNull(userInvitations.acceptedAt)));
@@ -84,7 +100,7 @@ export class UserAdminService {
       await sendEmail({
         to: email,
         subject: 'You have been invited to YLAAM-MEET',
-        html: inviteEmailHtml(actor?.fullName ?? 'Your administrator', `${env.APP_PUBLIC_URL}/?invite=${token}`, input.role),
+        html: inviteEmailHtml(actor?.fullName ?? 'Your administrator', invitationLink, input.role),
       });
     } catch (error) {
       await db.delete(userInvitations).where(eq(userInvitations.id, invitation.id));
@@ -111,13 +127,14 @@ export class UserAdminService {
     const invitation = await db.query.userInvitations.findFirst({ where: and(eq(userInvitations.id, invitationId), isNull(userInvitations.acceptedAt)) });
     if (!invitation) throw new TRPCError({ code: 'NOT_FOUND', message: 'Invitation not found or already accepted.' });
     const token = randomBytes(32).toString('hex');
+    const invitationLink = userInvitationLink(env.APP_PUBLIC_URL, token);
     const expiresAt = new Date(Date.now() + INVITE_TTL_MS);
     await db.update(userInvitations).set({ tokenHash: digest(token), expiresAt }).where(eq(userInvitations.id, invitation.id));
     const actor = await db.query.users.findFirst({ where: eq(users.id, actorId) });
     await sendEmail({
       to: invitation.email,
       subject: 'You have been invited to YLAAM-MEET',
-      html: inviteEmailHtml(actor?.fullName ?? 'Your administrator', `${env.APP_PUBLIC_URL}/?invite=${token}`, invitation.role),
+      html: inviteEmailHtml(actor?.fullName ?? 'Your administrator', invitationLink, invitation.role),
     });
     return { ok: true as const, expiresAt: expiresAt.toISOString() };
   }

@@ -1,0 +1,258 @@
+[
+  {
+    "timestamp": 1786439803205,
+    "tag": "0000_left_quicksilver",
+    "acceptedHashes": [
+      "47efddc263792f3142a4c354d8372929df5d3c765f7f3d55fb414ebe63673502",
+      "1ce8acd8aa5e01d181cef8d1f3fac357bd03383e4f5bd29d1edf243b55c49130"
+    ]
+  },
+  {
+    "timestamp": 1786690871104,
+    "tag": "0001_illegal_loners",
+    "acceptedHashes": [
+      "82bcad4150231ca5151e82ad3dc325041a7d36fd2d8a71cb17d2485eb7a6c25f"
+    ]
+  },
+  {
+    "timestamp": 1787011200000,
+    "tag": "0002_waiting_room",
+    "acceptedHashes": [
+      "b8604a7f44a8b461395a9b0171a7f61f941a07f42ecf2c26a265b9857e1e6941",
+      "aee58b7d6a3612aa5ada18c7b5444d8fcc71219d7aea553323246d7bb312988d"
+    ]
+  },
+  {
+    "timestamp": 1787990400000,
+    "tag": "0003_idempotent_join",
+    "acceptedHashes": [
+      "2a286e8c5c2147b1219914cc9336548f1411dfe14321c9eaf4245ca7ee1fb503",
+      "90190b44ba82a9054fac1c62b94c69579ef300ea80a1f283167df44f90e028a0"
+    ]
+  },
+  {
+    "timestamp": 1788307200000,
+    "tag": "0004_email_auth",
+    "acceptedHashes": [
+      "fb98fc3651b3107d19dc22218dc4c97a55d22eddbc9a36b6c64fe4f09933afd2",
+      "3a6feac4561a45c69ad2ac2018b215e5bd764a1e6be4aec6417433ae6ef94f42"
+    ]
+  },
+  {
+    "timestamp": 1789631531134,
+    "tag": "0005_one_time_scheduling",
+    "acceptedHashes": [
+      "c0e2aa8c5e44ec7d103417894946ea8ac31ba41fc23464082b86fad77ce39145",
+      "9de073a4cb4e085ad2d501d5ea4467f1d1b38da263b1f01d87e253a9c719cde0"
+    ]
+  },
+  {
+    "timestamp": 1789810245943,
+    "tag": "0006_reusable_sessions",
+    "acceptedHashes": [
+      "e7be0c9338e81ed0b316d7267f8be887b1462aab95a656e3e010faba436d28ef",
+      "08e10a871b70982204154a10eca5192fae2832d636d9cbe9b25092bc9bbf0c92"
+    ]
+  },
+  {
+    "timestamp": 1789811481362,
+    "tag": "0007_recurring_meetings",
+    "acceptedHashes": [
+      "dc0194c9786a9eea19ab07fc9116296b767597305ef92da0cef68608da1813c4",
+      "c40da8380d0a2b240f61c47b16377cef9bcc64f9a321dc47765fa1b122200b0c"
+    ]
+  },
+  {
+    "timestamp": 1789812354798,
+    "tag": "0008_meeting_notifications",
+    "acceptedHashes": [
+      "3fbce7ff06c8efdbcae65841ac192e381b1d0b366a2b9fa5d1984f0cc8ead850",
+      "365de70a942bf8797aa3cd1e6c694be2f9136f66a0813233aeff73d172a1ce5b"
+    ]
+  },
+  {
+    "timestamp": 1789966364266,
+    "tag": "0009_recurring_edits",
+    "acceptedHashes": [
+      "3e1c968376a5d2d6d04812d6f1ea1c9628e689f95c0c7b7ae60794292fa68854",
+      "b5b4461f2c0263a6f11358d486ef1353444ee62c4a10b30272f7ce3220cefeb9"
+    ]
+  },
+  {
+    "timestamp": 1790812800000,
+    "tag": "0010_persistent_auth_sessions",
+    "acceptedHashes": [
+      "db96c1af4592751917587197de854a0f26ebabc5740142545c57e74b4a38fd38",
+      "4cc74ccc2316397eec2d1f653684b7fbaa09c9e74911941cfd6da5e7e2d8f887",
+      "d179f0598e0654d597eacdbc0db7bac6ac21721ee5645c45a3a20ba055c4ef8f"
+    ]
+  },
+  {
+    "timestamp": 1791950400000,
+    "tag": "0011_meeting_ai_consent",
+    "acceptedHashes": [
+      "1ac297de7f8185c002f53d74a58e072b32a16d04009777b9452414f467e3bad5",
+      "737f3b0a1c88544d003ff57e67fa3b7fdeaeb5f3c7f3560c3ea516cd8e9bd4a2"
+    ]
+  },
+  {
+    "timestamp": 1792108800000,
+    "tag": "0012_meeting_history",
+    "acceptedHashes": [
+      "49d90db3536300d0540100e7a0e71c38832107b19eb34076999a7ad84339ab53",
+      "38d60ceda3fe07842abd079f8af3bf7370c63447dddf5fda8233f2bd75879724"
+    ]
+  },
+  {
+    "timestamp": 1792800000000,
+    "tag": "0013_meeting_recording_settings",
+    "acceptedHashes": [
+      "0354e1e649a2a9887e1a9a3a1cbabdfee85658e06e690d24a32cf6f262214b37",
+      "30f7cdb17d93103f305e2d9219d7234345b245d44ecb14c85127f38aca47b5fe"
+    ]
+  },
+  {
+    "timestamp": 1793188800000,
+    "tag": "0014_drive_security_foundation",
+    "acceptedHashes": [
+      "88b8789213b8ba322de287633eb6ca6e9ef4ff9672937b765e0b4abc02aa2b77",
+      "3ded0deb2b9f1080b1835dd4ad8f2aff14470a86795499337a4e05f232dc7858"
+    ]
+  },
+  {
+    "timestamp": 1793275200000,
+    "tag": "0015_recording_folder_creators",
+    "acceptedHashes": [
+      "d4d87e175e5d6a1a9a56963409974455bf2419347659b03f7b17d8343ef7cec5",
+      "7c2b5a1bd68f033d6276984d5adfc0c73ebdcf195b504455ee8436c6d1105d31"
+    ]
+  },
+  {
+    "timestamp": 1793361600000,
+    "tag": "0016_drive_credential_generation",
+    "acceptedHashes": [
+      "6fae5f8a2ab1c3577b6384f8ea0b07109750d68d6274b9cfadffc6e63b429a50",
+      "844dc833014a58f301e0c7fa3090f9c6029e2816f596bb5b17637f1a78eca3f7"
+    ]
+  },
+  {
+    "timestamp": 1793448000000,
+    "tag": "0017_company_recording_upload_jobs",
+    "acceptedHashes": [
+      "fb733dc4a6b0913b2f07a2d68f1b4f35328169d5d05ebb0308e456173858e541",
+      "8389f6c45facd45fcd1a22d434b16bb332a42dbcc797a82312d0f80a7bce6e14"
+    ]
+  },
+  {
+    "timestamp": 1793534400000,
+    "tag": "0018_local_recording_staging_retention",
+    "acceptedHashes": [
+      "ba7be27e31a2aad779740a62d6645472f8a78d0e47a694e53d3d084f6857ec8c",
+      "b9ce113495fd8b1ea502aa114faac607c24624565cf5b7a12f5de9a960c1be76"
+    ]
+  },
+  {
+    "timestamp": 1793620800000,
+    "tag": "0019_local_recording_ingestion_verification",
+    "acceptedHashes": [
+      "ba7c70fffa863f240e3a4a2b75d8fea60d74e515bb2db6d1023c89bc688caf07",
+      "18c918063652fe847d69ff1e40c51b20b344f4d0ca7e5e6399042f67e87c6838"
+    ]
+  },
+  {
+    "timestamp": 1793707200000,
+    "tag": "0020_company_recording_transfer_intent",
+    "acceptedHashes": [
+      "d590d8f08c1209739c80099bd9d3dd45ecc6e163c753b215e92f287b7c16eecc",
+      "815505d56facca5586e7806c10901a2df75b3195ea76c31da4c3dcdc9bcace30"
+    ]
+  },
+  {
+    "timestamp": 1793793600000,
+    "tag": "0021_company_recording_transfer_coordination",
+    "acceptedHashes": [
+      "623640e265738ae3bb2114eff2611b1d6d17a232ac7385f5b0a8f861751d1c19",
+      "9dd6cc9f5957dcb945fb40aa8fd2e2e387a74e4c1a60f3b7d71fe248af7ea7fe"
+    ]
+  },
+  {
+    "timestamp": 1793880000000,
+    "tag": "0022_company_recording_drive_verifications",
+    "acceptedHashes": [
+      "5fba0b7481f26b26159fc7c3ef2590ac004863203fa39cedaf3eda5dc3f879d6",
+      "f69b05d3519255f66bbd4e690ed7e76f6dfd84926f3e1798b7b5508a40c5cf5a"
+    ]
+  },
+  {
+    "timestamp": 1793966400000,
+    "tag": "0023_batch_student_enrollments",
+    "acceptedHashes": [
+      "edf712164142a337fbf624f4bd6884afc979b136ae2ffa70be582cd3d7420fff",
+      "608c71b4a1cfc566944cb7197a486de535b6eaf639b3ed3181fdd5da58202f79"
+    ]
+  },
+  {
+    "timestamp": 1794052800000,
+    "tag": "0024_batch_registration",
+    "acceptedHashes": [
+      "5df27bfabed3e26c48bf07dc9851b6e922b436ad098bbcb16ca7ddd40d97b6ab",
+      "7198852287a86f7ee1096ca24b616692600397b8da0fc29a208e968544a7ba7e"
+    ]
+  },
+  {
+    "timestamp": 1794139200000,
+    "tag": "0025_batch_enrollment_account_bindings",
+    "acceptedHashes": [
+      "2bb72f3c2aa6131087b78d88c80ca971e57a2273ae828bec7f45cc21db52fc9d",
+      "de5cb13bac9818df6950eef61b48b1d378ffab7307f8a4b69e471295ddecce06"
+    ]
+  },
+  {
+    "timestamp": 1794225600000,
+    "tag": "0026_student_google_oidc",
+    "acceptedHashes": [
+      "8951dbe23a49ee100059544c9d174307bd32c3f8a0cfca45b19d03e1cc4c78f4",
+      "36cd8e54bb7e454dee9399291998a2333ff93a8ca38b95b587db3b33969e8911"
+    ]
+  },
+  {
+    "timestamp": 1794312000000,
+    "tag": "0027_private_recording_acl_coordination",
+    "acceptedHashes": [
+      "79b35ba84270be2647f8617c951f7044ae3a53cc76dc60ac7093c85701ba0f55",
+      "1385985ff5366cda5f7c300f45bb1050afea6dc8e6185e9299d4fc395236964f"
+    ]
+  },
+  {
+    "timestamp": 1794398400000,
+    "tag": "0028_recording_sharing_modes",
+    "acceptedHashes": [
+      "6a164b6217382992c1d66aac560449b0f61ecfa0494177f4ebe98eb880f6cca1",
+      "abcc13263ebc3ab5b569a19eb7a554fe54016ca8aa0993542323aa5f58d31e93"
+    ]
+  },
+  {
+    "timestamp": 1794484800000,
+    "tag": "0029_recording_sharing_policy_versions",
+    "acceptedHashes": [
+      "5cb9309b90d9e3a8616c07e1a55dac38d08b06829dc1eaa2a8f826e389e257af",
+      "2c2f49b9970b07cb2eb7e0f7ee133cb55f264cded6fbb6eb30450664c0c52d5a"
+    ]
+  },
+  {
+    "timestamp": 1794571200000,
+    "tag": "0031_recording_filename_metadata",
+    "acceptedHashes": [
+      "3b0d683a30032828441d2b471b553b8d743232db6f24404ea668e9545960dc45",
+      "e38fa1ddbbe5a3fb8d9c5dc31d7c3e8d5c81e783b965f9e6731ba81574e4bd9e"
+    ]
+  },
+  {
+    "timestamp": 1794657600000,
+    "tag": "0032_secure_backend_recording_student_tables",
+    "acceptedHashes": [
+      "a3362e7fb5f0215efb63b207b7ede35d58ed125407ce15c5e20a0bbb950b05f7",
+      "e14a1d1038ea19e4389714a33faf962c27879d22d50163a12ac2dde9f8494f5c"
+    ]
+  }
+]

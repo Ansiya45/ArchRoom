@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Room, RoomEvent, Track, type Participant } from 'livekit-client';
 import { getMeetingSession, type MeetingSession } from '@/lib/meetingSession';
 import { trpc } from '@/lib/trpc';
@@ -6,6 +6,7 @@ import { updateMediaStream } from '@/lib/mediaStream';
 import { createBackgroundVideoProcessor } from '@/lib/backgroundVideoProcessor';
 import type { BackgroundChoice, ChatMessage } from '@/types/meeting';
 import type { TranscriptSegment } from '@/components/meeting/TranscriptModal';
+import { acceptRecordingNotice, type RecordingNotice, type RecordingNoticeState } from '@/lib/recordingNotice';
 
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
@@ -15,8 +16,7 @@ function publicationTrack(participant: Participant, source: Track.Source) {
 }
 
 function participantStream(participant: Participant, previous?: MediaStream) {
-  const video = publicationTrack(participant, Track.Source.ScreenShare)
-    || publicationTrack(participant, Track.Source.Camera);
+  const video = publicationTrack(participant, Track.Source.Camera);
   const audio = publicationTrack(participant, Track.Source.Microphone);
   return updateMediaStream(previous, video, audio);
 }
@@ -47,6 +47,7 @@ export function useWebRtcMeeting(
   const [localStream, setLocalStream] = useState<MediaStream | null>(null);
   const [displayStream, setDisplayStream] = useState<MediaStream | null>(null);
   const [remoteStreams, setRemoteStreams] = useState<Record<string, MediaStream>>({});
+  const [remoteScreenStreams, setRemoteScreenStreams] = useState<Record<string, MediaStream>>({});
   const [isConnected, setIsConnected] = useState(false);
   const [remoteBackgrounds, setRemoteBackgrounds] = useState<Record<string, BackgroundChoice>>({});
   const [remoteScreenShares, setRemoteScreenShares] = useState<Record<string, boolean>>({});
@@ -56,11 +57,14 @@ export function useWebRtcMeeting(
   const [transcriptSegments, setTranscriptSegments] = useState<TranscriptSegment[]>([]);
   const [transcriptAccessAllowed, setTranscriptAccessAllowed] = useState(false);
   const [connectionError, setConnectionError] = useState<string | null>(null);
+  const [recordingNotices, setRecordingNotices] = useState<Record<string, RecordingNotice>>({});
+  const lastRecordingNotice = useRef(0);
   const [microphoneError, setMicrophoneError] = useState<string | null>(null);
   const [audioInputDevices, setAudioInputDevices] = useState<MediaDeviceInfo[]>([]);
   const [remoteMicMuted, setRemoteMicMuted] = useState<Record<string, boolean>>({});
   const [videoInputDevices, setVideoInputDevices] = useState<MediaDeviceInfo[]>([]);
   const [remoteCameraOn, setRemoteCameraOn] = useState<Record<string, boolean>>({});
+  const [speakingLevels, setSpeakingLevels] = useState<Record<string, number>>({});
   const [cameraError, setCameraError] = useState<string | null>(null);
   const micStateCallbackRef = useRef(onMicrophoneStateChange);
   micStateCallbackRef.current = onMicrophoneStateChange;
@@ -124,6 +128,7 @@ export function useWebRtcMeeting(
     setDisplayStream(displayStreamRef.current);
 
     const streams: Record<string, MediaStream> = {};
+    const screenStreams: Record<string, MediaStream> = {};
     const backgrounds: Record<string, BackgroundChoice> = {};
     const screenShares: Record<string, boolean> = {};
     const raisedHands: Record<string, boolean> = {};
@@ -131,6 +136,8 @@ export function useWebRtcMeeting(
     const cameras: Record<string, boolean> = {};
     room.remoteParticipants.forEach((participant) => {
       streams[participant.identity] = streamFor(participant);
+      const screenTrack = publicationTrack(participant, Track.Source.ScreenShare);
+      if (screenTrack) screenStreams[participant.identity] = updateMediaStream(undefined, screenTrack);
       backgrounds[participant.identity] = backgroundOf(participant);
       screenShares[participant.identity] = Boolean(publicationTrack(participant, Track.Source.ScreenShare));
       raisedHands[participant.identity] = participant.attributes.handRaised === 'true';
@@ -145,6 +152,7 @@ export function useWebRtcMeeting(
     setTranscriptAccessAllowed(host?.attributes.transcriptAccess === 'true');
     streamsRef.current = streamsByIdentity;
     setRemoteStreams(streams);
+    setRemoteScreenStreams(screenStreams);
     setRemoteBackgrounds(backgrounds);
     setRemoteScreenShares(screenShares);
     setRemoteRaisedHands(raisedHands);
@@ -194,6 +202,12 @@ export function useWebRtcMeeting(
           true,
           cameraDeviceId !== 'default' ? { deviceId: cameraDeviceId } : undefined,
         );
+        const track = room.localParticipant.getTrackPublication(Track.Source.Camera)?.track as any;
+        if (track && background !== 'none') {
+          const processor = createBackgroundVideoProcessor(background as 'blur' | 'office' | 'skyline' | 'studio');
+          await track.setProcessor(processor, true);
+          backgroundProcessorRef.current = processor;
+        }
       } else {
         const cameraPublication = room.localParticipant.getTrackPublication(Track.Source.Camera);
         if (cameraPublication?.track) {
@@ -296,18 +310,36 @@ export function useWebRtcMeeting(
       RoomEvent.ParticipantAttributesChanged,
     ];
     mediaEvents.forEach((event) => room.on(event, refresh));
+    room.on(RoomEvent.ActiveSpeakersChanged, (speakers: Participant[]) => {
+      const levels: Record<string, number> = {};
+      for (const speaker of speakers) {
+        levels[speaker.isLocal ? 'user-self' : speaker.identity] = Math.round(speaker.audioLevel * 100);
+      }
+      setSpeakingLevels(levels);
+    });
     room.on(RoomEvent.Reconnecting, () => setIsConnected(false));
     room.on(RoomEvent.Reconnected, () => setIsConnected(true));
-    room.on(RoomEvent.Disconnected, () => { setIsConnected(false); setActiveSpeakerIds([]); });
+    room.on(RoomEvent.Disconnected, () => { setIsConnected(false); setActiveSpeakerIds([]); setSpeakingLevels({}); setRecordingNotices({}); });
     // LiveKit computes dominant speakers from real audio levels — no client
     // timers or guesswork needed.
     room.on(RoomEvent.ActiveSpeakersChanged, (speakers) => {
       setActiveSpeakerIds(speakers.map((speaker) => speaker.isLocal ? 'user-self' : speaker.identity));
     });
+    room.on(RoomEvent.ParticipantDisconnected, participant => {
+      setRecordingNotices(current => { const next = { ...current }; delete next[participant.identity]; return next; });
+    });
 
     room.on(RoomEvent.DataReceived, (payload, participant, _kind, topic) => {
       if (!participant) return;
       try {
+        if (topic === 'meeting-recording-notice') {
+          const data: unknown = JSON.parse(decoder.decode(payload));
+          setRecordingNotices(current => {
+            const notice = acceptRecordingNotice(data, current[participant.identity], Date.now());
+            return notice ? { ...current, [participant.identity]: notice } : current;
+          });
+          return;
+        }
         if (topic === 'meeting-transcript') {
           const data = JSON.parse(decoder.decode(payload)) as { id: string; text: string; sentAt: string };
           if (!data.id || !data.text) return;
@@ -393,6 +425,8 @@ export function useWebRtcMeeting(
       setIsConnected(false);
       setDisplayStream(null);
       setRemoteStreams({});
+      setRemoteScreenStreams({});
+      setSpeakingLevels({});
       setRemoteBackgrounds({});
       setRemoteScreenShares({});
       setRemoteRaisedHands({});
@@ -469,16 +503,29 @@ export function useWebRtcMeeting(
     refreshMedia(room);
   };
 
+  const publishRecordingNotice = useCallback((state: RecordingNoticeState) => {
+    const room = roomRef.current;
+    if (!room || room.state !== 'connected') return;
+    const sentAt = Math.max(Date.now(), lastRecordingNotice.current + 1);
+    lastRecordingNotice.current = sentAt;
+    const encoded = encoder.encode(JSON.stringify({ state, sentAt }));
+    const payload = new Uint8Array(encoded.byteLength);
+    payload.set(encoded);
+    void room.localParticipant.publishData(payload, { reliable: true, topic: 'meeting-recording-notice' }).catch(() => undefined);
+  }, []);
+
   return {
     isConnected,
     localStream,
     remoteStreams,
+    remoteScreenStreams,
     remoteBackgrounds,
     remoteScreenShares,
     remoteRaisedHands,
     remoteMicMuted,
     remoteCameraOn,
     activeSpeakerIds,
+    speakingLevels,
     audioInputDevices,
     videoInputDevices,
     microphoneError,
@@ -493,6 +540,8 @@ export function useWebRtcMeeting(
     transcriptAccessAllowed,
     publishTranscript,
     setTranscriptAccess,
+    recordingNotices,
+    publishRecordingNotice,
     connectionError,
   };
 }

@@ -31,6 +31,29 @@ test('detail requires both meeting id and creator id before querying content', a
   } finally { db.query.meetings.findFirst = original; }
 });
 
+test('history preserves entries and derives verification from matching durable company records', async () => {
+  const originalFind = db.query.meetings.findFirst, originalSelect = db.select;
+  let fields: any, calls = 0;
+  const entries = [
+    { id: 'verified', kind: 'drive', content: 'https://drive.google.com/file/d/verified/view', independentlyVerified: true },
+    { id: 'legacy', kind: 'drive', content: 'https://drive.google.com/file/d/legacy/view', independentlyVerified: false },
+  ];
+  db.query.meetings.findFirst = (async () => ({ id: 'meeting' })) as any;
+  db.select = ((selection: any) => {
+    const index = calls++;
+    if (index === 1) fields = selection;
+    return { from: () => ({ where: () => ({ orderBy: async () => index === 1 ? entries : [] }) }) };
+  }) as any;
+  try {
+    const result = await new MeetingHistoryService().detail('meeting', 'creator');
+    assert.deepEqual(result.items, entries);
+    const query = dialect.sqlToQuery(fields.independentlyVerified).sql;
+    for (const required of ['company_recording_upload_jobs', 'company_recording_drive_verifications', 'company_recording_transfer_intents', 'verified_drive_file_id', 'observed_sha256', 'credential_generation', 'dedupe_key', 'occurrence_id']) assert.ok(query.includes(required), required);
+    assert.match(query, /v\.outcome = 'verified'/);
+    assert.match(query, /j\.state = 'completed'/);
+  } finally { db.query.meetings.findFirst = originalFind; db.select = originalSelect; }
+});
+
 test('anonymous users cannot list history, read details, or save Drive references', async () => {
   const caller = meetingsRouter.createCaller({ user: null } as any);
   await assert.rejects(() => caller.history({ offset: 0 }), { code: 'UNAUTHORIZED' });

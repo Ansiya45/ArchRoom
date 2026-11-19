@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { Pause, Play, RotateCcw, RotateCw, Volume2, VolumeX } from 'lucide-react';
 
 function clock(seconds: number) {
   if (!Number.isFinite(seconds)) return '0:00';
@@ -54,9 +55,15 @@ export function RecordingPlayer({ src, durationSeconds }: { src: string; duratio
       onEnded={() => setPlaying(false)}
     />
     <div className="flex flex-wrap items-center gap-2 p-3 text-sm">
-      <button type="button" onClick={toggle} className="rounded px-2 py-1 hover:bg-white/20" aria-label={playing ? 'Pause playback' : 'Play recording'}>{playing ? 'Pause' : 'Play'}</button>
-      <button type="button" onClick={() => seek(time - 10)} className="rounded px-2 py-1 hover:bg-white/20" aria-label="Rewind 10 seconds">-10s</button>
-      <button type="button" onClick={() => seek(time + 10)} className="rounded px-2 py-1 hover:bg-white/20" aria-label="Forward 10 seconds">+10s</button>
+      <button type="button" onClick={toggle} className="inline-flex h-8 w-9 items-center justify-center rounded hover:bg-white/20" aria-label={playing ? 'Pause playback' : 'Play recording'} title={playing ? 'Pause' : 'Play'}>
+        {playing ? <Pause className="h-5 w-5" fill="currentColor" /> : <Play className="h-5 w-5" fill="currentColor" />}
+      </button>
+      <button type="button" onClick={() => seek(time - 10)} className="inline-flex h-8 w-9 items-center justify-center rounded hover:bg-white/20" aria-label="Rewind 10 seconds" title="Back 10 seconds">
+        <span className="relative inline-flex h-6 w-6 items-center justify-center"><RotateCcw className="h-6 w-6" /><span className="absolute mt-1 text-[8px] font-bold">10</span></span>
+      </button>
+      <button type="button" onClick={() => seek(time + 10)} className="inline-flex h-8 w-9 items-center justify-center rounded hover:bg-white/20" aria-label="Forward 10 seconds" title="Forward 10 seconds">
+        <span className="relative inline-flex h-6 w-6 items-center justify-center"><RotateCw className="h-6 w-6" /><span className="absolute mt-1 text-[8px] font-bold">10</span></span>
+      </button>
       <label className="min-w-[120px] flex-1">
         <span className="sr-only">Seek recording</span>
         <input type="range" min="0" max={Math.max(1, duration)} step="0.1" value={Math.min(time, Math.max(1, duration))}
@@ -79,7 +86,9 @@ export function RecordingPlayer({ src, durationSeconds }: { src: string; duratio
         if (!video.current) return;
         video.current.muted = !video.current.muted;
         setMuted(video.current.muted);
-      }} className="rounded px-2 py-1 hover:bg-white/20" aria-label={muted ? 'Unmute recording' : 'Mute recording'}>{muted ? 'Unmute' : 'Mute'}</button>
+      }} className="inline-flex h-8 w-9 items-center justify-center rounded hover:bg-white/20" aria-label={muted ? 'Unmute recording' : 'Mute recording'} title={muted ? 'Unmute' : 'Mute'}>
+        {muted ? <VolumeX className="h-5 w-5" /> : <Volume2 className="h-5 w-5" />}
+      </button>
       <label className="flex items-center gap-1"><span className="sr-only">Volume</span>
         <input type="range" min="0" max="1" step="0.05" value={volume} onChange={event => {
           const value = Number(event.target.value);

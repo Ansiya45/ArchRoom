@@ -36,7 +36,7 @@ export const JoinModal: React.FC<JoinModalProps> = ({
 
     try {
       let { meeting: room } = await trpc.meetings.getByCode.query({ meetingCode: code });
-      if ((room.scheduleType === 'reusable' || room.scheduleType === 'recurring') && !room.activeOccurrenceId && room.hostUserId === getStoredUser()?.id) {
+      if ((room.scheduleType === 'reusable' || room.scheduleType === 'recurring') && !room.activeOccurrenceId && Boolean(getStoredUser()?.id) && [room.hostUserId, room.assignedHostUserId].includes(getStoredUser()?.id ?? '')) {
         ({ meeting: room } = await startHostedMeeting(room));
       }
       const payload = await trpc.meetings.join.mutate({

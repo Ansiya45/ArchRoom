@@ -197,7 +197,7 @@ export function useMeetingRecorder(
     const record = spoolId ? await getSpool(spoolId).catch(() => undefined) : undefined;
     const durationSeconds = Math.max(1, Math.round(elapsedRef.current / 1000));
     const finished: RecordingPreview = {
-      blob, url: URL.createObjectURL(blob),
+      blob, canonicalBlob: null, url: URL.createObjectURL(blob),
       fileName: record?.fileName || `meeting-recording-${new Date().toISOString().replace(/[:.]/g, '-')}.webm`,
       mimeType: record?.mimeType || blob.type, durationSeconds, occurrenceId: occurrenceRef.current,
     };

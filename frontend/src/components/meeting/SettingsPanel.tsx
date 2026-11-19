@@ -22,7 +22,6 @@ interface SettingsPanelProps {
   deviceSettings: DeviceSettings;
   setDeviceSettings: React.Dispatch<React.SetStateAction<DeviceSettings>>;
   onClose: () => void;
-  onEnsureCameraOn?: () => void;
   audioInputDevices: MediaDeviceInfo[];
   microphoneError: string | null;
   videoInputDevices: MediaDeviceInfo[];
@@ -71,7 +70,6 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
   deviceSettings,
   setDeviceSettings,
   onClose,
-  onEnsureCameraOn,
   audioInputDevices,
   microphoneError,
   videoInputDevices,
@@ -320,7 +318,6 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
         <div className="pt-2 border-t border-blue-100/60 flex justify-end">
           <button
             onClick={() => {
-              onEnsureCameraOn?.();
               setDeviceSettings((prev) => ({ ...prev, backgroundBlur: previewBackground }));
               onClose();
             }}

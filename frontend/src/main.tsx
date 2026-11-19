@@ -6,6 +6,8 @@ import App from './App';
 import './app/globals.css';
 
 const PrivacyPolicy = lazy(() => import('./components/PrivacyPolicy'));
+const BatchRegistrationPage = lazy(() => import('./components/BatchRegistrationPage'));
+const StudentGoogleCallback = lazy(() => import('./components/StudentGoogleCallback'));
 const MeetingNotificationPreferences = lazy(() => import('./components/MeetingNotificationPreferences')
   .then(module => ({ default: module.MeetingNotificationPreferences })));
 const MeetingRoom = lazy(() => import('./components/meeting/MeetingRoom')
@@ -45,6 +47,9 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
       <Suspense fallback={<PageFallback />}>
         <Routes>
           <Route path="/privacy-policy" element={<PrivacyPolicy />} />
+          <Route path="/batch/register" element={<BatchRegistrationPage key="register" />} />
+          <Route path="/batch/verify" element={<BatchRegistrationPage key="verify" verify />} />
+          <Route path="/student-google/callback" element={<StudentGoogleCallback />} />
           <Route path="/meeting-notifications" element={<MeetingNotificationPreferences />} />
           <Route path="/" element={<App />} />
           <Route path="/meet/:meetingCode" element={<MeetingPage />} />

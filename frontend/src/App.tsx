@@ -14,6 +14,8 @@ import ScheduleModal from './components/ScheduleModal';
 import ScheduledMeetingsView from './components/ScheduledMeetingsView';
 import FavoritesView, { MeetingItem } from './components/FavoritesView';
 import SettingsView from './components/SettingsView';
+import DriveIntegrationPanel from './components/DriveIntegrationPanel';
+import StudentGoogleIdentity from './components/StudentGoogleIdentity';
 const MeetingHistoryView = React.lazy(() => import('./components/MeetingHistoryView'));
 const UserManagementView = React.lazy(() => import('./components/UserManagementView'));
 import SettingsModal from './components/SettingsModal';
@@ -57,7 +59,8 @@ export default function App() {
   const sessionUser: SessionUser | null = user ? { id: user.id ?? '', email: user.email, fullName: user.name, role: user.role } : null;
 
   const isTabVisible = useCallback((tab: SidebarTab) => {
-    if (!user) return tab === 'home' || tab === 'settings';
+    // Logged-out dashboard entries open the existing sign-in prompt.
+    if (!user) return tab !== 'users';
     switch (tab) {
       case 'create': return can('meetings.instant', 'write') || can('meetings.scheduled', 'write');
       case 'scheduled': return can('meetings.scheduled', 'read');
@@ -76,6 +79,11 @@ export default function App() {
     isOpen: boolean;
     mode: 'login' | 'signup';
   }>({ isOpen: false, mode: 'login' });
+  const [accountSwitchInvitation, setAccountSwitchInvitation] = useState<{
+    token: string;
+    email: string;
+    role: 'superadmin' | 'admin' | 'user';
+  } | null>(null);
 
   useEffect(() => {
     if (!invitedMeeting) return;
@@ -84,10 +92,23 @@ export default function App() {
   }, [invitedMeeting, navigate]);
 
   useEffect(() => {
-    if (!inviteParam || user) return;
-    setInviteToken(inviteParam);
-    setAuthModalState({ isOpen: true, mode: 'signup' });
-    navigate('/', { replace: true });
+    if (!inviteParam) return;
+    let active = true;
+    if (!user) {
+      setInviteToken(inviteParam);
+      setAuthModalState({ isOpen: true, mode: 'signup' });
+      navigate('/', { replace: true });
+      return;
+    }
+    void trpc.users.verifyInvitation.query({ token: inviteParam }).then((invitation) => {
+      if (active) setAccountSwitchInvitation({ token: inviteParam, email: invitation.email, role: invitation.role });
+    }).catch(() => {
+      if (active) {
+        setAccountSwitchInvitation(null);
+        navigate('/', { replace: true });
+      }
+    });
+    return () => { active = false; };
   }, [inviteParam, user, navigate]);
 
   // Scheduled & Favorite Meetings list
@@ -392,7 +413,7 @@ export default function App() {
             )}
             {/* Tab 5: Settings View */}
             {activeTab === 'settings' && (
-              <SettingsView onShowToast={(msg) => showToast(msg)} />
+              <><SettingsView onShowToast={(msg) => showToast(msg)} /><DriveIntegrationPanel /><StudentGoogleIdentity /></>
             )}
             </>
           </div>
@@ -425,10 +446,10 @@ export default function App() {
         isOpen={isCreateOpen}
         onClose={() => { setIsCreateOpen(false); setEditingMeeting(null); }}
         editingMeeting={editingMeeting}
-        onUpdated={(record) => {
+        onUpdated={(record, action) => {
           setMeetings((current) => current.map((item) => item.id === record.id
             ? { ...item, record, time: formatMeetingTime(record) } : item));
-          showToast(`Meeting "${record.title}" rescheduled. The link is unchanged.`);
+          showToast(action === 'recordingSettings' ? 'Recording settings saved.' : `Meeting "${record.title}" rescheduled. The link is unchanged.`);
         }}
         onCreated={(record) => {
           storeMeetingSession(record.meetingCode, { displayName: user?.name || 'You' });
@@ -450,6 +471,37 @@ export default function App() {
         isOpen={isSettingsOpen}
         onClose={() => setIsSettingsOpen(false)}
       />
+
+      {user && accountSwitchInvitation && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-900/60 p-4 backdrop-blur-sm">
+          <section role="dialog" aria-modal="true" aria-labelledby="account-switch-invitation-title"
+            className="w-full max-w-md rounded-3xl border border-slate-200 bg-white p-6 shadow-2xl">
+            <h2 id="account-switch-invitation-title" className="text-xl font-bold text-slate-900">Switch account to accept invitation</h2>
+            <p className="mt-3 text-sm text-slate-600">
+              You are signed in as <strong>{user.email}</strong>. This invitation is for <strong>{accountSwitchInvitation.email}</strong>.
+            </p>
+            <p className="mt-2 text-sm text-slate-500">Sign out of the current account before creating the invited {accountSwitchInvitation.role} account.</p>
+            <div className="mt-6 flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
+              <button type="button" className="rounded-xl border border-slate-200 px-4 py-2.5 text-sm font-semibold text-slate-700"
+                onClick={() => { setAccountSwitchInvitation(null); navigate('/', { replace: true }); }}>
+                Keep current account
+              </button>
+              <button type="button" className="rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white"
+                onClick={() => {
+                  const invitation = accountSwitchInvitation;
+                  setAccountSwitchInvitation(null);
+                  void logoutSession().catch(() => undefined).finally(() => {
+                    setInviteToken(invitation.token);
+                    setAuthModalState({ isOpen: true, mode: 'signup' });
+                    navigate('/', { replace: true });
+                  });
+                }}>
+                Sign out and accept invitation
+              </button>
+            </div>
+          </section>
+        </div>
+      )}
 
       <AuthModal
         key={sessionGeneration.current}

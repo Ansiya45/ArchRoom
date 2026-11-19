@@ -19,7 +19,8 @@ const schedule = { localDateTime: '2026-09-20T23:30', timeZone: 'Asia/Kolkata' }
 const base = () => ({ id: meetingId, meetingCode: code, hostUserId: hostId, title: 'Product Discussion',
   scheduledAt: new Date('2026-09-20T18:00:00Z'), timeZone: schedule.timeZone,
   scheduleType: 'one_time', status: 'scheduled', createdAt: new Date(), updatedAt: new Date() });
-async function withStore(initial: any, run: (store: any, service: InstanceType<typeof MeetingService>) => Promise<void>) {
+async function withStore(initial: any, run: (store: any, service: InstanceType<typeof MeetingService>) => Promise<void>,
+  service: InstanceType<typeof MeetingService> = new MeetingService()) {
   const original = { find: db.query.meetings.findFirst, transaction: db.transaction, update: db.update,
     user: db.query.users.findFirst, userPermissions: db.query.userPermissions.findMany };
   const store = { meeting: initial, inserts: 0, participants: [] as any[], writes: 0, patch: null as any, condition: null as any, rejectUpdate: false };
@@ -43,7 +44,7 @@ async function withStore(initial: any, run: (store: any, service: InstanceType<t
   })) as any;
   db.query.users.findFirst = (async () => ({ id: hostId, role: 'user' })) as any;
   db.query.userPermissions.findMany = (async () => []) as any;
-  try { await run(store, new MeetingService()); }
+  try { await run(store, service); }
   finally { db.query.meetings.findFirst = original.find; db.transaction = original.transaction; db.update = original.update;
     db.query.users.findFirst = original.user; db.query.userPermissions.findMany = original.userPermissions; }
 }
@@ -87,6 +88,53 @@ test('tRPC creates one classified scheduled parent, correct instant/zone and exi
     assert.equal(result.meeting.scheduleType, 'one_time'); assert.equal(result.meeting.timeZone, 'Asia/Kolkata');
     assert.equal(result.meeting.scheduledAt?.toISOString(), '2026-09-20T18:00:00.000Z');
     assert.equal(store.participants[0].admission, 'admitted'); assert.equal(store.participants[0].role, 'host');
+    assert.equal(result.meeting.recordingFolderId, null);
+    assert.equal(result.meeting.recordingAccessPolicy, 'private');
+  });
+});
+
+test('recording policy persists on create, including recurring parents; invalid or unverified input is rejected', async () => {
+  await withStore(null, async store => {
+    const caller = meetingsRouter.createCaller({ isAuthenticated: true, user: { id: hostId } } as never);
+    const created = await caller.create({ title: 'Class', meetingCode: code, schedule, recurrence: { frequency: 'weekly', interval: 1, weekdays: [0], ends: { type: 'never' } }, recordingAccessPolicy: 'restricted' });
+    assert.equal(created.meeting.recordingAccessPolicy, 'restricted');
+    assert.equal(created.meeting.recordingFolderId, null);
+    assert.equal(store.meeting.recordingAccessPolicy, 'restricted');
+    await assert.rejects(caller.create({ title: 'Bad', recordingAccessPolicy: 'invalid' as never }), { code: 'BAD_REQUEST' });
+    await assert.rejects(caller.create({ title: 'Bad', recordingFolderId: 'unverified' as never }), { code: 'BAD_REQUEST' });
+  });
+});
+
+test('a recurring series persists one authoritative recording folder for every occurrence', async () => {
+  const folderId = 'authorizedFolder123';
+  const service = new MeetingService(async (userId, requested) => {
+    assert.equal(userId, hostId); assert.equal(requested, folderId); return folderId;
+  });
+  await withStore(null, async (store, current) => {
+    const created = await current.createMeeting({ title: 'Weekday class', meetingCode: code,
+      schedule: { ...schedule, localDateTime: '2026-09-21T14:00' },
+      recurrence: { frequency: 'weekly', interval: 1, weekdays: [1, 2, 3, 4, 5], ends: { type: 'never' } },
+      recordingFolderId: folderId }, hostId);
+    assert.equal(created.meeting.scheduleType, 'recurring');
+    assert.equal(created.meeting.recordingFolderId, folderId);
+    assert.equal(store.meeting.recordingFolderId, folderId);
+  }, service);
+});
+
+test('only meeting creator can update recording settings without changing schedule', async () => {
+  await withStore(base(), async store => {
+    const creator = meetingsRouter.createCaller({ isAuthenticated: true, user: { id: hostId } } as never);
+    const other = meetingsRouter.createCaller({ isAuthenticated: true, user: { id: 'cohost-or-participant' } } as never);
+    const input = { meetingId, recordingFolderId: null, recordingAccessPolicy: 'anyone_with_link' as const };
+    await assert.rejects(other.updateRecordingSettings(input), { code: 'FORBIDDEN' });
+    await assert.rejects(meetingsRouter.createCaller({ user: null } as never).updateRecordingSettings(input), { code: 'UNAUTHORIZED' });
+    await assert.rejects(creator.updateRecordingSettings({ ...input, recordingFolderId: 'unverified' as never }), { code: 'BAD_REQUEST' });
+    assert.equal(store.writes, 0);
+    const updated = await creator.updateRecordingSettings(input);
+    assert.equal(updated.meeting.recordingAccessPolicy, 'anyone_with_link');
+    assert.equal(store.patch.scheduledAt, undefined);
+    assert.equal(store.patch.recurrenceRule, undefined);
+    assert.equal(store.writes, 1);
   });
 });
 

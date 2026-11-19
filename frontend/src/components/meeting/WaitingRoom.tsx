@@ -114,21 +114,17 @@ export const WaitingRoom: React.FC<WaitingRoomProps> = ({
   }, [isCameraOn, onToggleCamera]);
 
   const handleSelectBg = (bgId: BackgroundChoice) => {
-    if (!isCameraOn) onToggleCamera();
     setDeviceSettings((prev) => ({ ...prev, backgroundBlur: bgId }));
   };
 
   return (
-    <div className="w-full h-screen max-h-screen overflow-hidden bg-[#080b1f] text-white flex flex-col justify-between p-3 sm:p-5 md:p-6 relative font-sans select-none">
-      {/* Ambient background lighting */}
-      <div className="absolute top-1/4 left-1/4 w-96 h-96 bg-blue-200/50 rounded-full blur-3xl pointer-events-none" />
-      <div className="absolute bottom-1/4 right-1/4 w-96 h-96 bg-sky-200/50 rounded-full blur-3xl pointer-events-none" />
+    <div className="w-full h-screen overflow-y-auto bg-[#080b1f] text-white flex flex-col p-3 sm:p-5 md:p-6 relative font-sans select-none [&_button:focus-visible]:outline-2 [&_button:focus-visible]:outline-offset-2 [&_button:focus-visible]:outline-blue-400">
 
       {/* Header Branding */}
       <header className="w-full max-w-6xl mx-auto flex items-center justify-between shrink-0 z-10">
         <div className="flex items-center space-x-3">
-          <div className="w-10 h-10 rounded-2xl bg-blue-600 flex items-center justify-center shadow-md shadow-blue-200 text-white">
-            <Video className="w-5 h-5" />
+          <div className="w-10 h-10 shrink-0 rounded-[8px] bg-blue-600 flex items-center justify-center text-white">
+            <svg aria-hidden="true" className="w-1/2 h-1/2 fill-current" viewBox="0 0 24 24"><path d="M12 2L2 22h5l2.5-5h5l2.5 5h5L12 2zm0 6l2.8 5.6h-5.6L12 8z" /></svg>
           </div>
 
           <div>
@@ -149,21 +145,23 @@ export const WaitingRoom: React.FC<WaitingRoomProps> = ({
       </header>
 
       {/* Main Content Area - Scaled for Desktop Viewports */}
-      <main className="w-full max-w-6xl mx-auto flex-1 min-h-0 grid grid-cols-1 lg:grid-cols-12 gap-5 items-center z-10 py-2 sm:py-3 my-auto overflow-hidden">
+      <main className="w-full max-w-6xl mx-auto grid grid-cols-1 lg:grid-cols-12 gap-5 items-stretch z-10 py-6 sm:py-8 my-auto shrink-0">
         {/* Left Column: Video Feed & Background Selector */}
-        <div className="lg:col-span-7 flex flex-col h-full max-h-full justify-center space-y-3">
-          <div className="relative w-full aspect-video rounded-3xl bg-slate-900 border border-white/80 overflow-hidden shadow-2xl backdrop-blur-xl group max-h-[380px]">
-            <CameraVideo isCameraOn={isCameraOn} activeBg={activeBg} cameraDeviceId={deviceSettings.cameraId} onCameraUnavailable={handleCameraUnavailable} />
+        <div className="lg:col-span-7 min-w-0 flex flex-col rounded-[8px] bg-[#12162f] border border-white/20 overflow-hidden">
+          <div className="relative w-full aspect-video lg:aspect-auto lg:flex-1 min-h-[220px] sm:min-h-[300px] rounded-[8px] bg-[#080b1f] overflow-hidden group">
+            <div className="absolute inset-0">
+            <CameraVideo className="[&_.rounded-xl]:rounded-[8px]" cameraOffContent={<div className="flex flex-col items-center gap-3" role="img" aria-label="YLAAM Meet, camera is turned off"><div className="w-14 h-14 sm:w-16 sm:h-16 rounded-[8px] bg-blue-600 text-white flex items-center justify-center"><svg aria-hidden="true" className="w-1/2 h-1/2 fill-current" viewBox="0 0 24 24"><path d="M12 2L2 22h5l2.5-5h5l2.5 5h5L12 2zm0 6l2.8 5.6h-5.6L12 8z" /></svg></div><span className="text-lg sm:text-xl font-bold text-white">YLAAM-MEET</span></div>} isCameraOn={isCameraOn} activeBg={activeBg} cameraDeviceId={deviceSettings.cameraId} onCameraUnavailable={handleCameraUnavailable} />
+            </div>
 
             {/* Mic & Camera Controls Overlay */}
             <div className="absolute bottom-3 left-3 right-3 flex items-center justify-between z-30">
               <div className="flex items-center space-x-2">
                 <button
                   onClick={onToggleMic}
-                  className={`p-2.5 rounded-2xl backdrop-blur-md border transition-all ${
+                  className={`p-2.5 rounded-[8px] backdrop-blur-md border transition-all ${
                     isMicOn
-                      ? 'bg-blue-600 text-white border-blue-400 shadow-lg shadow-blue-200'
-                      : 'bg-red-500 text-white border-red-400 shadow-md shadow-red-200'
+                      ? 'bg-[#1a1e35] text-white border-white/10 hover:bg-[#252a45]'
+                      : 'bg-blue-500/15 text-blue-200 border-blue-400/40 hover:bg-blue-500/25'
                   }`}
                   title={isMicOn ? 'Mute Microphone' : 'Unmute Microphone'}
                 >
@@ -172,10 +170,10 @@ export const WaitingRoom: React.FC<WaitingRoomProps> = ({
 
                 <button
                   onClick={onToggleCamera}
-                  className={`p-2.5 rounded-2xl backdrop-blur-md border transition-all ${
+                  className={`p-2.5 rounded-[8px] backdrop-blur-md border transition-all ${
                     isCameraOn
-                      ? 'bg-blue-600 text-white border-blue-400 shadow-lg shadow-blue-200'
-                      : 'bg-red-500 text-white border-red-400 shadow-md shadow-red-200'
+                      ? 'bg-[#1a1e35] text-white border-white/10 hover:bg-[#252a45]'
+                      : 'bg-blue-500/15 text-blue-200 border-blue-400/40 hover:bg-blue-500/25'
                   }`}
                   title={isCameraOn ? 'Turn Off Camera' : 'Turn On Camera'}
                 >
@@ -185,7 +183,7 @@ export const WaitingRoom: React.FC<WaitingRoomProps> = ({
 
               {/* Audio Visualizer Level Meter */}
               {isMicOn && (
-                <div className="flex items-center space-x-1.5 px-3 py-1.5 rounded-2xl bg-black/50 border border-white/20 backdrop-blur-md text-white text-xs">
+                <div className="flex items-center space-x-1.5 px-3 py-1.5 rounded-[8px] bg-black/50 border border-white/20 backdrop-blur-md text-white text-xs">
                   <Volume2 className="w-3.5 h-3.5 text-blue-400 animate-pulse" />
                   <div className="flex items-end space-x-0.5 h-3">
                     <div className="w-1 bg-blue-400 rounded-full h-2 animate-bounce" />
@@ -198,15 +196,15 @@ export const WaitingRoom: React.FC<WaitingRoomProps> = ({
           </div>
 
           {/* Virtual Background Symbols Selector (Collection of 5 options) */}
-          <div className="p-3 rounded-2xl bg-[#12162f] border border-white/10 text-xs shadow-sm backdrop-blur-xl flex items-center justify-between gap-2">
+          <div className="p-4 sm:p-5 border-t border-white/10 text-xs flex items-center justify-between gap-3 shrink-0">
             <div className="flex items-center space-x-2 text-white font-bold shrink-0">
-              <div className="p-1.5 rounded-xl bg-blue-100 text-blue-600">
+              <div className="p-1.5 rounded-[8px] bg-blue-500/15 text-blue-300">
                 <Palette className="w-4 h-4" />
               </div>
               <span className="hidden sm:inline">Background</span>
             </div>
 
-            <div className="flex items-center space-x-2 overflow-x-auto py-0.5 pr-1 scrollbar-none">
+            <div className="flex min-w-0 items-center space-x-2 overflow-x-auto py-1 px-1 scrollbar-none">
               {BACKGROUND_PRESETS.map((preset) => {
                 const isSelected = activeBg === preset.id;
                 return (
@@ -214,9 +212,9 @@ export const WaitingRoom: React.FC<WaitingRoomProps> = ({
                     key={preset.id}
                     onClick={() => handleSelectBg(preset.id)}
                     title={preset.name}
-                    className={`relative flex items-center justify-center w-10 h-10 sm:w-11 sm:h-11 rounded-xl overflow-hidden border-2 transition-all shrink-0 ${
+                    className={`relative flex items-center justify-center w-10 h-10 sm:w-11 sm:h-11 rounded-[8px] overflow-hidden border-2 transition-all shrink-0 ${
                       isSelected
-                        ? 'border-blue-600 ring-2 ring-blue-300 scale-105 shadow-md shadow-blue-200'
+                        ? 'border-blue-400 ring-1 ring-blue-400'
                         : 'border-slate-200 hover:border-blue-300 opacity-80 hover:opacity-100 bg-slate-100'
                     }`}
                   >
@@ -234,7 +232,7 @@ export const WaitingRoom: React.FC<WaitingRoomProps> = ({
 
                     {/* Overlay badge with background symbol icon */}
                     <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent" />
-                    <div className="absolute bottom-0.5 right-0.5 p-0.5 rounded-md bg-black/60 text-white backdrop-blur-xs">
+                    <div className="absolute bottom-0.5 right-0.5 p-0.5 rounded-[8px] bg-black/60 text-white backdrop-blur-xs">
                       {preset.icon}
                     </div>
 
@@ -251,9 +249,9 @@ export const WaitingRoom: React.FC<WaitingRoomProps> = ({
         </div>
 
         {/* Right Column: Meeting Join Settings */}
-        <div className="lg:col-span-5 self-center w-full bg-[#12162f] border border-white/10 p-4 sm:p-5 rounded-3xl backdrop-blur-2xl shadow-xl text-white flex flex-col gap-5">
+        <div className="lg:col-span-5 min-w-0 w-full bg-[#12162f] border border-white/20 p-4 sm:p-5 rounded-[8px] text-white flex flex-col gap-5">
           <div className="space-y-1.5">
-            <span className="text-[11px] font-bold text-blue-600 uppercase tracking-wider">
+            <span className="text-[11px] font-bold text-blue-400 uppercase tracking-wider">
               Ready to connect
             </span>
             <h2 className="text-lg sm:text-xl font-bold text-white leading-tight">
@@ -267,7 +265,7 @@ export const WaitingRoom: React.FC<WaitingRoomProps> = ({
           {/* Name Input */}
           <div className="space-y-1.5">
             <label className="text-xs font-bold text-white flex items-center space-x-1.5">
-              <User className="w-4 h-4 text-blue-600" />
+              <User className="w-4 h-4 text-blue-300" />
               <span>Your Display Name</span>
             </label>
             <input
@@ -275,13 +273,13 @@ export const WaitingRoom: React.FC<WaitingRoomProps> = ({
               value={displayName}
               onChange={(e) => onDisplayNameChange(e.target.value)}
               placeholder="Enter your name"
-              className="w-full py-2.5 px-3.5 rounded-2xl bg-[#080b1f] border border-white/10 text-white font-medium text-xs sm:text-sm focus:outline-none focus:border-violet-500 focus:ring-2 focus:ring-violet-500/30 transition-all shadow-sm"
+              className="w-full py-2.5 px-3.5 rounded-[8px] bg-[#080b1f] border border-white/10 text-white font-medium text-xs sm:text-sm focus:outline-none focus:border-violet-500 focus:ring-2 focus:ring-violet-500/30 transition-all placeholder:text-slate-400"
             />
           </div>
 
           {isHost && canTranscribe && <div className="rounded-xl border border-violet-400/30 bg-[#1a1e3b] p-3 text-xs text-white">
             <label className="flex items-start gap-2 font-semibold"><input type="checkbox" checked={enableAiTranscription} onChange={event => onEnableAiTranscriptionChange(event.target.checked)} className="mt-0.5 accent-violet-600" />Enable AI transcription for this meeting</label>
-            <p className="mt-2 leading-relaxed">On by default — meeting audio in any language (English, Hindi, Malayalam, Tamil, Kannada and more) is processed by YLAAM Meet and OpenAI. Participants will see when transcription is active. Transcript text and summaries are saved to your Meeting History.</p>
+            <p className="mt-2 leading-relaxed text-slate-300">If enabled, meeting audio is processed by YLAAM Meet and OpenAI. Participants will see when transcription is active. Transcript text and summaries are saved to your Meeting History.</p>
             {enableAiTranscription && onTranscriptAccessChange && <label className="mt-3 block font-semibold">
               Transcript &amp; AI summary downloads
               <select value={transcriptAccess} onChange={event => onTranscriptAccessChange(event.target.value as 'all' | 'host')}
@@ -297,7 +295,7 @@ export const WaitingRoom: React.FC<WaitingRoomProps> = ({
           <button
             onClick={onJoin}
             disabled={checkingSession || !!sessionError || !displayName.trim() || isJoining}
-            className="w-full py-3 rounded-2xl bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed text-white font-bold text-sm flex items-center justify-center space-x-2 shadow-lg shadow-blue-200 transition-all active:scale-95"
+            className="mt-auto w-full py-3 rounded-[8px] bg-blue-600 hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed text-white font-bold text-sm flex items-center justify-center space-x-2 transition-all active:scale-95"
           >
             <span>{checkingSession ? 'Checking session...' : isJoining ? 'Joining...' : 'Join Meeting Now'}</span>
             <ArrowRight className="w-5 h-5" />

@@ -54,7 +54,7 @@ export const TopBar: React.FC<TopBarProps> = ({
     <header className="w-full h-16 flex-shrink-0 px-4 md:px-6 backdrop-blur-xl bg-white/60 border-b border-blue-100/50 shadow-sm flex items-center justify-between text-slate-800 select-none z-50">
       {/* Left: Video Icon & YLAAM-MEET */}
       <div className="flex items-center space-x-3 cursor-pointer group" onClick={onOpenInfo}>
-        <div className="relative w-10 h-10 bg-blue-600 rounded-xl flex items-center justify-center shadow-lg shadow-blue-200 group-hover:scale-105 transition-transform duration-300">
+        <div className="relative w-10 h-10 bg-blue-600 rounded-xl flex items-center justify-center group-hover:scale-105 transition-transform duration-300">
           <Video className="w-5 h-5 text-white" />
           <div className="absolute -top-1 -right-1 w-2.5 h-2.5 bg-blue-400 rounded-full animate-ping" />
         </div>
@@ -99,7 +99,7 @@ export const TopBar: React.FC<TopBarProps> = ({
             onClick={() => onChangeLayout('speaker')}
             className={`p-1.5 rounded-lg text-xs font-medium transition-all ${
               layoutMode === 'speaker'
-                ? 'bg-blue-600 text-white shadow-md shadow-blue-200'
+                ? 'bg-blue-600 text-white'
                 : 'text-slate-500 hover:text-slate-800 hover:bg-slate-100/80'
             }`}
             title="Full Screen / Speaker View"
@@ -110,7 +110,7 @@ export const TopBar: React.FC<TopBarProps> = ({
             onClick={() => onChangeLayout('grid')}
             className={`p-1.5 rounded-lg text-xs font-medium transition-all ${
               layoutMode === 'grid'
-                ? 'bg-blue-600 text-white shadow-md shadow-blue-200'
+                ? 'bg-blue-600 text-white'
                 : 'text-slate-500 hover:text-slate-800 hover:bg-slate-100/80'
             }`}
             title="Grid View"
@@ -122,7 +122,7 @@ export const TopBar: React.FC<TopBarProps> = ({
         {/* Invite Button */}
         <button
           onClick={onOpenInfo}
-          className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs sm:text-sm font-semibold shadow-md shadow-blue-200 transition-all duration-200 active:scale-95 flex items-center space-x-1.5"
+          className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs sm:text-sm font-semibold transition-all duration-200 active:scale-95 flex items-center space-x-1.5"
         >
           <UserPlus className="w-4 h-4" />
           <span>Invite</span>
@@ -131,7 +131,7 @@ export const TopBar: React.FC<TopBarProps> = ({
         {isHost && (
           <button
             onClick={onEndMeeting}
-            className="px-3 sm:px-4 py-2 bg-rose-600 hover:bg-rose-700 text-white rounded-xl text-xs sm:text-sm font-semibold shadow-md shadow-rose-200 transition-all duration-200 active:scale-95 flex items-center space-x-1.5"
+            className="px-3 sm:px-4 py-2 bg-rose-600 hover:bg-rose-700 text-white rounded-xl text-xs sm:text-sm font-semibold transition-all duration-200 active:scale-95 flex items-center space-x-1.5"
             title="End the meeting for everyone"
           >
             <PhoneOff className="w-4 h-4" />

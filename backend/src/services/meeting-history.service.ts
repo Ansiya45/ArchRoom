@@ -1,5 +1,5 @@
 import { TRPCError } from '@trpc/server';
-import { and, asc, desc, eq } from 'drizzle-orm';
+import { and, asc, desc, eq, getTableColumns, sql } from 'drizzle-orm';
 import { db } from '../db/index.js';
 import { meetings, meetingOccurrences, meetingHistoryItems, recordings } from '../db/schema.js';
 
@@ -19,7 +19,25 @@ export class MeetingHistoryService {
     if (!meeting) throw new TRPCError({ code: 'NOT_FOUND', message: 'Meeting history not found.' });
     const [sessions, items, savedRecordings] = await Promise.all([
       db.select().from(meetingOccurrences).where(eq(meetingOccurrences.meetingId, meetingId)).orderBy(desc(meetingOccurrences.scheduledAt), desc(meetingOccurrences.startedAt)),
-      db.select().from(meetingHistoryItems).where(eq(meetingHistoryItems.meetingId, meetingId)).orderBy(asc(meetingHistoryItems.createdAt), asc(meetingHistoryItems.id)),
+      db.select({ ...getTableColumns(meetingHistoryItems),
+        independentlyVerified: sql<boolean>`case when ${meetingHistoryItems.kind} = 'drive' then exists (
+          select 1 from company_recording_upload_jobs j
+          join company_recording_drive_verifications v on v.job_id = j.id
+          join company_recording_transfer_intents i on i.job_id = j.id
+          where j.meeting_id = ${meetingHistoryItems.meetingId}
+            and j.occurrence_id is not distinct from ${meetingHistoryItems.occurrenceId}
+            and ${meetingHistoryItems.dedupeKey} = ('company-drive:' || j.recording_id::text)
+            and j.state = 'completed' and j.verified_drive_file_id = j.drive_file_id
+            and i.drive_file_id = j.verified_drive_file_id and i.destination_folder_id = j.destination_folder_id
+            and ${meetingHistoryItems.content} = ('https://drive.google.com/file/d/' || j.verified_drive_file_id || '/view')
+            and v.outcome = 'verified' and v.recording_id = j.recording_id
+            and v.drive_file_id = j.verified_drive_file_id and v.destination_folder_id = j.destination_folder_id
+            and v.expected_byte_length = j.byte_length and v.observed_byte_length = j.byte_length
+            and v.expected_mime_type = j.mime_type and v.observed_mime_type = j.mime_type
+            and v.expected_sha256 = j.sha256 and v.observed_sha256 = j.sha256
+            and v.company_account_email = i.company_account_email and v.credential_generation = i.credential_generation
+        ) else false end` })
+        .from(meetingHistoryItems).where(eq(meetingHistoryItems.meetingId, meetingId)).orderBy(asc(meetingHistoryItems.createdAt), asc(meetingHistoryItems.id)),
       db.select({ id: recordings.id, occurrenceId: recordings.occurrenceId, fileName: recordings.fileName, status: recordings.status, createdAt: recordings.createdAt, durationSeconds: recordings.durationSeconds, fileSize: recordings.fileSize })
         .from(recordings).where(eq(recordings.meetingId, meetingId)).orderBy(desc(recordings.createdAt)),
     ]);
